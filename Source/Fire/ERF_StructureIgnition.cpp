@@ -170,6 +170,9 @@ void StructureIgnition::apply_heat_sources (Real time, MultiFab& heat_flux, cons
             li(i, j, k)  = qs * to_kW_m;
         });
     }
+    // The kernels above read d_q, which is freed on either early return below
+    // (ParallelFor is asynchronous; the device vector's destructor is not).
+    Gpu::streamSynchronize();
 
     // Incident radiant flux: every burning footprint cell is a ground point
     // source of radiant power chi_r * q * dA, seen by the cells within the
@@ -245,43 +248,55 @@ void StructureIgnition::update_state (Real time_new, Real dt,
     // Per-structure partial reductions on this rank: the largest heat load
     // and the largest current intensity in the wall band (the burnable cells
     // within m_ring of the footprint, as report_exposure() defines it), and
-    // the embers on the footprint. Cold band cells are skipped early.
+    // the embers on the footprint. Cold band cells are skipped early. The
+    // scan runs on the device with atomic per-structure maxima and sums (it
+    // staged five fabs to the host and swept every fire cell serially until
+    // 2026-10).
     std::vector<Real> hl_max(m_n + 1, 0.0_rt), ib_max(m_n + 1, 0.0_rt), emb(m_n + 1, 0.0_rt);
-    const int ring = m_ring;
-    for (MFIter mfi(structure_id); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        const ERFHostFabView id_v(structure_id[mfi]);
-        const ERFHostFabView mk_v(nonburnable[mfi]);
-        const ERFHostFabView hl_v(heat_load[mfi]);
-        const ERFHostFabView ib_v(fireline_intensity[mfi]);
-        const ERFHostFabView em_v(ember_landings[mfi]);
-        auto id = id_v.array();  auto mk = mk_v.array();
-        auto hl = hl_v.array();  auto ib = ib_v.array();  auto em = em_v.array();
-        LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
-            const int sid = static_cast<int>(id(i, j, 0) + 0.5_rt);
-            if (sid > 0) {
-                if (sid <= m_n) { emb[sid] += em(i, j, 0); }
-                return;
-            }
-            if (mk(i, j, 0) > 0.5_rt) { return; }
-            const Real h = hl(i, j, 0);
-            const Real b = ib(i, j, 0);
-            if (h <= 0.0_rt && b <= 0.0_rt) { return; }
-            int seen[8]; int ns = 0;
-            for (int dj = -ring; dj <= ring; ++dj) {
-                for (int di = -ring; di <= ring; ++di) {
-                    const int nid = static_cast<int>(id(i + di, j + dj, 0) + 0.5_rt);
-                    if (nid <= 0 || nid > m_n) { continue; }
-                    bool dup = false;
-                    for (int n = 0; n < ns; ++n) { if (seen[n] == nid) { dup = true; break; } }
-                    if (!dup && ns < 8) { seen[ns++] = nid; }
+    {
+        Gpu::DeviceVector<Real> d_hl(m_n + 1, 0.0_rt), d_ib(m_n + 1, 0.0_rt), d_emb(m_n + 1, 0.0_rt);
+        Real* p_hl  = d_hl.data();
+        Real* p_ib  = d_ib.data();
+        Real* p_emb = d_emb.data();
+        const int ring = m_ring;
+        const int nmax = m_n;
+        for (MFIter mfi(structure_id); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto const& id = structure_id.const_array(mfi);
+            auto const& mk = nonburnable.const_array(mfi);
+            auto const& hl = heat_load.const_array(mfi);
+            auto const& ib = fireline_intensity.const_array(mfi);
+            auto const& em = ember_landings.const_array(mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                const int sid = static_cast<int>(id(i, j, 0) + 0.5_rt);
+                if (sid > 0) {
+                    if (sid <= nmax) { Gpu::Atomic::AddNoRet(&p_emb[sid], em(i, j, 0)); }
+                    return;
                 }
-            }
-            for (int n = 0; n < ns; ++n) {
-                hl_max[seen[n]] = std::max(hl_max[seen[n]], h);
-                ib_max[seen[n]] = std::max(ib_max[seen[n]], b);
-            }
-        });
+                if (mk(i, j, 0) > 0.5_rt) { return; }
+                const Real h = hl(i, j, 0);
+                const Real b = ib(i, j, 0);
+                if (h <= 0.0_rt && b <= 0.0_rt) { return; }
+                int seen[8]; int ns = 0;
+                for (int dj = -ring; dj <= ring; ++dj) {
+                    for (int di = -ring; di <= ring; ++di) {
+                        const int nid = static_cast<int>(id(i + di, j + dj, 0) + 0.5_rt);
+                        if (nid <= 0 || nid > nmax) { continue; }
+                        bool dup = false;
+                        for (int n = 0; n < ns; ++n) { if (seen[n] == nid) { dup = true; break; } }
+                        if (!dup && ns < 8) { seen[ns++] = nid; }
+                    }
+                }
+                for (int n = 0; n < ns; ++n) {
+                    Gpu::Atomic::Max(&p_hl[seen[n]], h);
+                    Gpu::Atomic::Max(&p_ib[seen[n]], b);
+                }
+            });
+        }
+        Gpu::streamSynchronize();
+        Gpu::copy(Gpu::deviceToHost, d_hl.begin(),  d_hl.end(),  hl_max.begin());
+        Gpu::copy(Gpu::deviceToHost, d_ib.begin(),  d_ib.end(),  ib_max.begin());
+        Gpu::copy(Gpu::deviceToHost, d_emb.begin(), d_emb.end(), emb.begin());
     }
     ParallelDescriptor::ReduceRealMax(hl_max.data(), m_n + 1);
     ParallelDescriptor::ReduceRealMax(ib_max.data(), m_n + 1);

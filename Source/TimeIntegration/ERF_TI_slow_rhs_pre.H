@@ -179,7 +179,7 @@
             inject_smoke_from_fire(
                 cc_src,
                 *m_fire_layer->get_Q_atm_prev(),
-                *zpc_to_use,
+                zpn_to_use,
                 fine_geom,
                 m_fire_layer->get_params().smoke_emission_factor,
                 m_fire_layer->smoke_heat_per_kg_atm(),

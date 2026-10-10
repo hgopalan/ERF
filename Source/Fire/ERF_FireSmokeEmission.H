@@ -18,7 +18,9 @@
  *
  * @param[in,out] cc_source           ATM cell-centred source MultiFab
  * @param[in]     fire_heat_atm       Fire heat flux coarsened to ATM grid [W/m2]
- * @param[in]     z_phys_cc           Cell-centre terrain height [m]
+ * @param[in]     z_phys_nd           Nodal terrain-following heights [m], or nullptr
+ *                                    without terrain; the k = 0 cell thickness is
+ *                                    the mean of its four node pairs
  * @param[in]     geom_atm            ATM geometry
  * @param[in]     emission_factor     kg smoke per kg fuel burned [-]
  * @param[in]     heat_of_combustion  J per kg fuel burned [J/kg]; the caller passes
@@ -31,7 +33,7 @@
 void inject_smoke_from_fire(
     amrex::MultiFab&       cc_source,
     const amrex::MultiFab& fire_heat_atm,
-    const amrex::MultiFab& z_phys_cc,
+    const amrex::MultiFab* z_phys_nd,
     const amrex::Geometry& geom_atm,
     amrex::Real            emission_factor,
     amrex::Real            heat_of_combustion,

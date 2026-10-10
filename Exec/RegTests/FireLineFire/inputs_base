@@ -10,7 +10,8 @@
 # reduced by the fuel model's wind reduction factor (windrf = 0.36 for FM1,
 # Andrews' unsheltered factor), no midflame wind cap (WRF-Fire caps R at
 # 6 m/s only), a 0.03 m roughness length. Only the sounding, the feedback and
-# the probes change between the decks.
+# the probes change between the decks, except wind2p5_open_2way, which also
+# enlarges the box and shortens the line.
 
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 400.0 80.0 160.0

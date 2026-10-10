@@ -44,37 +44,33 @@ is what ruled out band width as the cause and indicted the normalization itself.
 
 ## Expected Results
 
-Burned-cell count at t = 150 / 300 / 450 / 600 s, measured on 1 rank. These counts
-were measured with the previous reinitialization and on a 25 m fire grid; the decks
-now run on a 10 m fire grid, so they have not been re-measured and are not a current
-reference:
+Burned-cell count at t = 150 / 300 / 450 / 600 s on the 10 m fire grid of the
+decks, two ranks, re-measured 2026-10-09 (`run_compare.sh`):
 
 | | 150 s | 300 s | 450 s | 600 s |
 |---|---|---|---|---|
 | analytic, `r = r0 + R*t` | 34 | 41 | 48 | 56 |
-| `inputs_fire_levelset_baseline` | 36 | 52 | 60 | 64 |
-| `inputs_fire_levelset_no_reinit` | 32 | 44 | 52 | 52 |
-| FARSITE reference | 32 | 32 | 32 | 68 |
-| `inputs_fire_levelset_weno5z` | 32 | 44 | 52 | 52 |
-| `inputs_fire_levelset_weno5z_front` | 32 | 44 | 52 | 52 |
-| `inputs_fire_levelset_lowvisc` | 32 | 44 | 52 | 52 |
+| `inputs_fire_levelset_baseline` | 34 | 40 | 44 | 46 |
+| `inputs_fire_levelset_weno5z` | 34 | 40 | 46 | 48 |
+| `inputs_fire_levelset_weno5z_front` | 34 | 40 | 46 | 48 |
+| `inputs_fire_levelset_lowvisc` | 34 | 40 | 46 | 48 |
 
-The first two decks pin `erf.fire.levelset.gradient = upwind`, the scheme
-their numbers were measured with; the last two use WENO5-Z everywhere and
-the default hybrid, which reproduces WENO everywhere to the cell here
-because the whole burn sits inside the band. All three put the front on
-the analytic radius along the axes (within 0.3 m at 600 s, on a 25 m
-grid); the difference is the corners, which the first-order scheme grows
-out square (64 cells against 56) and WENO keeps rounder (52). The rate is
-the same, the shape is better. Lowering the near-front viscosity to 0.1
-(`inputs_fire_levelset_lowvisc`) changes nothing that this 25 m grid can
-show: the same cells, the front within 0.1 m of the hybrid run along the
-axis and the diagonal. The burn here is only a few cells across; the
-viscosity option is for fine fire grids. On the 5 m grid of the WUI
-wildland case (`WUI_Subdivision`, 1200 s) the near-front value of 0.1
-leaves the head at 0.250 m/s on every segment and lets the flanks spread a
-little more: 150 m wide at x = 450 m against 140 m, 4.96 ha burned against
-4.83 ha.
+The first deck pins `erf.fire.levelset.gradient = upwind`; the next two use
+WENO5-Z everywhere and the default hybrid, which reproduces WENO everywhere
+to the cell here because the whole burn sits inside the band; the last
+lowers the near-front viscosity to 0.1. All four track the analytic count
+to 300 s and fall behind it from 450 s, 46 to 48 cells against 56 at 600 s:
+the burn is only a few cells across, and the signed-distance nudge of the
+reinitialisation rounds its corners inward. The first-order scheme loses
+two cells more than WENO; the viscosity option changes nothing this grid
+can show (it is for fine fire grids: on the 5 m grid of the WUI wildland
+case, `WUI_Subdivision`, 1200 s, the near-front value of 0.1 leaves the
+head at 0.250 m/s on every segment and lets the flanks spread a little
+more, 150 m wide at x = 450 m against 140 m, 4.96 ha burned against
+4.83 ha). The code before this branch gives the same counts on these decks to
+the cell; the table this README carried until 2026-10 (64 cells for the
+first-order scheme and 52 for WENO at 600 s) was measured on a 25 m grid
+with the previous reinitialisation and never on these decks.
 
 Both cases track the analytic front. `phi` behaves as a signed distance:
 `phi_min` about -38 m near the centre of the burn, `phi_max` about the

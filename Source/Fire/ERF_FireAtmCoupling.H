@@ -5,7 +5,11 @@
 // (subroutine fire_tendency), which:
 //   1. Builds a vertical flux profile with exponential decay:
 //        hfx(z) = (Q_sfc / Cp) * exp(-z / alfg)
-//      where z is height above terrain, alfg is the e-folding scale [m].
+//      where z is the height above the lowest cell centre of the column (half
+//      a cell above the terrain: the profile's datum is that centre, so the
+//      first cell takes the share 1 - e^{-dz/a}, 0.105 for dz = 5 m and
+//      a = 45 m, and nothing is lost below it) and alfg is the e-folding
+//      scale [m].
 //   2. Converts the flux profile to a theta tendency via flux divergence:
 //        d(RhoTheta)/dt = -rho * d(hfx)/dz
 //   3. Does the same for latent heat (grnqfx -> rqvfrten):
@@ -81,15 +85,14 @@
 #include <limits>
 #include <ERF_Constants.H>
 #include <ERF_IndexDefines.H>
+#include <ERF_EOS.H>
 #include <ERF_FireGrid.H>
 
 // Default e-folding height for ground fire heat distribution [m].
 // WRF-Fire default: alfg ~ 45-75 m. At z = alfg: flux decays to 1/e ~ 37%.
+// The crown-fire release is added to the same surface flux and injected with
+// this one profile; there is no separate canopy e-folding height.
 constexpr amrex::Real FIRE_ATM_ALFG_DEFAULT = 45.0;
-
-// Default e-folding height for canopy fire contribution [m].
-// Only used when canopy fire heat is non-zero.
-constexpr amrex::Real FIRE_ATM_ALFC_DEFAULT = 60.0;
 
 // Coarsen a fire-grid field (C*nx x C*ny x 1) onto the atmospheric columns of
 // the level the fire grid refines (nx x ny x 1) by area averaging.
@@ -144,6 +147,15 @@ inline void coarsen_fire_flux_to_atm(
 }
 
 // Compute fire latent heat flux [W/m2] from sensible heat flux and fuel moisture.
+//
+// WRF-SFIRE's bookkeeping (module_fr_sfire_atm.F): the burn rate Q/h is read as
+// a wet-mass rate, of which the share b = M/(1 + M) is fuel water and the rest
+// dry fuel yielding f_w = 0.56 kg of water of combustion per kg. The loads the
+// fuel models carry are oven-dry, for which the water released per unit dry
+// fuel is M + 0.56 and the factor would be (M + 0.56) instead of b + (1 - b)
+// 0.56: 0.640 against 0.593 at M = 0.08 (7 %) and 0.860 against 0.662 at
+// M = 0.30 (23 %). The SFIRE form is kept for parity with WRF-SFIRE and the
+// Community Fire Behavior Model; fire_coupling.rst states the basis.
 inline void compute_fire_latent_flux(
     amrex::MultiFab& Q_lat_out,
     const amrex::MultiFab& Q_sfc,
@@ -201,7 +213,8 @@ inline void apply_fire_tendency_to_cc_source(
     const amrex::MultiFab* open_frac_atm = nullptr,
     const amrex::MultiFab* roof_h_atm = nullptr,
     bool use_open_weights = false,
-    bool density_factor = true)
+    bool density_factor = true,
+    bool exner_factor = false)
 {
     using namespace amrex;
 
@@ -210,6 +223,12 @@ inline void apply_fire_tendency_to_cc_source(
 
     constexpr Real Cp_fire = 1004.64;
     constexpr Real L_V  = 2.501e6;
+    // Exner function of the cell from its rho theta (erf.fire.heat_tendency_exner):
+    // heating q [W/m3] gives d(theta)/dt = q / (rho cp Pi), so the rho theta
+    // tendency carries 1/Pi; without it the enthalpy injected is Pi times the
+    // flux, 4.5 % short at 850 hPa. WRF-SFIRE omits the factor; the default here
+    // does too.
+    const Real rdOcp = R_d / Cp_d;
 
     const Box& domain = geom_atm.Domain();
     int klo = domain.smallEnd(2);
@@ -263,6 +282,40 @@ inline void apply_fire_tendency_to_cc_source(
         Array4<Real> dbg_arr;
         if (fire_debug) { dbg_arr = tend_dbg.array(mfi); }
 
+        // Column normalisation of the open-fraction weights, once per column
+        // on the tile's k = klo slab (it was recomputed inside every cell of
+        // the column, O(nz) per cell, three times a step).
+        FArrayBox norm_fab;
+        Elixir norm_eli;   // keeps the slab alive until the kernels below have read it
+        Array4<Real> norm_arr;
+        if (use_open) {
+            const Box slab = makeSlab(bx, 2, klo);
+            norm_fab.resize(slab, 1, The_Arena());
+            norm_eli = norm_fab.elixir();
+            norm_arr = norm_fab.array();
+            amrex::ParallelFor(slab, [=] AMREX_GPU_DEVICE (int i, int j, int /*kslab*/) noexcept {
+                const Real f_open = open_arr(i, j, 0);
+                const Real h_roof = roof_arr(i, j, 0);
+                const Real z_sfc  = z_cc_a(i, j, klo);
+                Real norm = 0.0;
+                for (int kk = klo; kk <= khi; ++kk) {
+                    const Real zz    = z_cc_a(i, j, kk) - z_sfc;
+                    const Real zzp1  = (kk < khi) ? (z_cc_a(i, j, kk + 1) - z_sfc) : (zz + dz_avg);
+                    Real dzz = (kk < khi) ? (z_cc_a(i, j, kk + 1) - z_cc_a(i, j, kk)) : dz_avg;
+                    if (dzz <= 1.0e-10) { dzz = dz_avg; }
+                    Real s = 1.0;
+                    if (h_roof > 0.0) {
+                        const Real zlo2 = zz - 0.5 * dzz;
+                        const Real zhi2 = zz + 0.5 * dzz;
+                        if (zhi2 <= h_roof)     { s = f_open; }
+                        else if (zlo2 < h_roof) { s = f_open + (1.0 - f_open) * (zhi2 - h_roof) / dzz; }
+                    }
+                    norm += (std::exp(-zz / alfg) - std::exp(-zzp1 / alfg)) * s;
+                }
+                norm_arr(i, j, klo) = norm;
+            });
+        }
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(const IntVect& iv) {
             int i = iv[0];
             int j = iv[1];
@@ -289,7 +342,17 @@ inline void apply_fire_tendency_to_cc_source(
             // Heating gives d(rho theta)/dt = -(1/Cp) dQ/dz, with no density
             // factor. The legacy form carries an extra rho, so its injected
             // energy is rho times the flux; density_factor = false drops it.
-            const Real rho_fac = density_factor ? rho : 1.0;
+            // The Exner factor divides the tendency by Pi(p) so that the
+            // enthalpy, not rho theta, integrates to the flux.
+            Real rho_fac = density_factor ? rho : 1.0;
+            if (exner_factor) {
+                const Real rhotheta = amrex::max(s_old_a(i, j, k, RhoTheta_comp), Real(1.0e-10));
+                // the moist pressure where there is vapour (0.3 % in Pi at 15 g/kg)
+                const Real qv = has_moisture ? amrex::max(s_old_a(i, j, k, RhoQ1_comp), Real(0.0)) / rho : Real(0.0);
+                const Real p = getPgivenRTh(rhotheta, qv);
+                const Real exner = std::pow(p / p_0, rdOcp);
+                rho_fac /= amrex::max(exner, Real(1.0e-6));
+            }
 
             // Layer weight: the fraction of the column's exponential profile
             // that falls in this cell. Without structures this is the flux
@@ -311,22 +374,9 @@ inline void apply_fire_tendency_to_cc_source(
                     if (z_hi <= h_roof)      { share = f_open; }
                     else if (z_lo < h_roof)  { share = f_open + (1.0 - f_open) * (z_hi - h_roof) / dz; }
                 }
-                // Column normalisation over the open shares of the same profile.
-                Real norm = 0.0;
-                for (int kk = klo; kk <= khi; ++kk) {
-                    const Real zz    = z_cc_a(i, j, kk) - z_sfc;
-                    const Real zzp1  = (kk < khi) ? (z_cc_a(i, j, kk + 1) - z_sfc) : (zz + dz_avg);
-                    Real dzz = (kk < khi) ? (z_cc_a(i, j, kk + 1) - z_cc_a(i, j, kk)) : dz_avg;
-                    if (dzz <= 1.0e-10) { dzz = dz_avg; }
-                    Real s = 1.0;
-                    if (h_roof > 0.0) {
-                        const Real zlo2 = zz - 0.5 * dzz;
-                        const Real zhi2 = zz + 0.5 * dzz;
-                        if (zhi2 <= h_roof)     { s = f_open; }
-                        else if (zlo2 < h_roof) { s = f_open + (1.0 - f_open) * (zhi2 - h_roof) / dzz; }
-                    }
-                    norm += (std::exp(-zz / alfg) - std::exp(-zzp1 / alfg)) * s;
-                }
+                // Column normalisation over the open shares of the same
+                // profile, precomputed per column above.
+                const Real norm = norm_arr(i, j, klo);
                 // The legacy profile integrates to (1 - exp(-z_top/alfg)); keep
                 // that total so the two modes inject the same energy per column.
                 const Real z_top   = (z_cc_a(i, j, khi) - z_sfc) + dz_avg;

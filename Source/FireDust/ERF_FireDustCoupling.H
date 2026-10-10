@@ -47,7 +47,7 @@ struct FireDustCoupling {
     void apply_burned_area_to_crust(amrex::MultiFab& dust_crust_index) const;
 
     // ── Phase 2: fire reference wind → dust u* inside the perimeter ──────────
-    // When fire_wind_to_dust = true, the fire's wind at erf.fire.wind_ref_ht
+    // When fire_wind_to_dust = true, the fire's wind at FireParams::sampled_wind_ht()
     // (fire_wind_ref, the datum fire_wind_zref names; until October 2026 the
     // WAF-reduced midflame wind fire_wind_eff was handed over as if it were
     // the 6.1 m wind, 0.36x for grass, so the coupling never won) is copied
@@ -59,7 +59,7 @@ struct FireDustCoupling {
     // the neutral log law ignores the surface layer's roughness and stability).
     bool        fire_wind_to_dust  = true;
     amrex::Real fire_wind_z0       = 0.1;  // surface roughness for log-law [m]
-    amrex::Real fire_wind_zref     = 6.1;  // reference height matching fire wind_ref_ht [m]
+    amrex::Real fire_wind_zref     = 6.1;  // height of the fire's reference wind, FireParams::sampled_wind_ht() [m]
 
 
     /**

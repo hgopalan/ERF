@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# The front-cell update with the spread shape this path grew until 2026-10: the
+# Richards coefficients read as a support function, the rectangle
+# [-c R, a R] x [-b R, b R] with a head-to-back ratio of 5 at every wind.
+erf.fire.farsite.front_update = "front_cell"
+erf.fire.farsite.shape = "rectangle"

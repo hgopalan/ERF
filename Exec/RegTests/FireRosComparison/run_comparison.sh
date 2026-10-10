@@ -25,6 +25,7 @@ VARIANTS="rothermel_isotropic rothermel_directional
           hybrid_wind_off hybrid_wind
           macarthur_isotropic macarthur_directional
           cheney_gould_isotropic cheney_gould_directional
+          grass_simple_isotropic grass_simple_directional
           behave_isotropic behave_directional
           rothermel_nearest balbi2020_reference_wind balbi2020_extinction_wet
           hybrid_behave_cheney hybrid_behave_cheney_directional hybrid_blend_width

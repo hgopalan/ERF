@@ -158,8 +158,11 @@ def check_hold(f, log):
                 all(m[il][j] == 1.0 for j in rows_between(150, 195) if at[il - 1][j] >= 0.0),
                 f"{len(held)} held cells with a burned neighbour, y {min(held) if held else 'n/a'}..{max(held) if held else 'n/a'}")
     beyond = [centre(j) for j in range(len(at[0])) if any(at[i][j] >= 0.0 for i in range(il + 1, il + 6))]
-    ok &= check("the fire crossed the line (burned cells beyond it) only north of y = 190 m",
-                beyond and min(beyond) > 190.0, f"crossed rows y {min(beyond) if beyond else 'n/a'}..{max(beyond) if beyond else 'n/a'}")
+    # the fire that crossed where the hold failed (y >= 197 m) spreads along
+    # the far side of the line as well; the Richards ellipse's flanks (2026-10)
+    # take it about five 2 m cells south of the crossing in these 40 steps
+    ok &= check("the fire crossed the line (burned cells beyond it) only north of y = 180 m",
+                beyond and min(beyond) > 180.0, f"crossed rows y {min(beyond) if beyond else 'n/a'}..{max(beyond) if beyond else 'n/a'}")
     hf = events(log, "hold_failed", "L1")
     ok &= check("log: hold_failed events for L1 with the cell counts summing to the failed cells",
                 hf and sum(int(r["cells"]) for r in hf) == len(failed), f"{len(hf)} events")

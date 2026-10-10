@@ -62,9 +62,7 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     bool has_suppression = (fire_layer.get_suppression() != nullptr);
 
     Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_structure_ignition, has_precip, has_suppression);
-    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_structure_ignition, has_precip, has_suppression);
-    // Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
-    // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
+    const int ncomp = static_cast<int>(varnames.size());
 
     MultiFab mf(fg.ba, fg.dm, ncomp, 0);
 
@@ -96,8 +94,10 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     MultiFab::Copy(mf, *fire_layer.get_flame_length(), 0, 17, 1, 0);
     // Component 18: fire_arrival_time
     MultiFab::Copy(mf, *fire_layer.get_arrival_time(), 0, 18, 1, 0);
+    // Component 19: fire_heat_release, h (w0 - w) R
+    MultiFab::Copy(mf, *fire_layer.get_heat_release(), 0, 19, 1, 0);
 
-    int comp = 19;
+    int comp = 20;
 
     // The catalog names fire_fuel_mc_lh and fire_fuel_mc_lw right after the base
     // block whenever the moisture MultiFab carries the live classes, but nothing
@@ -115,6 +115,13 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         comp += 4;
     }
 
+    // Flame tilt: computed with or without crown fire (it was copied inside
+    // the crown block only, so a tilt-only run never plotted it)
+    if (has_flame_tilt) {
+        MultiFab::Copy(mf, *fire_layer.get_flame_tilt(), 0, comp, 1, 0);
+        ++comp;
+    }
+
     // Phase 9: Crown-fire diagnostics
     if (has_crown) {
         MultiFab::Copy(mf, *fire_layer.get_crown_active(), 0, comp, 1, 0);
@@ -123,10 +130,6 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         ++comp;
         MultiFab::Copy(mf, *fire_layer.get_crown_fraction_burned(), 0, comp, 1, 0);
         ++comp;
-        if (has_flame_tilt) {
-            MultiFab::Copy(mf, *fire_layer.get_flame_tilt(), 0, comp, 1, 0);
-            ++comp;
-        }
         MultiFab::Copy(mf, *fire_layer.get_flame_temp(), 0, comp, 1, 0);
         ++comp;
     }
@@ -183,6 +186,10 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         MultiFab::Copy(mf, *sp->ros_factor(), 0, comp++, 1, 0);
         MultiFab::Copy(mf, *sp->progress(),   0, comp++, 1, 0);
     }
+    // Every slot of the catalog was filled, and nothing beyond it: a field added
+    // to the names but not copied here (or the reverse) shifts every column after it.
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(comp == ncomp,
+        "[FIRE] WriteFirePlotfile copied a different number of components than the catalog names");
 
     std::string plotfilename = Concatenate(plotfile_prefix, step, 5);
 

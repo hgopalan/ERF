@@ -30,6 +30,14 @@ function(set_erf_compile_flags target)
     if(ENABLE_CUDA_FASTMATH)
       list(APPEND ERF_CUDA_FLAGS "--use_fast_math")
     endif()
+    # With the fire module, nvlink refused the fire kernels and the line and
+    # plane samplers with "uses too much data for compiler-generated
+    # constants; please recompile with -Xptxas --disable-optimizer-constants"
+    # (ERF-Fire, October 2026; development, without fire, links). This is that
+    # option: ptxas keeps the optimizer's constants out of the constant bank.
+    if(ERF_ENABLE_FIRE)
+      list(APPEND ERF_CUDA_FLAGS "--ptxas-options=--disable-optimizer-constants")
+    endif()
     separate_arguments(ERF_CUDA_FLAGS)
     target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${ERF_CUDA_FLAGS}>)
     if(DEFINED AMReX_CUDA_ARCH)

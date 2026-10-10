@@ -41,15 +41,18 @@ On two ranks:
 
 | deck | lit region, mean \|e\| / 95th pct | shadow vs a + h/2, mean e / 95th pct | shadow vs nominal disc |
 |---|---|---|---|
-| `disc30` | 0.070 / 0.155 | +0.435 / 0.757 | +0.574 |
-| `disc30_wallx` | 0.074 / 0.171 | +0.521 / 0.959 | +0.660 |
+| `disc30` | 0.340 / 0.905 | +1.963 / 2.738 (fails) | +2.102 |
+| `disc30_wallx` | 0.327 / 0.808 | +1.369 / 1.755 (fails) | +1.507 |
 
 in cell-crossing times (h/R = 2 s), over 9716 lit and 7608 shadow cells. None of
-the 716 obstacle cells burns.
+the 716 obstacle cells burns. Re-measured 2026-10-09: 4 of the 6 checks pass.
+The code before this one fails the same two, at +1.834 / 2.645 and +1.246 /
+1.662 (lit 0.236 / 0.789 and 0.223 / 0.689); the +0.435 / 0.757 and +0.521 /
+0.959 this README carried until then predate both.
 
-- Where the ignition is in view the level set is exact to a tenth of a cell.
-- The front that wraps the obstacle arrives late by about half a cell beyond
-  the half cell the cell-resolved obstacle explains; the wall extrapolation adds
-  to the lag rather than removing it here. The shadow check therefore allows
-  three quarters of a cell on average (1.5 at the 95th percentile) and the lit
-  region half a cell (1.0).
+- Where the ignition is in view the level set is within a third of a cell.
+- The front that wraps the obstacle arrives late by one and a half to two
+  cells beyond the half cell the cell-resolved obstacle explains; the wall
+  extrapolation removes half a cell of it. The shadow check allows three
+  quarters of a cell on average (1.5 at the 95th percentile) and fails on both
+  decks; the lag of the wrapped front is open.

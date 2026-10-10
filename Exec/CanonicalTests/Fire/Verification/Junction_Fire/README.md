@@ -38,13 +38,17 @@ On two ranks, arrival errors in cell-crossing times (h/R = 2 s):
 
 | deck | whole field mean \|e\| / 95th pct | bisector mean \|e\| / 95th pct | meeting-point speed |
 |---|---|---|---|
-| `v30` | 0.172 / 0.395 | 0.147 / 0.387 | 3.896 m/s (+0.85 %) |
-| `v60` | 0.159 / 0.334 | 0.172 / 0.183 | 2.000 m/s (-0.02 %) |
-| `v90` | 0.305 / 0.423 | 0.340 / 0.488 | 1.416 m/s (+0.15 %) |
+| `v30` | 0.098 / 0.251 | 0.086 / 0.137 | 3.842 m/s (-0.55 %) |
+| `v60` | 0.146 / 0.444 | 0.128 / 0.249 | 1.989 m/s (-0.56 %) |
+| `v90` | 0.074 / 0.223 | 0.142 / 0.304 | 1.406 m/s (-0.56 %) |
 
-The fronts lag the exact ones by a fifth to a third of a cell, the stamping of
+Re-measured 2026-10-09 (the code before it: 0.089 / 0.206, 0.124 / 0.334 and
+0.101 / 0.235 over the field, the meeting point 0.55 to 0.67 % slow; the
+0.172 / 0.395 and +0.85 % this README carried until then predate both). The
+fronts lag the exact ones by a tenth to a seventh of a cell, the stamping of
 the thin line and the artificial viscosity of the default level set on the
-rounded outer corner; the meeting point runs at the geometric speed to within 1 %.
+rounded outer corner; the meeting point runs at the geometric speed to within
+0.6 %.
 The checks allow half a cell on average and one cell at the 95th percentile
 (1.5 along the bisector), and 2 % on the speed.
 

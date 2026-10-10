@@ -65,18 +65,21 @@ and flanks at R0 travel 7 to 9 cells, where the check is on position):
 
 | deck | up the slope | down the slope | across |
 |---|---|---|---|
-| `iso_s30` | 0.10809 (-0.17 %) | 0.10808 (-0.20 %) | 0.11280 (-0.22 %) |
-| `iso_s60` | 0.32563 (-0.07 %) | 0.32530 (-0.19 %) | 0.37921 (-0.24 %) |
-| `dir_s30` | 0.10175: Wulff 0.09136, Rothermel 0.10826 (61 % of the way) | 0.02293 (0.04 cell) | 0.02399 (0.03 cell) |
-| `dir_s60` | 0.25676: Wulff 0.18272, Rothermel 0.32585 (52 % of the way) | 0.02052 (0.04 cell) | 0.02401 (0.02 cell) |
-| `ell_s30` | 0.10768 (-0.54 % of Rothermel) | 0.02414 (0.13 cell) | 0.02401 (0.01 cell) |
-| `ell_s60` | 0.32498 (-0.27 % of Rothermel) | 0.02147 (0.13 cell) | 0.02402 (0.01 cell) |
-| `and_s30` | 0.10786 (-0.37 % of Rothermel) | 0.02295 (0.04 cell) | 0.04396 (-0.21 %) |
-| `and_s60` | 0.32515 (-0.21 % of Rothermel) | 0.02054 (0.04 cell) | 0.07818 (-0.05 %) |
+| `iso_s30` | 0.10805 (-0.21 %) | 0.10801 (-0.26 %) | 0.11278 (-0.24 %) |
+| `iso_s60` | 0.32477 (-0.34 %) | 0.32479 (-0.35 %) | 0.37857 (-0.40 %) |
+| `dir_s30` | 0.10093: Wulff 0.09136, Rothermel 0.10826 (57 % of the way) | 0.02295 (0.04 cell) | 0.02400 (0.03 cell) |
+| `dir_s60` | 0.26648: Wulff 0.18272, Rothermel 0.32585 (59 % of the way) | 0.02054 (0.04 cell) | 0.02402 (0.02 cell) |
+| `ell_s30` | 0.10760 (-0.61 % of Rothermel) | 0.02290 (0.05 cell) | 0.02401 (0.01 cell) |
+| `ell_s60` | 0.32376 (-0.64 % of Rothermel) | 0.02047 (0.06 cell) | 0.02405 (0.01 cell) |
+| `and_s30` | 0.10781 (-0.42 % of Rothermel) | 0.02295 (0.04 cell) | 0.04398 (-0.16 %) |
+| `and_s60` | 0.32407 (-0.55 % of Rothermel) | 0.02055 (0.04 cell) | 0.07817 (-0.06 %) |
 
-The slope factor and the ground projection are exact to a quarter of a percent.
-The default directional head of a point fire falls 6 % and 21 % short of
-Rothermel's; the ellipse shape brings it within 0.6 %.
+Re-measured 2026-10-09; the code before it gives the same rates to 0.05 %
+(the directional heads at 57 % and 59 % of the way there too), so the 61 %
+and 52 % this README carried until then predate both. The slope factor and
+the ground projection are exact to 0.4 %. The default directional head of a
+point fire falls 7 % and 18 % short of Rothermel's; the ellipse shape brings
+it within 0.65 %.
 
 The `and_*` decks keep those heads and backs and widen the flanks to Anderson's
 length-to-width ratio at the effective wind speed (Anderson's fit with its

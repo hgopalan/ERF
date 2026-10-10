@@ -46,7 +46,7 @@ def rothermel_fm1(mf=0.06, U_ftmin=0.0):
     phi_w = C * U_ftmin ** B * (beta / beta_op) ** -E
     return dict(R0_ftmin=R0, phi_w=phi_w, ROS_ftmin=R0 * (1 + phi_w), ROS_ms=R0 * (1 + phi_w) * 0.00508, I_R=I_R, C=C, B=B, E=E)
 
-MEWS_FTMIN = 300.0   # the model's maximum effective wind for fine fuels (SAV > 1000/ft)
+WIND_LIMIT_FACTOR = 0.9   # Rothermel (1972) eq. 87: U <= 0.9 I_R ft/min (erf.fire.wind_limit = rothermel)
 
 DX_FIRE = 5.0
 FM1_LOAD_KG_M2 = 0.166     # 0.74 ton/acre
@@ -86,13 +86,55 @@ F, t_end = fields(pf, ["fire_arrival_time", "fire_phi", "fire_fuel_load"])
 at = F["fire_arrival_time"]
 t1, t2 = arrival(at, 400.0, 240.0), arrival(at, 470.0, 240.0)
 ros_model = 70.0 / (t2 - t1) if (t1 > 0 and t2 > 0 and t2 > t1) else float("nan")
-u_mid = waf_andrews() * 10.0                     # m/s at midflame from the 6.1 m wind
-u_eff = min(u_mid * 196.85, MEWS_FTMIN)          # ft/min, capped as the model caps it
-ref = rothermel_fm1(mf=0.06, U_ftmin=u_eff)["ROS_ms"]
+u_mid = waf_andrews() * 10.0                     # m/s at midflame from the sounding's 6.1 m wind
+u_lim = WIND_LIMIT_FACTOR * rothermel_fm1(mf=0.06)["I_R"]   # ft/min, Rothermel's own limit
+u_eff = min(u_mid * 196.85, u_lim)               # ft/min, bounded as the model bounds it
+ref0 = rothermel_fm1(mf=0.06, U_ftmin=u_eff)["ROS_ms"]   # the rate at the sounding wind, the run's t = 0 value
+# The surface layer slows the 6.1 m wind as the run proceeds (the 300 ft/min
+# cap hid that until 2026-10: any wind above 1.52 m/s gave 0.2501 m/s), so the
+# head is held to Rothermel at the wind the fire samples on its path: the
+# effective (midflame) wind along y = 240 m from x = 400 to 470 m in the fire
+# plotfile nearest the middle of the arrival window, put through this file's
+# own rothermel_fm1 with the same 0.9 I_R bound. The model's computed rate is
+# never the reference, so a defect that scaled it would move the measured head
+# but not the bracket.
+t_mid = 0.5 * (t1 + t2)
+best, best_dt = None, float("inf")
+for p_w in sorted(glob.glob("plt_fire_wildland_?????")):
+    _, t_p = fields(p_w, ["fire_phi"])
+    if t_p > 0.0 and abs(t_p - t_mid) < best_dt:   # the t = 0 file holds no sampled wind yet
+        best, best_dt = p_w, abs(t_p - t_mid)
+if best is None:
+    fail("no wildland plotfile after t = 0 holds the sampled wind"); sys.exit(1)
+Fw, t_w = fields(best, ["fire_wind_eff_u", "fire_wind_eff_v", "fire_wind_ref_u", "fire_wind_ref_v"])
+xs_path = np.arange(400.0 + 0.5 * DX_FIRE, 470.0, DX_FIRE)
+u_path = [math.hypot(Fw["fire_wind_eff_u"][cell(x, 240.0)], Fw["fire_wind_eff_v"][cell(x, 240.0)]) for x in xs_path]
+u_ref_path = [math.hypot(Fw["fire_wind_ref_u"][cell(x, 240.0)], Fw["fire_wind_ref_v"][cell(x, 240.0)]) for x in xs_path]
+u_head = sum(u_path) / len(u_path)
+# The effective wind is the model's own: hold its ratio to the reference wind
+# to this file's WAF, so a defect that skipped, doubled or changed the WAF
+# cannot move the head and the bracket together.
+waf_seen = [u_e / u_r for u_e, u_r in zip(u_path, u_ref_path) if u_r > 0.0]
+if not waf_seen or max(abs(w / waf_andrews() - 1.0) for w in waf_seen) > 1.0e-4:
+    fail(f"effective/reference wind on the head's path {min(waf_seen, default=float('nan')):.5f} to "
+         f"{max(waf_seen, default=float('nan')):.5f}, not the Andrews WAF {waf_andrews():.5f}")
+ref = rothermel_fm1(mf=0.06, U_ftmin=min(u_head * 196.85, u_lim))["ROS_ms"]
 print(f"  arrival at x=400: {t1:.1f} s, x=470: {t2:.1f} s -> head ROS {ros_model:.3f} m/s")
-print(f"  Rothermel FM1, 6% moisture, midflame {u_mid:.2f} m/s (WAF {waf_andrews():.3f}), capped at {MEWS_FTMIN:.0f} ft/min: {ref:.4f} m/s")
-if not (0.85 * ref <= ros_model <= 1.15 * ref):
-    fail(f"wildland head ROS {ros_model:.3f} m/s outside 15% of Rothermel {ref:.3f} m/s")
+print(f"  Rothermel FM1, 6% moisture, midflame {u_mid:.2f} m/s (WAF {waf_andrews():.3f}), below the limit 0.9 I_R = {u_lim:.0f} ft/min: {ref0:.4f} m/s at t = 0")
+print(f"  effective/reference wind on the head's path: {min(waf_seen):.6f} to {max(waf_seen):.6f} (Andrews WAF {waf_andrews():.6f})")
+print(f"  Rothermel at the effective wind on the head's path at t = {t_w:.0f} s ({u_head:.3f} m/s midflame, x = 400 to 470 m): {ref:.4f} m/s (the surface layer has slowed the 6.1 m wind)")
+# The deck runs the directional level set with the projection formula, whose
+# head of a curved front falls from the Rothermel rate toward the Wulff-shape
+# tip R0 B/(B-1) (phi_w (B-1))^(1/B) once phi_w (B-1) > 1 (FireAdvectiveWindCoupling,
+# FireDirectionalShape): the head is bracketed between that tip at the
+# head's-path wind and the Rothermel rate, as Slope_No_Wind brackets its
+# directional decks.
+rw = rothermel_fm1(mf=0.06, U_ftmin=min(u_head * 196.85, u_lim))
+R0_ms, phi_w, B = rw["R0_ftmin"] * 0.00508, rw["phi_w"], rw["B"]
+tip = R0_ms * B / (B - 1.0) * (phi_w * (B - 1.0)) ** (1.0 / B) if phi_w * (B - 1.0) > 1.0 else ref
+print(f"  bracket: Wulff tip of the projection at that wind {tip:.4f} m/s ({tip / ref:.0%} of the Rothermel rate), head at {ros_model / ref:.0%}")
+if not (tip <= ros_model <= 1.15 * ref):
+    fail(f"wildland head ROS {ros_model:.3f} m/s outside [Wulff tip {tip:.3f}, 1.15 x Rothermel rate {ref:.3f}] m/s")
 t_wild_850 = arrival(at, 780.0, 240.0)
 print(f"  arrival at x=780 (beyond the last street): {t_wild_850:.1f} s")
 if t_wild_850 <= 0:
@@ -183,8 +225,13 @@ for v in ["subdivision", "defensible", "coupled"]:
             fail("subdivision: the front reached x = 780 m no later than the grass run with the same spotting")
         if reached == 0:
             fail("subdivision: no house was reached by the front")
-        if embers == 0:
-            fail("subdivision: no ember landed on a footprint")
+        # Brands launch at Byram's intensity of the cell's load from the first
+        # step and drift on the log profile (2026-10), so from this 10 m/s
+        # grass fire every brand reaches the fuel's 200 m landing cap and lands
+        # on the 200 m-shifted copy of its launch band: a footprint is hit only
+        # when it sits exactly there. The landings are therefore counted over
+        # the three structure variants below, not required of this one (it had
+        # 86 until 2026-10, when the brands rose on the consumed load only).
     if v == "defensible":
         s = results.get("subdivision", {})
         if s and not (hl_max < s["hl_max"]):
@@ -265,5 +312,10 @@ for v in VARIANTS:
     r = results.get(v)
     if not r: continue
     print(f"  {v:12s} {r['t850']:11.1f} {r['burned']:7d} {r.get('reached', 0):8d} {r.get('pk_max', 0.0):10.0f} {r.get('hl_max', 0.0):9.2f} {r.get('embers', 0):7d} {r.get('ignited', 0):8d}")
+landed = {v: results[v]["embers"] for v in ("subdivision", "coupled", "ignition") if v in results}
+if landed and sum(landed.values()) == 0:
+    fail(f"no ember landed on any footprint in the structure variants: {landed}")
+elif landed:
+    print(f"  embers on footprints over the structure variants: {landed}")
 print("RESULT:", "pass" if ok_all else "FAIL")
 sys.exit(0 if ok_all else 1)

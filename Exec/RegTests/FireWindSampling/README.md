@@ -5,8 +5,8 @@ The Community Fire Behavior Model's second wind interpolation option
 the flames and bring it down to the target height with a neutral log
 profile, so the fire is driven by ambient wind rather than by air its own
 plume has accelerated. `erf.fire.wind_sample_ht` sets the sampling height and
-`erf.fire.wind_sample_z0` the roughness of the profile; 0 (default) samples at
-`erf.fire.wind_ref_ht` as before.
+`erf.fire.wind_sample_z0` the roughness of the profile (default 0.1 m); a
+sampling height of 0 (the default) samples at `erf.fire.wind_ref_ht` as before.
 
 A grass fire on flat ground, one-way so the atmosphere is identical in every
 deck:

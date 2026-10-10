@@ -48,7 +48,7 @@ TEST(ReactionVelocityFormula, DefaultMatchesExplicitAlbini)
 {
     const FuelModelParams fp = get_fuel_params(1, 0);  // FM1, sigma_d1 = 3500
     const RothermelComputed rc_default = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD);
-    const RothermelComputed rc_albini  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false);
+    const RothermelComputed rc_albini  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, false);
 
     expect_close(rc_default.R0, rc_albini.R0);
     expect_close(rc_default.I_R, rc_albini.I_R);
@@ -57,16 +57,23 @@ TEST(ReactionVelocityFormula, DefaultMatchesExplicitAlbini)
 TEST(ReactionVelocityFormula, OnlyChangesReactionPath)
 {
     // A only enters Gamma_prime -> I_R -> R0 (Eq. 1); it has no business
-    // touching the wind-factor, slope-factor or packing-ratio fields.
+    // touching the wind-factor, slope-factor or packing-ratio fields. The
+    // wind limit follows I_R under Rothermel's own bound U <= 0.9 I_R (the
+    // default since 2026-10), so there A moves it through I_R and nothing
+    // else; under the fuel-class cap it is a constant and does not move.
     const FuelModelParams fp = get_fuel_params(1, 0);
-    const RothermelComputed rc_albini    = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false);
-    const RothermelComputed rc_rothermel = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true);
+    const RothermelComputed rc_albini    = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, false);
+    const RothermelComputed rc_rothermel = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, true);
 
     expect_close(rc_albini.beta, rc_rothermel.beta);
     expect_close(rc_albini.C, rc_rothermel.C);
     expect_close(rc_albini.B, rc_rothermel.B);
     expect_close(rc_albini.phi_s_const, rc_rothermel.phi_s_const);
-    EXPECT_EQ(rc_albini.U_max_ftmin, rc_rothermel.U_max_ftmin);
+    expect_close(rc_albini.U_max_ftmin, 0.9 * rc_albini.I_R);
+    expect_close(rc_rothermel.U_max_ftmin, 0.9 * rc_rothermel.I_R);
+    const RothermelComputed fc_albini    = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::fuel_class, false);
+    const RothermelComputed fc_rothermel = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::fuel_class, true);
+    EXPECT_EQ(fc_albini.U_max_ftmin, fc_rothermel.U_max_ftmin);
     expect_close(rc_albini.wind_conv, rc_rothermel.wind_conv);
     expect_close(rc_albini.ros_conv, rc_rothermel.ros_conv);
 
@@ -83,8 +90,8 @@ TEST(ReactionVelocityFormula, MagnitudeDifferenceMatchesPublishedFormulas)
     // (Gamma_max, w_n, heat_content, eta_M, eta_s) is common to both and
     // cancels.
     const FuelModelParams fp = get_fuel_params(1, 0);
-    const RothermelComputed rc_albini    = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false);
-    const RothermelComputed rc_rothermel = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true);
+    const RothermelComputed rc_albini    = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, false);
+    const RothermelComputed rc_rothermel = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, true);
 
     const Real sigma = amrex::max(fp.sigma_d1, Real(100.0));
     const Real A_a = albini_A(sigma);
@@ -114,7 +121,7 @@ TEST(ReactionVelocityFormula, LowSigmaGuardPreventsWrfPole)
     FuelModelParams fp = get_fuel_params(1, 0);
     fp.sigma_d1 = Real(50.0);  // below the pole; clamp must intervene
 
-    const RothermelComputed rc = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true);
+    const RothermelComputed rc = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, true);
 
     EXPECT_TRUE(std::isfinite(rc.R0));
     EXPECT_TRUE(std::isfinite(rc.I_R));
@@ -132,8 +139,8 @@ TEST(ReactionVelocityFormula, LowSigmaGuardPreventsWrfPole)
 
 TEST(ReactionVelocityFormula, PerFuelTable)
 {
-    const auto albini    = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, false);
-    const auto rothermel = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, true);
+    const auto albini    = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, fire_wind_limit::rothermel, false);
+    const auto rothermel = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, fire_wind_limit::rothermel, true);
     ASSERT_EQ(albini.size(), rothermel.size());
 
     EXPECT_EQ(albini[0].R0, Real(0.0));  // non-burnable slot stays zero
@@ -181,9 +188,9 @@ TEST(ReactionVelocityFormula, CustomSlotGetsBothOptions)
         for (bool bmst : {false, true}) {
             SCOPED_TRACE(::testing::Message() << "rothermel A " << a_rothermel << ", bmst " << bmst);
             const auto table = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true,
-                                                          tbl.data(), a_rothermel, bmst);
+                                                          tbl.data(), fire_wind_limit::rothermel, a_rothermel, bmst);
             const RothermelComputed direct = compute_rothermel_params(fm1, M_DEAD, M_DEAD, M_DEAD,
-                                                                      true, a_rothermel, bmst);
+                                                                      true, fire_wind_limit::rothermel, a_rothermel, bmst);
             EXPECT_EQ(table[FUEL_SLOT_CUSTOM_BASE].R0,   direct.R0);
             EXPECT_EQ(table[FUEL_SLOT_CUSTOM_BASE].I_R,  direct.I_R);
             EXPECT_EQ(table[FUEL_SLOT_CUSTOM_BASE].beta, direct.beta);
@@ -191,9 +198,9 @@ TEST(ReactionVelocityFormula, CustomSlotGetsBothOptions)
     }
     // and the options do change that slot
     const auto plain = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true,
-                                                  tbl.data(), false, false);
+                                                  tbl.data(), fire_wind_limit::rothermel, false, false);
     const auto both  = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true,
-                                                  tbl.data(), true, true);
+                                                  tbl.data(), fire_wind_limit::rothermel, true, true);
     EXPECT_NE(plain[FUEL_SLOT_CUSTOM_BASE].I_R, both[FUEL_SLOT_CUSTOM_BASE].I_R);
     EXPECT_NE(plain[FUEL_SLOT_CUSTOM_BASE].beta, both[FUEL_SLOT_CUSTOM_BASE].beta);
 }
@@ -206,7 +213,7 @@ TEST(WrfBmstCompat, DefaultOffMatchesExplicitFalse)
 {
     const FuelModelParams fp = get_fuel_params(1, 0);
     const RothermelComputed rc_default = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD);
-    const RothermelComputed rc_off = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false, false);
+    const RothermelComputed rc_off = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, false, false);
 
     expect_close(rc_default.R0, rc_off.R0);
     expect_close(rc_default.beta, rc_off.beta);
@@ -217,8 +224,8 @@ TEST(WrfBmstCompat, ZeroMoistureIsExactNoOp)
     // bmst = M_f/(1+M_f) is identically zero at zero fuel moisture, so the
     // deflation must vanish and both settings must agree bit-for-bit.
     const FuelModelParams fp = get_fuel_params(1, 0);
-    const RothermelComputed rc_off = compute_rothermel_params(fp, 0.0, 0.0, 0.0, true, false, false);
-    const RothermelComputed rc_on  = compute_rothermel_params(fp, 0.0, 0.0, 0.0, true, false, true);
+    const RothermelComputed rc_off = compute_rothermel_params(fp, 0.0, 0.0, 0.0, true, fire_wind_limit::rothermel, false, false);
+    const RothermelComputed rc_on  = compute_rothermel_params(fp, 0.0, 0.0, 0.0, true, fire_wind_limit::rothermel, false, true);
 
     EXPECT_EQ(rc_off.beta, rc_on.beta);
     EXPECT_EQ(rc_off.I_R, rc_on.I_R);
@@ -233,8 +240,8 @@ TEST(WrfBmstCompat, DeflatesPackingRatioByExactBmstFactor)
     // multiplicative factor on beta, independent of every downstream
     // nonlinearity (Gamma_prime, I_R, R0).
     const FuelModelParams fp = get_fuel_params(1, 0);
-    const RothermelComputed rc_off = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false, false);
-    const RothermelComputed rc_on  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false, true);
+    const RothermelComputed rc_off = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, false, false);
+    const RothermelComputed rc_on  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, false, true);
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);
     expect_rel_close(rc_on.beta, rc_off.beta * (Real(1.0) - bmst));
@@ -250,8 +257,8 @@ TEST(WrfBmstCompat, IndependentOfReactionVelocityFormula)
     // exact beta-deflation factor must hold the same way regardless of
     // which A formula reaction_velocity_formula selects.
     const FuelModelParams fp = get_fuel_params(1, 0);
-    const RothermelComputed rc_off = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true, false);
-    const RothermelComputed rc_on  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true, true);
+    const RothermelComputed rc_off = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, true, false);
+    const RothermelComputed rc_on  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, fire_wind_limit::rothermel, true, true);
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);
     expect_rel_close(rc_on.beta, rc_off.beta * (Real(1.0) - bmst));
@@ -269,8 +276,8 @@ TEST(WrfBmstCompat, PerFuelTable)
     // go either direction and must not be asserted monotonic here (see
     // DeflatesPackingRatioByExactBmstFactor for the FM1 case where it does
     // decrease).
-    const auto off = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, false, false);
-    const auto on  = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, false, true);
+    const auto off = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, fire_wind_limit::rothermel, false, false);
+    const auto on  = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, fire_wind_limit::rothermel, false, true);
     ASSERT_EQ(off.size(), on.size());
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);

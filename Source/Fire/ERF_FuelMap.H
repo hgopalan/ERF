@@ -6,6 +6,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_FuelModels.H>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -26,6 +27,45 @@
  * - Proper row reordering: file row 0 = northernmost (highest y)
  *   → reverse to match domain ordering
  */
+
+/**
+ * @brief Parse one code of an ESRI ASCII fuel map.
+ *
+ * A code is a whole number ("7" or "7.0"); the NODATA_value becomes 0
+ * (non-burnable). A fractional, negative (other than NODATA_value) or
+ * non-numeric token is refused: reading it into an int stopped at the decimal
+ * point and reported the map as too short, or took a stray negative code as
+ * a fuel.
+ *
+ * @param[in]  tok        The token as read from the file
+ * @param[in]  nodata_val The header's NODATA_value
+ * @param[out] code       The fuel code, set only when the token is valid
+ * @return an empty string, or why the token is not a fuel code
+ */
+inline std::string parse_ascii_fuel_code(const std::string& tok, int nodata_val, int& code)
+{
+    char* end = nullptr;
+    const double v = std::strtod(tok.c_str(), &end);
+    if (end == tok.c_str() || *end != '\0' || !std::isfinite(v)) {
+        return "'" + tok + "', which is not a number";
+    }
+    if (v != std::floor(v)) {
+        return "'" + tok + "', which is not a whole number (fuel codes are integers)";
+    }
+    if (std::abs(v) > 1.0e9) {
+        return "'" + tok + "', which is out of range";
+    }
+    const int c = static_cast<int>(v);
+    if (c == nodata_val) {
+        code = 0;  // nodata: code 0, non-burnable
+        return "";
+    }
+    if (c < 0) {
+        return "'" + tok + "', which is negative and not the NODATA_value " + std::to_string(nodata_val);
+    }
+    code = c;
+    return "";
+}
 
 /**
  * @brief Read an ESRI ASCII grid fuel map file.
@@ -136,13 +176,16 @@ inline bool read_ascii_fuel_map(const std::string& filename,
         std::vector<int> temp_data(static_cast<size_t>(ncols) * static_cast<size_t>(nrows));
         for (int j = nrows - 1; j >= 0; --j) {
             for (int i = 0; i < ncols; ++i) {
-                int val = 0;
-                if (!(file >> val)) {
+                std::string tok;
+                if (!(file >> tok)) {
                     amrex::Abort("Fuel map '" + filename + "' ends before its "
                                  + std::to_string(ncols) + " x " + std::to_string(nrows) + " codes");
                 }
-                if (val == nodata_val) {
-                    val = 0;  // Assign code 0 to nodata cells
+                int val = 0;
+                const std::string why = parse_ascii_fuel_code(tok, nodata_val, val);
+                if (!why.empty()) {
+                    amrex::Abort("Fuel map '" + filename + "': the code at data row " + std::to_string(nrows - j)
+                                 + ", column " + std::to_string(i + 1) + " is " + why);
                 }
                 temp_data[static_cast<size_t>(j) * static_cast<size_t>(ncols) + static_cast<size_t>(i)] = val;
             }
@@ -228,7 +271,8 @@ inline void fill_fuel_load_from_map(amrex::MultiFab& fire_fuel_load,
         auto const& fuel = fire_fuel_load.array(mfi);
         auto const& code = fire_fuel_model.const_array(mfi);
         amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            const int c = static_cast<int>(code(i, j, k));
+            // the nearest integer, as every other reader of the code field
+            const int c = static_cast<int>(code(i, j, k) + amrex::Real(0.5));
             fuel(i, j, k) = (sb40 && sb40_nonburnable(c)) ? amrex::Real(0.0)
                           : fuel_total_load_kg_m2(fuel_params_at_code(c, fuel_set, M_live,
                                                                       fp_tbl, fp_tbl_size));

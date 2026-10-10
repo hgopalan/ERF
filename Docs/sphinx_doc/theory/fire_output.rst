@@ -12,10 +12,20 @@ Flame diagnostics
 Computed every fire step on burned cells (:math:`\phi < 0`) and zero
 elsewhere:
 
-- **Byram fireline intensity** :math:`I_B = h\, w_{consumed}\, R` [kW/m],
-  with :math:`h` the heat content [kJ/kg], :math:`w_{consumed}` the fuel
-  consumed so far [kg/m²] and :math:`R` the rate of spread. It drives ember
-  lofting, crown-fire initiation and the flame diagnostics below.
+- **Byram fireline intensity** :math:`I_B = h\, w_0\, R` [kW/m], with
+  :math:`h` the heat content [kJ/kg], :math:`w_0` the fuel load the front
+  consumes [kg/m²] (the cell's initial load) and :math:`R` the rate of
+  spread, on burning cells; it is zero once the cell's remaining load falls
+  below 1 % of :math:`w_0` (burned out). It drives ember lofting, crown-fire
+  initiation and the flame diagnostics below. :math:`w_0` is the whole
+  load, dead and live, so on heavy fuels the intensity is above Byram's
+  :math:`I_R t_r R / 60` of the flaming front alone (BehavePlus): for
+  Anderson 10 the 100-h class is 0.23 lb/ft² of the 0.55 lb/ft² load, so
+  the crown criterion and ember launch trigger more readily there than
+  BehavePlus would. Until October 2026 it was
+  :math:`h\,(w_0 - w)\, R`, zero on the cell the front had just reached and
+  largest far behind it; that form is kept as the plotfile variable
+  ``fire_heat_release``.
 - **Thomas flame length** :math:`L = 0.0775\, I_B^{0.46}` [m].
 - **Flame temperature**, by :cpp:`erf.fire.flame_temp_method`:
   ``"byram_radiant"`` (default) :math:`T = T_a + 800\,(I_B/1000)^{0.25}`;
@@ -86,18 +96,21 @@ order; the optional blocks are present only when their feature is on:
    * - ``fire_arrival_time``
      - s
      - always
+   * - ``fire_heat_release``
+     - kW/m
+     - always (:math:`h\,(w_0 - w)\, R`, the intensity's form before 2026-10)
    * - ``fire_fuel_mc_lh``, ``fire_fuel_mc_lw``
      - fraction
      - live moisture components present (BEHAVE path)
    * - ``fire_lofting_height``, ``fire_spot_brand_count``, ``fire_spot_max_dist``, ``fire_spot_active``
      - m, -, m, -
      - ``erf.fire.spotting.enable``
+   * - ``fire_flame_tilt``
+     - deg
+     - ``erf.fire.compute_flame_tilt`` (crown fire on or off)
    * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
      - -, kg/m², -
      - ``erf.fire.crown.enable``
-   * - ``fire_flame_tilt``
-     - deg
-     - crown fire on and ``erf.fire.compute_flame_tilt``
    * - ``fire_flame_temp``
      - K
      - ``erf.fire.crown.enable``
@@ -113,6 +126,12 @@ order; the optional blocks are present only when their feature is on:
    * - ``fire_nonburnable``
      - 0/1
      - structures, ``fuel_map.nonburnable_codes``, ``firebreak.use_mask`` or ``suppression.enable`` configured
+   * - ``fire_structure_id``, ``fire_heat_load``, ``fire_peak_intensity``, ``fire_ember_landings``
+     - -, J/m², kW/m, -
+     - ``erf.fire.exposure.enable`` (see below)
+   * - ``fire_structure_state``, ``fire_structure_ignition_time``, ``fire_structure_rad_flux``
+     - -, s, W/m²
+     - ``erf.fire.structures.ignition.enable`` (:doc:`wui_structure_ignition`)
    * - ``fire_precip_mm_hr``
      - mm/hr
      - dynamic dead-fuel moisture with ``erf.fire.precip_source = atmosphere`` or a positive ``erf.fire.precip_rate_mm_hr``
@@ -209,6 +228,33 @@ The CSV then gains ``state, t_ignition_s, cause, structure_flux_Wm2,
 incident_flux_max_Wm2`` (the columns are absent when the option is off), the
 plotfile ``fire_structure_state``, ``fire_structure_ignition_time`` and
 ``fire_structure_rad_flux``, and the checkpoint ``FireStructureState``.
+
+Models in use
+-------------
+
+Every run prints, once at start-up and before the first step, the model or
+option it uses for each piece of fire physics, whatever
+:cpp:`erf.fire.fire_debug` says: the rate-of-spread model and its options,
+the front propagation and its directional options, the wind (interpolation,
+height, sampling, wind adjustment factor, terrain factors), the fuel, burnout
+and moisture models, the coupling to the atmosphere, the flame temperature,
+and whether acceleration, spotting, crown fire, threshold ignition, smoke,
+structures and suppression are on, with the ignition sources. Each line gives
+the ``erf.fire`` key, the value the run uses, and whether the inputs set it or
+it is the default; a value the code forced says so. An excerpt::
+
+  [FIRE] Models (erf.fire key = value; set in the inputs, or the default):
+  [FIRE]   Rate of spread                      ros_model = rothermel  (set)
+  [FIRE]     Rothermel reaction velocity       reaction_velocity_formula = albini  (default)
+  [FIRE]     midflame wind limit               use_wind_limit = true  (default)
+  [FIRE]     wind limit form                   wind_limit = rothermel  (default)
+  [FIRE]   Front propagation                   propagation_method = levelset  (set)
+
+An option is listed only when it acts in the run: a model's own options only
+when that model is in use (the Cheney-Gould pasture with ``ros_model =
+cheney_gould``, the level-set gradient with ``propagation_method = levelset``),
+the heat-injection options only when heat reaches the atmosphere, the wind
+interpolation only when the wind is not prescribed.
 
 Debug output
 ------------

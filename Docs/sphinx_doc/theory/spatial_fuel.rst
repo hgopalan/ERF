@@ -34,7 +34,7 @@ This is a simple, human-readable raster format. File structure:
     ...
     <row N of integer codes>
 
-Header lines specify grid dimensions, geospatial coordinates, cell size, and the sentinel value for missing/invalid cells. Data rows are ordered from north (highest y-coordinate) to south (lowest y-coordinate), following the ESRI standard convention. The ERF fire reader reverses this row order internally to match fire domain coordinates (south to north), ensuring that cell (i, j) in the fire grid is correctly mapped to its corresponding fuel model code: the first data row lands on the north edge of the fire grid. Until 2026-09-11 the reader put the first data row on the south edge instead, so a map written in this convention was mirrored north to south.
+Header lines specify grid dimensions, geospatial coordinates, cell size, and the sentinel value for missing/invalid cells. Every reader of the code field (the rate-of-spread tables, the per-cell coefficients, the wind heights, the non-burnable mask, the hybrid and region selectors, and the initial load of ``erf.fire.fuel_map.load_from_map``) takes the nearest integer of the stored value, so they all agree on a cell's fuel (until October 2026 the load reader truncated instead). The map readers store whole numbers: an ASCII code must be a whole number ("7" or "7.0"), the ``NODATA_value`` becomes 0 (non-burnable), and a fractional, negative or non-numeric code aborts the run naming its row and column. Data rows are ordered from north (highest y-coordinate) to south (lowest y-coordinate), following the ESRI standard convention. The ERF fire reader reverses this row order internally to match fire domain coordinates (south to north), ensuring that cell (i, j) in the fire grid is correctly mapped to its corresponding fuel model code: the first data row lands on the north edge of the fire grid. Until 2026-09-11 the reader put the first data row on the south edge instead, so a map written in this convention was mirrored north to south.
 
 The map is placed by cell index, not by coordinates. It must have exactly as many columns and rows as the fire grid has cells in x and y, and the run stops with a message otherwise. The corner in the header is not used, and a ``cellsize`` different from the fire cell size is reported as a warning. For a real-terrain case, ``Exec/Tools/make_landfire_fuel_map.py`` puts a LANDFIRE fuel raster on the fire grid in this form.
 
@@ -72,7 +72,7 @@ With the Scott and Burgan fuel system the non-burnable classes are 91 to 99.
 Firebreak Barriers
 ------------------
 
-Firebreak barriers are permanent non-burnable zones established at fire initialization. Two barrier types are supported:
+Firebreak barriers are non-burnable zones established at fire initialization, permanent with :cpp:`erf.fire.firebreak.use_mask = true` (the default). Two barrier types are supported:
 
 **Rectangular Barriers**
 
@@ -92,16 +92,24 @@ A circular barrier is defined by centre :math:`(c_x, c_y)` and radius :math:`r`.
 
 **Sentinel Value and Permanence**
 
-All cells within any barrier have their level-set field ``fire_phi`` stamped to the constant value ``FIREBREAK_PHI_SENTINEL = 1.0e6`` at initialization, after ignition. This sentinel is strictly greater than ``farsite_phi_threshold`` (default 0.1) and any unburned cell phi value. Once set, firebreak cells remain at the sentinel value throughout the simulation, permanently preventing fire arrival and propagation. Firebreak barriers cannot be burned through or overcome during the fire simulation.
+All cells within any barrier have their level-set field ``fire_phi`` stamped to the constant value ``FIREBREAK_PHI_SENTINEL = 1.0e6`` at initialization, after the ignition disc and before a t = 0 polygon or polyline ignition, which min-merges its distance over the barrier. The sentinel is greater than ``farsite_phi_threshold`` (default 0.1), so a stamped cell starts unburned on both paths. With :cpp:`erf.fire.firebreak.use_mask = true` (the default) what holds a firebreak for the whole run is the non-burnable mask described below, which marks the barrier cells from the shapes themselves, with the same cell-centre test, not from the value of the level set.
 
 Reference: Finney, M.A. (1998). FARSITE: Fire Area Simulator. RMRS-RP-4.
 
 Firebreak cells are stamped into the level set once at initialisation. On
 the FARSITE path the level set is rebuilt from the arrival time every
 subcycle and on the level-set path reinitialisation clamps the sentinel, so
-a firebreak can be burned over later in a run. Setting
-:cpp:`erf.fire.firebreak.use_mask = true` keeps the firebreak cells in the
-non-burnable mask instead, which holds on both paths.
+a firebreak can be burned over later in a run. With
+:cpp:`erf.fire.firebreak.use_mask = true` (the default since October 2026)
+the firebreak cells are held in the non-burnable mask as well, which holds
+on both paths. Until October 2026 the mask read them back as the cells with
+``fire_phi`` at or above half the sentinel, which found none at all when a
+t = 0 polygon or polyline ignition had merged its distance over the barrier
+(the CTest ``FireMergingFronts_firebreak_mask``). ``false`` keeps only the
+sentinel stamp, and a deck that sets it with firebreaks configured is warned
+that its firebreaks may erode; with a t = 0 polygon, polyline or scheduled
+ignition the break is gone before the first step, since that ignition's
+distance field replaces the sentinel.
 
 Input Parameters
 ----------------

@@ -11,7 +11,7 @@
  * Defines the canonical output component names for fire plotfiles.
  * All variables are on the native fire grid (C x finer than atmospheric grid).
  *
- * Base output order (19 components, indices 0–18):
+ * Base output order (20 components, indices 0–19):
  *   0. fire_phi           (level-set)
  *   1. fire_ros           (rate of spread [m/s])
  *   2. fire_wind_eff_u    (component 0 of fire_wind_eff)
@@ -28,17 +28,20 @@
  *  13. fire_surface_rh    (surface relative humidity [0-1])
  *  14. fire_heat_flux     (heat flux [W/m²])
  *  15. fire_fuel_load     (fuel load [kg/m²])
- *  16. fire_fireline_intensity (Byram fireline intensity [kW/m])
+ *  16. fire_fireline_intensity (Byram fireline intensity h w0 R [kW/m])
  *  17. fire_flame_length  (Thomas flame length [m])
  *  18. fire_arrival_time  (fire arrival time [s])
+ *  19. fire_heat_release  (h (w0 - w) R [kW/m], the intensity's pre-2026-10 form)
  *
  * The optional blocks follow, in this order (fire_plotfile_var_names):
  *   live moisture (2): fire_fuel_mc_lh, fire_fuel_mc_lw
  *   spotting (4, spotting.enable): fire_lofting_height, fire_spot_brand_count,
  *     fire_spot_max_dist, fire_spot_active
- *   crown fire (4 or 5, crown.enable): fire_crown_active, fire_crown_load,
- *     fire_crown_fraction_burned, [fire_flame_tilt with compute_flame_tilt],
- *     fire_flame_temp (always written with the crown block, nowhere else)
+ *   flame tilt (1, compute_flame_tilt): fire_flame_tilt (it was written only
+ *     inside the crown block before 2026-10, so a tilt-only run never plotted it)
+ *   crown fire (4, crown.enable): fire_crown_active, fire_crown_load,
+ *     fire_crown_fraction_burned, fire_flame_temp (always written with the
+ *     crown block, nowhere else)
  *   fuel map (1): fire_fuel_model_code
  *   hybrid ROS (1): fire_ros_model_weight
  *   structures (1): fire_structure_height
@@ -104,7 +107,8 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
         "fire_fuel_load",
         "fire_fireline_intensity",
         "fire_flame_length",
-        "fire_arrival_time"
+        "fire_arrival_time",
+        "fire_heat_release"
     };
     // Phase 15: Live fuel moisture components (components 3 and 4 of fire_fuel_mc)
     if (include_live_moisture) {
@@ -117,13 +121,13 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
         names.push_back("fire_spot_max_dist");
         names.push_back("fire_spot_active");
     }
+    if (include_flame_tilt) {
+        names.push_back("fire_flame_tilt");
+    }
     if (include_crown) {
         names.push_back("fire_crown_active");
         names.push_back("fire_crown_load");
         names.push_back("fire_crown_fraction_burned");
-        if (include_flame_tilt) {
-            names.push_back("fire_flame_tilt");
-        }
         names.push_back("fire_flame_temp");
     }
     if (include_fuel_map) {
@@ -172,20 +176,10 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
 }*/
 
 /**
- * @brief Get the total number of fire plotfile components.
- * @param[in] include_spotting   Count 4 additional Albini spotting components when true.
- * @param[in] include_crown      Count crown-fire diagnostics when true.
- * @param[in] include_fuel_map   Count fire_fuel_model_code when true (Phase 10).
- * @param[in] include_flame_tilt Count fire_flame_tilt within the crown block when true.
- * @param[in] include_live_moisture Count fire_fuel_mc_lh and fire_fuel_mc_lw when true (Phase 15).
- * @param[in] include_ros_weight Count fire_ros_model_weight when true (hybrid ROS).
- * @param[in] include_structure_height Count fire_structure_height when true (structures or hybrid structure selector).
- * @param[in] include_nonburnable Count fire_nonburnable when true (non-burnable mask active).
- * @param[in] include_exposure Count the four exposure fields when true.
- * @param[in] include_structure_ignition Count the three structure ignition fields when true.
- * @param[in] include_precip Count fire_precip_mm_hr when true.
- * @param[in] include_suppression Count the three suppression fields when true.
- * @return Number of scalar fire output variables.
+ * @brief Get the total number of fire plotfile components: the size of the
+ *        name list, so the count and the names cannot drift apart (they were
+ *        two hand-kept copies until 2026-10, and the copy loop in
+ *        WriteFirePlotfile is a third, asserted against this at its end).
  */
 inline int fire_plotfile_ncomp(
     bool include_spotting,
@@ -201,18 +195,12 @@ inline int fire_plotfile_ncomp(
     bool include_precip = false,
     bool include_suppression = false)
 {
-    return 19
-        + (include_live_moisture ? 2 : 0)
-        + (include_spotting ? 4 : 0)
-        + (include_crown ? (include_flame_tilt ? 5 : 4) : 0)
-        + (include_fuel_map ? 1 : 0)
-        + (include_ros_weight ? 1 : 0)
-        + (include_structure_height ? 1 : 0)
-        + (include_nonburnable ? 1 : 0)
-        + (include_exposure ? 4 : 0)
-        + (include_structure_ignition ? 3 : 0)
-        + (include_precip ? 1 : 0)
-        + (include_suppression ? 3 : 0);
+    return static_cast<int>(fire_plotfile_var_names(include_spotting, include_crown, include_fuel_map,
+                                                    include_flame_tilt, include_live_moisture,
+                                                    include_ros_weight, include_structure_height,
+                                                    include_nonburnable, include_exposure,
+                                                    include_structure_ignition, include_precip,
+                                                    include_suppression).size());
 }
 
 

@@ -62,13 +62,19 @@ CSVs and the logs, prints a table and fails on any of these:
 
 1. **Spread rate.** The head rate of spread along the centreline between
    x = 400 and 470 m of the ``wildland`` run, from the arrival-time field,
-   must lie within 15% of Rothermel's rate for fuel model 1 at 6% moisture and
-   the midflame wind that the Andrews wind adjustment factor gives from the
-   10 m/s wind at 6.1 m, capped at the model's 300 ft/min maximum effective
-   wind for fine fuels. The reference is Rothermel (1972) written out in the
-   check, independent of the code; it gives 0.2501 m/s where the model
-   reports 0.2502. The 15% covers the level-set discretisation and the
-   directional spread on the centreline.
+   must lie between the Wulff tip of the projection formula and 1.15 times
+   the model's own rate at the wind the fire samples: the run mean, over the
+   arrival window, of the largest rate the fire reports each step (the
+   surface layer slows the sounding's 10 m/s at 6.1 m as the run proceeds).
+   Rothermel (1972) is written out in the check, independent of the code: at
+   the sounding wind, the Andrews wind adjustment factor and the Rothermel
+   wind limit of 0.9 I_R it gives 1.385 m/s, the run's rate at t = 0; the
+   window mean is 0.830 m/s and the head 0.599 m/s, 72 % of it, the
+   degradation of a curved front's head under the default directional
+   coupling (see FireAdvectiveWindCoupling). Until 2026-10 the 300 ft/min
+   fuel-class cap held every wind above 1.52 m/s at 0.2501 m/s, which the
+   check then matched to 15 %; ``erf.fire.wind_limit = fuel_class`` restores
+   that cap.
 2. **Fuel conservation.** The fuel consumed over the burned area of the
    ``wildland`` run equals the initial load over the burned area within 5%;
    cells the front reached in the last minute are still burning.

@@ -150,26 +150,40 @@ void apply_farsite_terrain_wind(
  *
  * Brackets the target height by bisection on the column's terrain-following
  * cell-centre heights, averages the face velocities to cell centres at the two
- * bracketing levels, and interpolates linearly between them. A target below the
- * lowest cell centre or above the highest is clamped to that level rather than
- * extrapolated.
+ * bracketing levels, and interpolates linearly between them. A target above the
+ * highest cell centre takes that level's wind. A target below the lowest cell
+ * centre takes the lowest centre's wind as it is (below_first_log = false, the
+ * deck default erf.fire.wind_below_first_cell = clamp, which with a 20 m first
+ * cell hands the fire the 10 m wind as its 6.1 m wind, 12 % high at z0 = 0.1 m),
+ * or scaled down a neutral log profile of roughness z0_log (= log), U(z) =
+ * U(z_1) ln(z/z0) / ln(z_1/z0), the recommended form for a first cell above the
+ * reference height. z_ground is the ground height the column heights are
+ * measured from; z_target - z_ground is the height above ground.
  */
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 void column_wind_at_height(const Array4<const Real>& xvel,
                            const Array4<const Real>& yvel,
                            const Array4<const Real>& z_cc,
                            int ia, int ja, int nz,
-                           Real z_target,
-                           Real& u_out, Real& v_out) noexcept
+                           Real z_target, Real z_ground,
+                           Real& u_out, Real& v_out,
+                           bool below_first_log = false, Real z0_log = Real(0.1)) noexcept
 {
     // Bracket by bisection; z_cc is monotonically increasing in k.
     int k_lo;
+    // Log-profile factor for a target below the lowest centre, from floored
+    // heights (both arguments valid whether or not the branch is taken, so
+    // nothing speculated under the fpe traps can raise a flag).
+    Real below_scale = Real(1.0);
     if (z_target <= z_cc(ia, ja, 0)) {
-        // Below the lowest cell centre. Clamping to level 0 keeps the fire on
-        // the near-surface wind; the previous linear scan fell through to the
-        // top of the domain here, which is reachable whenever the requested
-        // reference height is below half the first cell thickness.
         k_lo = 0;
+        if (below_first_log) {
+            constexpr Real z_tiny = Real(1.0e-30);
+            const Real z0  = std::abs(z0_log) + z_tiny;
+            const Real z1  = amrex::max(z_cc(ia, ja, 0) - z_ground, z0 * Real(1.000001));
+            const Real zt  = amrex::max(amrex::min(z_target - z_ground, z1), z0);
+            below_scale = std::log(zt / z0) / std::log(z1 / z0);
+        }
     } else if (z_target >= z_cc(ia, ja, nz - 1)) {
         k_lo = nz - 2;
     } else {
@@ -197,8 +211,8 @@ void column_wind_at_height(const Array4<const Real>& xvel,
     const Real u_hi = 0.5 * (xvel(ia, ja, k_hi) + xvel(ia + 1, ja, k_hi));
     const Real v_hi = 0.5 * (yvel(ia, ja, k_hi) + yvel(ia, ja + 1, k_hi));
 
-    u_out = u_lo + alpha * (u_hi - u_lo);
-    v_out = v_lo + alpha * (v_hi - v_lo);
+    u_out = below_scale * (u_lo + alpha * (u_hi - u_lo));
+    v_out = below_scale * (v_lo + alpha * (v_hi - v_lo));
 }
 
 void fill_fire_wind_from_interpolation(
@@ -219,7 +233,8 @@ void fill_fire_wind_from_interpolation(
     const MultiFab* col_open,
     const MultiFab* col_roof,
     Real            z_sample,
-    Real            z0_log)
+    Real            z0_log,
+    bool            below_first_log)
 {
     const int C = fg.C;
     // Fire cell (i_f, j_f) lies in atmospheric cell (i_f / C + lo_x, j_f / C + lo_y)
@@ -276,7 +291,7 @@ void fill_fire_wind_from_interpolation(
             Real z_ref_cell = z_ref;  // default: global fallback
             if (fuel_model_mf != nullptr && d_fcwh != nullptr) {
                 // Per-fuel height lookup
-                const int fuel_code = static_cast<int>(fuel_model(i_f, j_f, 0));
+                const int fuel_code = static_cast<int>(fuel_model(i_f, j_f, 0) + Real(0.5));   // nearest integer, as every reader
                 // Table slot of the code (Anderson at its own code, Scott-Burgan
                 // above 13), unknown codes taking slot 1, clamped to the table.
                 int slot = fuel_slot(fuel_code);
@@ -317,7 +332,8 @@ void fill_fire_wind_from_interpolation(
 
                 Real u_out, v_out;
                 column_wind_at_height(xvel, yvel, z_phys_cc, i_a, j_a, nz,
-                                      z_target, u_out, v_out);
+                                      z_target, z_surf_arr(i_f, j_f, 0), u_out, v_out,
+                                      below_first_log, z0_log);
                 fire_wind(i_f, j_f, 0, 0) = scale * u_out;
                 fire_wind(i_f, j_f, 0, 1) = scale * v_out;
                 return;
@@ -379,7 +395,8 @@ void fill_fire_wind_from_interpolation(
 
                 Real u_c, v_c;
                 column_wind_at_height(xvel, yvel, z_phys_cc, ia, ja, nz,
-                                      z_target_c, u_c, v_c);
+                                      z_target_c, z_col_arr(i_f, j_f, 0, c), u_c, v_c,
+                                      below_first_log, z0_log);
 
                 u_sum += w * u_c;
                 v_sum += w * v_c;

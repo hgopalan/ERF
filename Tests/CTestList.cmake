@@ -620,6 +620,23 @@ if(EXISTS "${ERF_NOAHMP_TABLE}")
   endif()
 endif()
 
+# The fire plotfile table in fire_output.rst lists the fields "in this fixed
+# order"; this checks it against the order ERF_FirePlotfileCatalog.H builds.
+# Plain Python, no ERF run; the self-test proves a swapped or missing row fails.
+if(ERF_TEST_PYTHON)
+  add_test(NAME FirePlotfileDoc_MatchesCatalog
+      COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py
+              --catalog ${PROJECT_SOURCE_DIR}/Source/Fire/ERF_FirePlotfileCatalog.H
+              --doc ${PROJECT_SOURCE_DIR}/Docs/sphinx_doc/theory/fire_output.rst)
+  add_test(NAME FirePlotfileDoc_SelfTest
+      COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py --self-test)
+  set_tests_properties(FirePlotfileDoc_MatchesCatalog FirePlotfileDoc_SelfTest
+      PROPERTIES
+      TIMEOUT 60
+      PROCESSORS 1
+      LABELS "unit;fire")
+endif()
+
 # Restart parity: run one deck straight, then to a checkpoint and on from it, and
 # require the plotfile at the end to be identical (no gold file). Every run has a
 # time limit; the default stays at 600, but an explicit RUN_TIMEOUT is forwarded
@@ -2319,6 +2336,20 @@ add_test_fire(FireRestart_levelset_straight FireRestart           inputs_levelse
 add_test_fire(FireMrfThermalExcess          FireRestart           inputs_coupled_straight    40 NRANKS 1
     RUNTIME_OPTIONS "erf.pbl_type=MRF erf.pbl_mrf_fire_thermal_excess=true")
 add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rothermel_isotropic 40 NRANKS 1)
+# the defaults the 2026-10 validation changed, each next to the deck that keeps
+# the earlier form: the grass model (Cheney, Gould and Catchpole 1998 against
+# the fit it replaced), the BEHAVE net load (surface-area weighted against the
+# summed), the FARSITE spread shape (Richards ellipse against the rectangle)
+# and the wind limit (Rothermel's 0.9 I_R against the 300/500 ft/min rule)
+add_test_fire(FireRosComparison_cheney_gould FireRosComparison    inputs_cheney_gould_isotropic 40 NRANKS 1)
+add_test_fire(FireRosComparison_grass_simple FireRosComparison    inputs_grass_simple_isotropic 40 NRANKS 1)
+add_test_fire(FireRosComparison_behave      FireRosComparison     inputs_behave_isotropic    40 NRANKS 1)
+add_test_fire(FireRosComparison_behave_sum  FireRosComparison     inputs_behave_isotropic    40 NRANKS 1
+    RUNTIME_OPTIONS "erf.fire.behave.net_load=sum")
+add_test_fire(FireFarsiteShape_ellipse      FarsiteFrontUpdate    inputs_front_cell          40 NRANKS 1)
+add_test_fire(FireFarsiteShape_rectangle    FarsiteFrontUpdate    inputs_rectangle           40 NRANKS 1)
+add_test_fire(FireLineFire_wind5_cap        FireLineFire          inputs_wind5_cap           40 NRANKS 1)
+add_test_fire(FireLineFire_wind5_cap_fuel_class FireLineFire      inputs_wind5_cap_fuel_class 40 NRANKS 1)
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireCustomFuel_uniform        FireCustomFuel        inputs_custom_grass        40)
 add_test_fire(FireCustomFuel_map            FireCustomFuel        inputs_custom_map          40)
@@ -2376,6 +2407,29 @@ add_test_fire_abort(FireBadRosModel_abort     FireRestart           inputs_level
     "erf.fire.ros_model = \"rothermal\" is not one of" "erf.fire.ros_model=rothermal")
 add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_levelset_straight
     "erf.fire.coupling_type = \"laged\" is not one of" "erf.fire.coupling_type=laged")
+# selectors and ranges of the keys the 2026-10 validation added
+add_test_fire_abort(FireBadWindLimit_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.wind_limit = \"rothermal\" is not one of" "erf.fire.wind_limit=rothermal")
+add_test_fire_abort(FireBadFarsiteShape_abort FireRestart           inputs_levelset_straight
+    "erf.fire.farsite.shape = \"oval\" is not one of" "erf.fire.farsite.shape=oval")
+add_test_fire_abort(FireBadNetLoad_abort      FireRestart           inputs_levelset_straight
+    "erf.fire.behave.net_load = \"average\" is not one of" "erf.fire.ros_model=behave erf.fire.behave.net_load=average")
+add_test_fire_abort(FireCheneyKeyNoModel_abort FireRestart          inputs_levelset_straight
+    "erf.fire.cheney_gould.pasture needs erf.fire.ros_model = cheney_gould" "erf.fire.cheney_gould.pasture=grazed")
+add_test_fire_abort(FireMacArthurCap_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.macarthur.ros_max must be >= 0" "erf.fire.macarthur.ros_max=-1")
+# the model checks of the keys read only by one model
+add_test_fire_abort(FireMacArthurCapNoModel_abort FireRestart       inputs_levelset_straight
+    "erf.fire.macarthur.ros_max needs erf.fire.ros_model = macarthur" "erf.fire.ros_model=rothermel erf.fire.macarthur.ros_max=3")
+add_test_fire_abort(FireNetLoadNoBehave_abort FireRestart           inputs_levelset_straight
+    "erf.fire.behave.net_load needs erf.fire.ros_model = behave" "erf.fire.ros_model=rothermel erf.fire.behave.net_load=sum")
+add_test_fire_abort(FireBadWindBelow_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.wind_below_first_cell = \"linear\" is not one of" "erf.fire.wind_below_first_cell=linear")
+add_test_fire_abort(FireHybridGrassPair_abort FireRestart           inputs_levelset_straight
+    "cheney_gould and grass_simple share one grass state" "erf.fire.ros_model=hybrid erf.fire.hybrid.primary=cheney_gould erf.fire.hybrid.secondary=grass_simple")
+# a threshold ignition with no disc (erf.fire.ignition_r = 0) is a deferred ignition: the
+# start-up must not abort for "no cells were marked as burned" (it did until 2026-10)
+add_test_fire(FireThresholdNoDisc FireThresholdIgnition inputs_on 5 RUNTIME_OPTIONS "erf.fire.ignition_r=0")
 # start-up checks added by the October 2026 audit: a value the kernels cannot use,
 # or an input given without the switch that reads it, stops the run naming the key
 # (each of these ran on silently before: Balbi returned 15 m/s with no bisection
@@ -2453,6 +2507,43 @@ add_test_fire_abort(FireMergingFronts_missing_file_abort FireMergingFronts input
 # a polyline file with one vertex has no segment and would mark nothing: stop naming it
 add_test_fire_abort(FireMergingFronts_one_vertex_abort FireMergingFronts inputs_one_vertex
     "'one_vertex.csv' has 1 vertices; a polyline needs at least 2" "")
+# erf.fire.wind_sample_z0 must stay below the height of the reference wind:
+# wind_ref_ht, or 6.096 m with use_per_fuel_wind_ht (until 2026-10 the per-fuel
+# case was checked against wind_ref_ht, so z0 = 8 with wind_ref_ht = 10 ran with
+# the ember drift's log profile reversed)
+add_test_fire_abort(FireWindSampleZ0_abort FireLineFire inputs_nowind
+    "erf.fire.wind_sample_z0 must be positive and below the height of the reference wind" "erf.fire.wind_sample_z0=7")
+add_test_fire_abort(FireWindSampleZ0PerFuel_abort FireLineFire inputs_nowind
+    "erf.fire.wind_sample_z0 must be positive and below the height of the reference wind.*with that height 6.096" "erf.fire.wind_ref_ht=10 erf.fire.wind_sample_z0=8 erf.fire.use_per_fuel_wind_ht=true")
+# use_per_fuel_wind_ht samples the wind at 6.096 m without a fuel map too (until
+# 2026-10 a uniform-fuel run sampled at wind_ref_ht while the checks and the
+# ember drift took 6.096 m; this deck aborted, 8 m not being above 10 m)
+add_test_fire_abort(FireWindPerFuelUniform_height FireLineFire inputs_wind2p5
+    "Wind sampled at 8 m above ground, log-law factor to 6.096" "erf.fire.wind_ref_ht=10 erf.fire.wind_sample_ht=8 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+# the same without resampling: the height the extraction records in every
+# fire cell (the old code sampled at 10 m), and the warning that wind_ref_ht is unused
+add_test_fire_abort(FireWindPerFuelUniform_extract FireLineFire inputs_wind2p5
+    "Wind extraction height range: min=6.096 m  max=6.096 m" "erf.fire.wind_ref_ht=10 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+add_test_fire_abort(FireWindRefHtPerFuel_warn FireLineFire inputs_wind2p5
+    "WARNING: erf.fire.wind_ref_ht = 10 m is not used" "erf.fire.wind_ref_ht=10 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+# the start-up summary of the models in use is printed with fire_debug off, and
+# marks a key the inputs set and one they do not
+add_test_fire_abort(FireModelSummary_print FireLineFire inputs_wind2p5
+    "Models \\(erf.fire key = value.*reaction_velocity_formula = albini  \\(default\\).*wind limit form +wind_limit = fuel_class  \\(set\\)" "erf.fire.fire_debug=false erf.fire.use_wind_limit=true erf.fire.wind_limit=fuel_class max_step=0")
+# the domain must be deeper than the wind's sampling height; until 2026-10 the
+# check compared the absolute top, so this 4 m deep domain at z = 156 to 160 m ran
+add_test_fire_abort(FireDomainDepth_abort FireLineFire inputs_nowind
+    "Domain depth 4.0+ m .* should exceed the wind's sampling height 6.1" "geometry.prob_lo=0\ 0\ 156 geometry.prob_hi=400\ 80\ 160 max_step=1")
+# with erf.fire.wind_sample_ht the wind is sampled there: a 15 m deep domain
+# cannot sample at 20 m (the check compared the 6.1 m target until 2026-10)
+add_test_fire_abort(FireDomainDepthSample_abort FireLineFire inputs_wind2p5
+    "Domain depth 15.0+ m .* should exceed the wind's sampling height 20" "geometry.prob_lo=0\ 0\ 145 geometry.prob_hi=400\ 80\ 160 erf.fire.wind_sample_ht=20 max_step=1")
+
+# A firebreak with a t = 0 polyline ignition stays in the non-burnable mask: all
+# 750 break cells. Until 2026-10 the mask read the break back from phi after the
+# polyline's whole-grid distance had been merged over it, and came out empty.
+add_test_fire_abort(FireMergingFronts_firebreak_mask FireMergingFronts inputs_firebreak
+    "Non-burnable mask: 750 cells" "erf.fire.fire_debug=1")
 # Suppression (erf.fire.suppression.*): each scenario on the level-set and the
 # FARSITE path, checked from the last fire plotfile and the suppression log
 add_test_fire_check(FireSuppression_line_early_levelset FireSuppression inputs_line_early 40 check_suppression.py NRANKS 1)
@@ -2631,7 +2722,11 @@ add_test_fire_abort(DustPhreeqcMissing_abort  FireRestart           inputs_dust_
 add_test_fire_abort(DustRoadBinZero_abort      FireRestart           inputs_dust_straight
     "road mass into bin 0, whose diameter" "erf.dust.bin_diameters=50.0e-6\ 2.5e-6\ 7.0e-6")
 add_test_fire_abort(FireDustWindZrefMatch_abort FireRestart          inputs_dust_straight
-    "must match erf.fire.wind_ref_ht" "erf.fire_dust_wind_zref=10.0")
+    "must match 6.1.* m, the height of the wind the fire hands over" "erf.fire_dust_wind_zref=10.0")
+# with use_per_fuel_wind_ht the fire hands over the 6.096 m wind (until 2026-10
+# the dust read it as the wind at wind_ref_ht, so zref = 6.1 ran here)
+add_test_fire_abort(FireDustWindZrefPerFuel_abort FireRestart        inputs_dust_straight
+    "must match 6.096.* m, the height of the wind the fire hands over" "erf.fire.use_per_fuel_wind_ht=true erf.fire_dust_wind_zref=6.1")
 endif()
 endif()
 

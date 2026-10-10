@@ -129,3 +129,73 @@ TEST(FuelMap, LoadFromMapAtNorthEdge)
     }
     EXPECT_EQ(north_cells, NX);
 }
+
+namespace {
+/// model = v0 in cell (0,0), v1 in (1,0), v2 in (2,0).
+void fill_three_codes (MultiFab& model, Real v0, Real v1, Real v2)
+{
+    for (MFIter mfi(model); mfi.isValid(); ++mfi) {
+        auto m = model.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            m(i,j,k) = (i == 0) ? v0 : (i == 1) ? v1 : v2;
+        });
+    }
+    Gpu::streamSynchronize();
+}
+}  // namespace
+
+/**
+ * A fractional value in the code field starts with the load of the nearest
+ * model, the model every other reader of the code (the rate tables, the
+ * per-cell coefficients, the wind heights, the masks) takes. The map readers
+ * store whole numbers, so this keeps the readers consistent rather than
+ * guarding a value a map can hold; the load reader truncated until 2026-10
+ * (found by Copilot's review of hgopalan/ERF#501).
+ */
+TEST(FuelMap, AFractionalCodeStartsWithTheNearestModelsLoad)
+{
+    const Box domain(IntVect(0, 0, 0), IntVect(2, 0, 0));
+    BoxArray ba(domain);
+    const DistributionMapping dm(ba);
+    MultiFab model(ba, dm, 1, 0), load(ba, dm, 1, 0);
+    fill_three_codes(model, 1.6_rt, 2.4_rt, 1.4_rt);
+    load.setVal(-1.0);
+    fill_fuel_load_from_map(load, model, FUEL_SET_ANDERSON13, false, -1.0_rt);
+    const Real w1 = fuel_total_load_kg_m2(get_fuel_params(1, FUEL_SET_ANDERSON13));
+    const Real w2 = fuel_total_load_kg_m2(get_fuel_params(2, FUEL_SET_ANDERSON13));
+    ASSERT_GT(std::abs(w2 - w1), 0.1 * w1) << "the two models must differ for the check to mean anything";
+    for (MFIter mfi(load); mfi.isValid(); ++mfi) {
+        auto const& w = load.const_array(mfi);
+        EXPECT_EQ(w(0, 0, 0), w2) << "1.6 is model 2";
+        EXPECT_EQ(w(1, 0, 0), w2) << "2.4 is model 2";
+        EXPECT_EQ(w(2, 0, 0), w1) << "1.4 is model 1";
+    }
+}
+
+/*
+ * A code is a whole number; the NODATA_value is code 0. Read into an int, a
+ * "1.6" stopped at the decimal point and the map was reported as too short,
+ * and a stray -3 went on as a fuel code.
+ */
+TEST(FuelMap, ACodeIsAWholeNonNegativeNumber)
+{
+    int code = -42;
+    EXPECT_EQ(parse_ascii_fuel_code("7", -9999, code), "");
+    EXPECT_EQ(code, 7);
+    code = -42;
+    EXPECT_EQ(parse_ascii_fuel_code("102.0", -9999, code), "") << "a whole number written as a real";
+    EXPECT_EQ(code, 102);
+    code = -42;
+    EXPECT_EQ(parse_ascii_fuel_code("-9999", -9999, code), "");
+    EXPECT_EQ(code, 0) << "NODATA_value is code 0, non-burnable";
+    code = 0;
+    EXPECT_EQ(parse_ascii_fuel_code("0", -9999, code), "");
+    EXPECT_EQ(code, 0);
+    for (const char* bad : {"1.6", "-3", "abc", "7x", "nan", "1e12"}) {
+        code = -42;
+        EXPECT_NE(parse_ascii_fuel_code(bad, -9999, code), "") << bad << " is not a fuel code";
+        EXPECT_EQ(code, -42) << bad << " leaves the code untouched";
+    }
+    EXPECT_NE(parse_ascii_fuel_code("1.6", -9999, code).find("whole number"), std::string::npos);
+    EXPECT_NE(parse_ascii_fuel_code("-3", -9999, code).find("NODATA_value -9999"), std::string::npos);
+}

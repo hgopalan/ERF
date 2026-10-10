@@ -8,6 +8,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <cmath>
+#include <limits>
 
 /// Round-off tolerance of the build precision: 1e-12 in double, 1e-5 in single.
 static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
@@ -389,4 +390,350 @@ TEST(LevelSetAdvection, ReinitialisationRestoresUnitGradient)
         EXPECT_EQ(sign_changes(phi, phi0), 0) << "stretch " << c.stretch;
         EXPECT_EQ(nonfinite_cells(phi), 0) << "stretch " << c.stretch;
     }
+}
+
+/**
+ * At the production setting (erf.fire.levelset.reinit_dtau auto = 0.01 dx,
+ * reinit_iters = 1, WRF-Fire's own) one call moves phi by at most 0.01 dx S (1
+ * - |grad phi|), and the correction of the gradient spreads from the front at
+ * unit pseudo-speed, 0.01 dx per call: a cell a few cells from the front
+ * keeps its stretched gradient. It is a nudge, which the doc now says, not a
+ * restoration of the signed distance; the test above restores it with dtau =
+ * 0.25 dx over 40 outer steps.
+ */
+TEST(LevelSetAdvection, ReinitialisationAtTheProductionStepIsANudge)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi0(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 0);
+    R.setVal(1.0);
+    ref.setVal(-1.0);
+    const Real R0 = 50.0, stretch = 1.5;
+    const LevelSetGradient g = scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * DX);
+    auto band = [&f, R0] (int i, int j) { const Real d = f.radius(i, j) - R0; return d > DX && d < 3.0 * DX; };
+
+    f.disc(phi, R0, stretch);
+    f.disc(phi0, R0, stretch);
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
+    const Real before = max_abs_diff(rhs, ref, band);   // about stretch - 1
+    EXPECT_NEAR(before, stretch - 1.0, 0.05);
+
+    reinitialize_phi(phi, f.geom, 1, 0.01 * DX, 4.0 * DX);
+    fire_fill_boundary(phi, f.geom);
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
+    const Real after = max_abs_diff(rhs, ref, band);
+    EXPECT_NEAR(after, before, 0.02 * before) << "the band's gradient error is unchanged to a few percent";
+    MultiFab moved(f.ba, f.dm, 1, 0);
+    MultiFab::Copy(moved, phi, 0, 0, 1, 0);
+    MultiFab::Subtract(moved, phi0, 0, 0, 1, 0);
+    EXPECT_LE(moved.norm0(), 0.01 * DX * (stretch - 1.0) * 1.0001) << "|dphi| <= dtau (|grad phi| - 1)";
+    EXPECT_EQ(burned_cells(phi), burned_cells(phi0));
+}
+
+#include <ERF_FireIgnition.H>
+
+/**
+ * erf.fire.ignition_r = 0 means "no disc": a scheduled, polygon or threshold
+ * ignition starts the fire. On the level-set path the initialiser wrote the
+ * distance to the ignition point, a disc of zero radius that the advection
+ * grew from the first step (the idealized Marshall decks burned 2 cells at
+ * 150 s of a 1200 s spin-up); it must leave every cell unburned, at least
+ * the domain diagonal from the front.
+ */
+TEST(LevelSetAdvection, ANoDiscIgnitionLeavesTheLevelSetUnburned)
+{
+    Box domain(IntVect(0, 0, 0), IntVect(19, 19, 0));
+    BoxArray ba(domain);
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 200.0, 200.0, 1.0), CoordSys::cartesian, {0, 0, 0});
+    MultiFab phi(ba, dm, 1, 1);
+    initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 0.0_rt, /*normalized=*/ false);
+    const Real diag = std::sqrt(Real(200.0) * Real(200.0) + Real(200.0) * Real(200.0));
+    // within the precision-aware TOL: the float sqrt sits 7e-8 below the double one
+    EXPECT_GE(phi.min(0), diag * (Real(1.0) - TOL)) << "no disc: every cell at least the domain diagonal from a front (the distance to the point until 2026-10)";
+    EXPECT_NEAR(phi.max(0), diag, diag * TOL) << "and the field is uniform";
+    // the advection and the reinitialisation keep it there: 20 substeps of the
+    // production scheme at R = 1 m/s with a reinitialisation every fifth,
+    // nothing burns and the field is the diagonal to the bit (the reinit's
+    // +dtau rise is removed by its min clamp)
+    {
+        MultiFab vel(ba, dm, 2, 0), R(ba, dm, 1, 0);
+        vel.setVal(0.0_rt); R.setVal(1.0_rt);
+        fire_fill_boundary(phi, geom);
+        const Real dx10 = 10.0_rt;
+        for (int step = 0; step < 20; ++step) {
+            advect_levelset_weno5z_rk3(phi, vel, R, geom, 0.4_rt * dx10, 0.4_rt, nullptr, nullptr, false,
+                                       scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * dx10));
+            fire_fill_boundary(phi, geom);
+            if ((step + 1) % 5 == 0) {
+                reinitialize_phi(phi, geom, 1, 0.01 * dx10, 4.0 * dx10);
+                fire_fill_boundary(phi, geom);
+            }
+        }
+        EXPECT_EQ(nonfinite_cells(phi), 0);
+        EXPECT_NEAR(phi.min(0), diag, diag * TOL) << "no cell moved off the diagonal (a zero-radius disc burned by now)";
+        EXPECT_NEAR(phi.max(0), diag, diag * TOL);
+    }
+    initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 0.0_rt, /*normalized=*/ true);
+    EXPECT_NEAR(phi.min(0), 1.0, 1.0e-12) << "the FARSITE indicator stays +1";
+    EXPECT_NEAR(phi.max(0), 1.0, 1.0e-12);
+    initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 30.0_rt, /*normalized=*/ false);
+    EXPECT_LT(phi.min(0), 0.0) << "a disc still burns";
+}
+
+#include <ERF_PolygonIgnition.H>
+
+/**
+ * On a fire grid wider than 100 km the no-disc start must still be the full
+ * domain diagonal. A cap there (100 km in the first form of the fix above)
+ * left every cell beyond it at the same value once a polygon's distance field
+ * was min-merged over it: a flat plateau, which the upwind scheme still
+ * crosses, but late. Copilot's review of hgopalan/ERF#501 found it.
+ */
+TEST(LevelSetAdvection, ANoDiscStartIsTheFullDiagonalOnAWideGrid)
+{
+    // 600 km on 20 cells of 30 km: the diagonal is 848.5 km
+    Box domain(IntVect(0, 0, 0), IntVect(19, 19, 0));
+    BoxArray ba(domain);
+    DistributionMapping dm(ba);
+    const Real L = 6.0e5;
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, L, L, 1.0), CoordSys::cartesian, {0, 0, 0});
+    MultiFab phi(ba, dm, 1, 1);
+    initialize_ignition(phi, geom, 0.5_rt * L, 0.5_rt * L, 0.0_rt, /*normalized=*/ false);
+    const Real diag = std::sqrt(Real(2.0)) * L;
+    EXPECT_NEAR(phi.min(0), diag, diag * TOL) << "no cap: every cell starts the full diagonal from a front (1e5 m with the cap)";
+    EXPECT_NEAR(phi.max(0), diag, diag * TOL);
+    // a t = 0 polygon (a 200 m square at the south-west corner) min-merged
+    // over it by the production stamp: every cell holds its own distance to
+    // the square, the farthest the distance from (200, 200) m to the
+    // opposite corner cell, not a value shared with its neighbours
+    init_phi_from_polygon(phi, geom, {0.0_rt, 200.0_rt, 200.0_rt, 0.0_rt}, {0.0_rt, 0.0_rt, 200.0_rt, 200.0_rt});
+    const Real c = L - Real(0.5) * geom.CellSize(0) - Real(200.0);
+    const Real far_corner = std::sqrt(Real(2.0)) * c;
+    EXPECT_NEAR(phi.max(0), far_corner, far_corner * TOL) << "the merged field is the distance to the polygon in every cell (1e5 m beyond 100 km with the cap)";
+}
+
+#include <ERF_FireBreak.H>
+
+namespace {
+/// Valid cells with a >= thr, over ranks (a free function: nvcc rejects
+/// device lambdas inside gtest's private TestBody).
+int count_at_least (const MultiFab& mf, Real thr)
+{
+    ReduceOps<ReduceOpSum> op; ReduceData<int> data(op);
+    for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        auto a = mf.const_array(mfi);
+        op.eval(mfi.validbox(), data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> GpuTuple<int> {
+            return { a(i,j,k) >= thr ? 1 : 0 };
+        });
+    }
+    int n = amrex::get<0>(data.value());
+    ParallelDescriptor::ReduceIntSum(n);
+    return n;
+}
+}  // namespace
+
+/**
+ * The non-burnable mask marks the firebreak cells from the barrier shapes
+ * (mark_firebreak_cells), the cells apply_firebreaks() stamps the sentinel
+ * into. Until 2026-10 it read them back as phi >= half the sentinel, which
+ * an unburned level set whose domain diagonal exceeds 500 km also passes:
+ * every cell of this 600 km grid would have been non-burnable.
+ */
+TEST(FireBreak, TheMaskMarksTheBarrierCellsWhateverTheLevelSet)
+{
+    Box domain(IntVect(0, 0, 0), IntVect(19, 19, 0));
+    BoxArray ba(domain);
+    ba.maxSize(8);   // several boxes: the test spans box edges
+    DistributionMapping dm(ba);
+    const Real L = 6.0e5;
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, L, L, 1.0), CoordSys::cartesian, {0, 0, 0});
+    // a 150 km square from 150 to 300 km: the centres of cells 5 to 9 (x = 165 ... 285 km)
+    FireBreak brk; brk.type = "rect"; brk.x_lo = 1.5e5; brk.x_hi = 3.0e5; brk.y_lo = 1.5e5; brk.y_hi = 3.0e5;
+    const std::vector<FireBreak> breaks{brk};
+
+    MultiFab phi(ba, dm, 1, 1), mask(ba, dm, 1, 0);
+    initialize_ignition(phi, geom, 0.5_rt * L, 0.5_rt * L, 0.0_rt, /*normalized=*/ false);
+    apply_firebreaks(phi, breaks, geom);
+    mask.setVal(0.0_rt);
+    mark_firebreak_cells(mask, breaks, geom, 1.0_rt);
+
+    EXPECT_EQ(count_at_least(mask, 0.5_rt), 25) << "the mask is the 5 x 5 barrier cells";
+    EXPECT_EQ(count_at_least(phi, FIREBREAK_PHI_SENTINEL), 25) << "the same cells carry the sentinel";
+    // the deck CTest FireMergingFronts_firebreak_mask runs the mask through
+    // FireLayer::build_nonburnable_mask; this pins the shared cell test
+    EXPECT_EQ(count_at_least(phi, 0.5_rt * FIREBREAK_PHI_SENTINEL), 400) << "the former rule (phi >= half the sentinel) marks the whole grid here";
+}
+
+namespace {
+/// The production level-set scheme of FireLayer (weno5z_front, a 4-cell
+/// WENO band, eps 0.1 m within 2 cells of the front blended to 0.4 m over 2
+/// more) on a cell size h.
+LevelSetGradient production_scheme (Real h)
+{
+    LevelSetGradient g;
+    g.scheme = LEVELSET_GRAD_WENO5Z_FRONT;
+    g.band = 4.0_rt * h;
+    g.eps_visc_front = 0.1_rt;
+    g.visc_d0 = 2.0_rt * h;
+    g.visc_d1 = 4.0_rt * h;
+    return g;
+}
+
+/// phi = the distance to (px, py) on every valid cell (the level-set start
+/// before 2026-10 with ignition_r = 0, and the shape of any background far
+/// from a front).
+void fill_distance (MultiFab& phi, const Geometry& geom, Real px, Real py)
+{
+    const auto lo = geom.ProbLoArray();
+    const auto dx = geom.CellSizeArray();
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real x = lo[0] + (i + 0.5_rt) * dx[0] - px, y = lo[1] + (j + 0.5_rt) * dx[1] - py;
+            p(i,j,k) = std::sqrt(x * x + y * y);
+        });
+    }
+    Gpu::streamSynchronize();
+}
+
+/// T = T_hot in the one cell (ih, jh), T_cold elsewhere.
+void fill_hot_cell (MultiFab& T, int ih, int jh, Real T_hot, Real T_cold)
+{
+    for (MFIter mfi(T); mfi.isValid(); ++mfi) {
+        auto t = T.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            t(i,j,k) = (i == ih && j == jh) ? T_hot : T_cold;
+        });
+    }
+    Gpu::streamSynchronize();
+}
+
+/// phi at cell (i, j), over ranks.
+Real value_at (const MultiFab& phi, int i, int j)
+{
+    Real v = std::numeric_limits<Real>::lowest();
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().contains(IntVect(i, j, 0))) {
+            const auto h = phi.const_array(mfi);
+#ifdef AMREX_USE_GPU
+            Gpu::DeviceScalar<Real> d(0.0_rt);
+            Real* dp = d.dataPtr();
+            ParallelFor(1, [=] AMREX_GPU_DEVICE (int) noexcept { *dp = h(i, j, 0); });
+            v = d.dataValue();
+#else
+            v = h(i, j, 0);
+#endif
+        }
+    }
+    ParallelDescriptor::ReduceRealMax(v);
+    return v;
+}
+
+/// One threshold ignition of the hot cell at the default radius (one cell,
+/// threshold_radius = 0), then nsub substeps of the production scheme at
+/// R = 0.1 m/s and CFL 0.4; returns the hot cell's phi after them.
+Real hot_cell_after_substeps (MultiFab& phi, const Geometry& geom, int ih, int jh, int nsub)
+{
+    const Real h = geom.CellSize(0);
+    MultiFab T(phi.boxArray(), phi.DistributionMap(), 1, 0);
+    fill_hot_cell(T, ih, jh, 400.0_rt, 300.0_rt);
+    const amrex::Long n = apply_threshold_ignition(phi, T, nullptr, geom, 350.0_rt, h, /*normalized=*/ false);
+    EXPECT_EQ(n, 1) << "the hot cell ignites";
+    fire_fill_boundary(phi, geom);
+    EXPECT_LT(value_at(phi, ih, jh), 0.0_rt) << "stamped burning";
+    MultiFab vel(phi.boxArray(), phi.DistributionMap(), 2, 0), R(phi.boxArray(), phi.DistributionMap(), 1, 0);
+    vel.setVal(0.0_rt); R.setVal(0.1_rt);
+    for (int s = 0; s < nsub; ++s) {
+        advect_levelset_weno5z_rk3(phi, vel, R, geom, 0.4_rt * h / 0.1_rt, 0.4_rt, nullptr, nullptr, false,
+                                   production_scheme(h));
+        fire_fill_boundary(phi, geom);
+    }
+    EXPECT_EQ(nonfinite_cells(phi), 0);
+    return value_at(phi, ih, jh);
+}
+}  // namespace
+
+/**
+ * A threshold ignition at the default radius stamps the hot cell alone. Its
+ * neighbours keep whatever phi they had: the no-disc start (the domain
+ * diagonal), or on any grid the distance to a front or ignition point far
+ * away. The artificial viscosity of the next substep then reads that jump
+ * as a Laplacian and lifts the cell above zero, and the new fire goes out:
+ * on 30 m cells over a 14 km background the hot cell went from -30 m to
+ * +31.6 m in one substep. On fine cells the viscosity carries the lift in
+ * from further out over a few substeps, so the stamp's distance band must
+ * be wide in metres, not only in cells (a three-cell band let a 1 m-cell
+ * ignition go out within a few substeps).
+ */
+TEST(LevelSetAdvection, AThresholdIgnitionSurvivesTheNextSubstep)
+{
+    // 64 cells of 30 m: 1.92 km
+    Box domain(IntVect(0, 0, 0), IntVect(63, 63, 0));
+    BoxArray ba(domain);
+    ba.maxSize(32);
+    DistributionMapping dm(ba);
+    const Real L = 1920.0;
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, L, L, 1.0), CoordSys::cartesian, {0, 0, 0});
+    MultiFab phi(ba, dm, 1, 3);
+
+    // (a) the no-disc start of a wide grid (14 km, a 10 km square)
+    phi.setVal(1.4e4_rt);
+    EXPECT_LT(hot_cell_after_substeps(phi, geom, 32, 32, 1), 0.0_rt)
+        << "the hot cell still burns after one substep on the no-disc start";
+    // and keeps burning while the jump three cells out collapses (20 substeps
+    // move a front 8 cells at CFL 0.4)
+    phi.setVal(1.4e4_rt);
+    EXPECT_LT(hot_cell_after_substeps(phi, geom, 32, 32, 20), 0.0_rt)
+        << "the hot cell still burns 20 substeps later";
+
+    // (b) the distance to a point 8 km away (outside the grid): the start
+    // before 2026-10, and the shape of the field near a fire far from the hot
+    // cell. The one-cell stamp went out here too, which predates the no-disc
+    // start.
+    fill_distance(phi, geom, 32.5_rt * 30.0_rt - 8000.0_rt, 32.5_rt * 30.0_rt);
+    fire_fill_boundary(phi, geom);
+    EXPECT_LT(hot_cell_after_substeps(phi, geom, 32, 32, 1), 0.0_rt)
+        << "and on a distance field 8 km from its source";
+
+    // (c) 1 m cells under the same 14 km background, 20 substeps: the band
+    // must be wide in metres (three cells, 3 m, let it go out)
+    Geometry geom1(domain, RealBox(0.0, 0.0, 0.0, 64.0, 64.0, 1.0), CoordSys::cartesian, {0, 0, 0});
+    phi.setVal(1.4e4_rt);
+    EXPECT_LT(hot_cell_after_substeps(phi, geom1, 32, 32, 20), 0.0_rt)
+        << "on 1 m cells the hot cell still burns 20 substeps later";
+}
+
+namespace {
+/// mask = 1 in the one cell (im, jm), 0 elsewhere.
+void fill_one_cell (MultiFab& mask, int im, int jm)
+{
+    for (MFIter mfi(mask); mfi.isValid(); ++mfi) {
+        auto m = mask.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            m(i,j,k) = (i == im && j == jm) ? 1.0_rt : 0.0_rt;
+        });
+    }
+    Gpu::streamSynchronize();
+}
+}  // namespace
+
+/**
+ * A cell of the non-burnable mask next to a hot cell takes no stamp: neither
+ * the disc nor the distance band beyond it is written there.
+ */
+TEST(LevelSetAdvection, AThresholdStampSkipsNonBurnableCells)
+{
+    Box domain(IntVect(0, 0, 0), IntVect(31, 31, 0));
+    BoxArray ba(domain);
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 320.0, 320.0, 1.0), CoordSys::cartesian, {0, 0, 0});
+    MultiFab phi(ba, dm, 1, 3), T(ba, dm, 1, 0), mask(ba, dm, 1, 0);
+    phi.setVal(1.0e3_rt);
+    fill_hot_cell(T, 16, 16, 400.0_rt, 300.0_rt);
+    fill_one_cell(mask, 17, 16);   // the hot cell's east neighbour, inside the band
+    const amrex::Long n = apply_threshold_ignition(phi, T, &mask, geom, 350.0_rt, 10.0_rt, /*normalized=*/ false);
+    EXPECT_EQ(n, 1);
+    EXPECT_LT(value_at(phi, 16, 16), 0.0_rt) << "the hot cell burns";
+    EXPECT_NEAR(value_at(phi, 15, 16), 0.0_rt, 1.0e-6) << "its west neighbour takes the band distance (10 m - 10 m)";
+    EXPECT_NEAR(value_at(phi, 17, 16), 1.0e3_rt, 1.0e-6) << "the masked east neighbour is untouched";
 }

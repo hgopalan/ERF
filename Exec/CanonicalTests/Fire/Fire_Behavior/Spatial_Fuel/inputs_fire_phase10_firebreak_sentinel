@@ -1,0 +1,10 @@
+FILE = inputs_fire_phase10_firebreak
+
+# The firebreak deck with erf.fire.firebreak.use_mask = false: the firebreak is
+# only stamped into phi as the sentinel, which the FARSITE front-cell update
+# rebuilds away on its first subcycle, so the fire crosses it. This was the
+# default until 2026-10; the start-up prints a warning for it. Kept so the
+# earlier behaviour can be reproduced against inputs_fire_phase10_firebreak.
+erf.fire.firebreak.use_mask = false
+erf.fire.fire_stats_csv_file = "fire_stats_phase10_firebreak_sentinel.csv"
+erf.fire_plot_file = plt_fire_sentinel_

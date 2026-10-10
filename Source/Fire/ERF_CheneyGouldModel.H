@@ -8,287 +8,217 @@
 
 /**
  * @file ERF_CheneyGouldModel.H
- * @brief Cheney-Gould (1998) empirical grassland fire spread model
+ * @brief Cheney, Gould and Catchpole (1998) grassland fire spread model, and
+ *        the simple grass fit this code carried under that name until October 2026
  *
- * Implements the Cheney-Gould (1998) fire spread model calibrated for open
- * grassland fuels, particularly Australian grasslands. Provides better
- * agreement with observed grassland fires than Rothermel for FM1–FM3.
+ * ros_model = "cheney_gould" is the CSIRO grassland fire spread model of
+ * Cheney, Gould and Catchpole (1998), the model behind the CSIRO Grassland
+ * Fire Spread Meter and the Australian Fire Danger Rating System's grassland
+ * module. The head rate of spread in km/h is
  *
- * Not appropriate for forest or shrub fuels (FM4–FM13).
+ *   R = (a_1 + a_2 U10) phi_M phi_C                      U10 < 5 km/h
+ *   R = (b_1 + b_2 (U10 - 5)^0.844) phi_M phi_C           U10 >= 5 km/h
  *
- * Key relationships:
- *   Forward ROS depends on:
- *     - Fuel moisture content (dead fine fuel)
- *     - Wind speed
- *     - Curing degree (fraction of dry grass; 0=fresh, 1=fully cured)
- *     - Slope
- *   Backing and flank ROS computed using CSIRO grassfire relations.
+ * with U10 the 10 m open wind in km/h, the coefficients of the pasture type
+ * (natural: 0.054, 0.269, 1.4, 0.838; grazed: 0.054, 0.209, 1.1, 0.715), the
+ * dead fine fuel moisture function
+ *
+ *   phi_M = exp(-0.108 M)                                M < 12 %
+ *   phi_M = 0.684 - 0.0342 M   (U10 < 10 km/h)           12 <= M < 20 %
+ *   phi_M = 0.547 - 0.0228 M   (U10 >= 10 km/h)          12 <= M < 24 %
+ *
+ * (zero beyond), and the curing coefficient of the degree of curing C [%],
+ * by default the Cruz et al. (2015) curve
+ *
+ *   phi_C = 1.036 / (1 + 103.989 exp(-0.0996 (C - 20)))
+ *
+ * (erf.fire.cheney_gould.curing_curve = "cruz2015"), or the 1998 curve
+ * phi_C = 1.12 / (1 + 59.2 exp(-0.124 (C - 50))) ("cheney1998"). The wind is
+ * the reference-height wind (erf.fire.cheney_gould.wind_source = "reference",
+ * so set erf.fire.wind_ref_ht = 10 without erf.fire.use_per_fuel_wind_ht)
+ * or the midflame wind after the Wind
+ * Adjustment Factor ("midflame"). Not appropriate for forest or shrub fuels.
+ *
+ * ros_model = "grass_simple" is the fit that this code presented as
+ * "Cheney-Gould (1998)" before October 2026 and that no publication describes:
+ *
+ *   R = R_b (1 + 0.15 U (c + 0.2)) 20 / (M + 1),   R_b = max(0.08 c e^{-0.01 M}, 0.001) m/s
+ *
+ * with U the midflame wind in m/s, M in % and c the curing fraction. It is
+ * about 26x the 1998 model's rate in calm, cured grass at 10 % moisture and
+ * under a third of it at 20 km/h; it is kept so earlier results can be reproduced.
  *
  * References:
  *   Cheney, N.P., Gould, J.S. & Catchpole, W.R. (1998). Prediction of fire
- *     spread in grasslands. Int. J. Wildland Fire, 8(1), 1–13.
- *   Catchpole, W.R., Bradstock, R.A., Choate, J.S., Foley, D., Prasad, M.,
- *     Furnell-Smith, G. & Anderson, W. (1998). Cooperative development of
- *     fire spread prediction systems for Australian vegetation. Int. J.
- *     Wildland Fire, 8(1), 14–24.
+ *     spread in grasslands. Int. J. Wildland Fire, 8(1), 1-13.
+ *   Cruz, M.G., Gould, J.S., Kidnie, S., Bessell, R., Nichols, D. &
+ *     Slijepcevic, A. (2015). Effects of curing on grassfires: II. Effect of
+ *     grass senescence on the rate of fire spread. Int. J. Wildland Fire, 24,
+ *     838-848.
  */
+
+/// Selectors of the grass model state, from erf.fire.ros_model and erf.fire.cheney_gould.*
+namespace cheney_gould {
+    constexpr int model_cg98         = 0;   ///< ros_model = "cheney_gould": Cheney, Gould and Catchpole (1998)
+    constexpr int model_grass_simple = 1;   ///< ros_model = "grass_simple": the pre-2026-10 fit
+    constexpr int pasture_natural    = 0;   ///< erf.fire.cheney_gould.pasture = "natural"
+    constexpr int pasture_grazed     = 1;   ///< erf.fire.cheney_gould.pasture = "grazed"
+    constexpr int curing_cruz2015    = 0;   ///< erf.fire.cheney_gould.curing_curve = "cruz2015"
+    constexpr int curing_cheney1998  = 1;   ///< erf.fire.cheney_gould.curing_curve = "cheney1998"
+}
 
 /**
  * @struct CheneyGouldComputed
- * @brief Precomputed Cheney-Gould coefficients (depends on moisture and curing)
+ * @brief Precomputed grass-model state (depends on moisture and curing), trivially
+ *        copyable so the directional kernels can capture it
  */
 struct CheneyGouldComputed
 {
-    amrex::Real ros_backing;  ///< Backing (into-wind) ROS [m/s]
-    amrex::Real ros_flank;    ///< Flank ROS [m/s] (computed, read by nothing yet)
-    amrex::Real gamma;        ///< Spread adjustment factor for slope effects (1, read by nothing yet)
-    amrex::Real moisture;     ///< Dead fine fuel moisture [%] the coefficients were built with
-    amrex::Real curing;       ///< Degree of curing [0-1] the coefficients were built with
+    int         model     = cheney_gould::model_cg98;       ///< cheney_gould::model_*
+    int         pasture   = cheney_gould::pasture_natural;  ///< cheney_gould::pasture_*
+    amrex::Real moisture  = 10.0;   ///< Dead fine fuel moisture [%] the state was built with
+    amrex::Real curing    = 1.0;    ///< Degree of curing [0-1] the state was built with
+    amrex::Real phi_C     = 1.0;    ///< Curing coefficient of the 1998 model
+    amrex::Real ros_backing = 0.0;  ///< Backing rate [m/s] of the grass_simple fit
 };
 
+/// Curing coefficient phi_C of the degree of curing C [%], by curve (cheney_gould::curing_*)
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real cheney_gould_phi_C(amrex::Real C_pct, int curve) noexcept
+{
+    const amrex::Real C = amrex::max(amrex::Real(0.0), amrex::min(C_pct, amrex::Real(100.0)));
+    if (curve == cheney_gould::curing_cheney1998) {
+        return amrex::Real(1.12) / (amrex::Real(1.0) + amrex::Real(59.2) * std::exp(amrex::Real(-0.124) * (C - amrex::Real(50.0))));
+    }
+    return amrex::Real(1.036) / (amrex::Real(1.0) + amrex::Real(103.989) * std::exp(amrex::Real(-0.0996) * (C - amrex::Real(20.0))));
+}
+
+/// Moisture coefficient phi_M of the dead fine fuel moisture M [%] and the 10 m wind [km/h]
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real cheney_gould_phi_M(amrex::Real M_pct, amrex::Real U10_kmh) noexcept
+{
+    const amrex::Real M = amrex::max(M_pct, amrex::Real(0.0));
+    if (M < amrex::Real(12.0)) { return std::exp(amrex::Real(-0.108) * M); }
+    const amrex::Real phi = (U10_kmh < amrex::Real(10.0))
+                          ? amrex::Real(0.684) - amrex::Real(0.0342) * M
+                          : amrex::Real(0.547) - amrex::Real(0.0228) * M;
+    return amrex::max(phi, amrex::Real(0.0));
+}
+
 /**
- * @brief Compute Cheney-Gould parameters for given fuel state
+ * @brief Cheney, Gould and Catchpole (1998) head rate of spread [m/s]
  *
- * @param[in] cgp  CheneyGouldParams with moisture [%] and curing [0-1]
- * @return CheneyGouldComputed with precomputed coefficients
+ * @param[in] U10_mps   10 m open wind in the spread direction [m/s] (>= 0)
+ * @param[in] M_pct     Dead fine fuel moisture [%]
+ * @param[in] phi_C     Curing coefficient (cheney_gould_phi_C)
+ * @param[in] pasture   cheney_gould::pasture_natural or ::pasture_grazed
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real cheney_gould_1998_ros(amrex::Real U10_mps, amrex::Real M_pct,
+                                  amrex::Real phi_C, int pasture) noexcept
+{
+    const amrex::Real U = amrex::Real(3.6) * amrex::max(U10_mps, amrex::Real(0.0));   // km/h
+    const bool grazed = (pasture == cheney_gould::pasture_grazed);
+    const amrex::Real a1 = amrex::Real(0.054);
+    const amrex::Real a2 = grazed ? amrex::Real(0.209) : amrex::Real(0.269);
+    const amrex::Real b1 = grazed ? amrex::Real(1.1)   : amrex::Real(1.4);
+    const amrex::Real b2 = grazed ? amrex::Real(0.715) : amrex::Real(0.838);
+    // the high-wind branch's pow is evaluated from a floored argument so that
+    // nothing speculated under the fpe traps raises a flag below 5 km/h
+    const amrex::Real excess = amrex::max(U - amrex::Real(5.0), amrex::Real(0.0));
+    const amrex::Real R_lo = a1 + a2 * U;
+    const amrex::Real R_hi = b1 + b2 * std::pow(excess, amrex::Real(0.844));
+    const amrex::Real R_kmh = ((U < amrex::Real(5.0)) ? R_lo : R_hi) * cheney_gould_phi_M(M_pct, U) * phi_C;
+    return amrex::max(R_kmh / amrex::Real(3.6), amrex::Real(0.0));
+}
+
+/// The pre-2026-10 grass fit, ros_model = "grass_simple" (see the file comment)
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real grass_simple_ros(amrex::Real u_wind, amrex::Real ros_backing,
+                             amrex::Real moisture, amrex::Real curing) noexcept
+{
+    const amrex::Real wind_factor = amrex::Real(0.15) * u_wind * (curing + amrex::Real(0.2));
+    constexpr amrex::Real moisture_scale = 20.0;   // reference moisture [%]
+    const amrex::Real moisture_factor = moisture_scale / (moisture + amrex::Real(1.0));
+    const amrex::Real ros_forward = ros_backing * (amrex::Real(1.0) + wind_factor) * moisture_factor;
+    return amrex::max(ros_forward, amrex::Real(0.0));
+}
+
+/**
+ * @brief Head rate of spread [m/s] of the selected grass model
  *
- * Computes the backing ROS from the fuel moisture and curing degree, and
- * carries both inputs so that every ROS path (isotropic fill_cheney_gould_ros
- * and the directional kernel) evaluates cheney_gould_ros with the same
- * moisture and curing, including the dynamic-moisture update that rebuilds
- * this struct each step. The inputs are range-checked in FireParams
- * (moisture 1-40 %, curing 0-1); the clamps below only guard a struct built
- * by hand.
+ * @param[in] u_wind  Wind in the spread direction [m/s]: the 10 m (reference) or
+ *                    midflame wind for the 1998 model as erf.fire.cheney_gould.wind_source
+ *                    selects, the midflame wind for grass_simple
+ * @param[in] cg      Precomputed state (compute_cheney_gould_params)
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real cheney_gould_ros(amrex::Real u_wind, const CheneyGouldComputed& cg) noexcept
+{
+    if (cg.model == cheney_gould::model_grass_simple) {
+        return grass_simple_ros(amrex::max(u_wind, amrex::Real(0.0)), cg.ros_backing, cg.moisture, cg.curing);
+    }
+    return cheney_gould_1998_ros(u_wind, cg.moisture, cg.phi_C, cg.pasture);
+}
+
+/**
+ * @brief Build the grass-model state for the deck's moisture and curing
+ *
+ * Carries both inputs so that every path (the isotropic fill and the
+ * directional kernel) evaluates cheney_gould_ros with the same moisture and
+ * curing, including the dynamic-moisture update that rebuilds this struct each
+ * step. The inputs are range-checked in FireParams (moisture 1-40 %, curing
+ * 0-1); the clamps below only guard a struct built by hand.
+ *
+ * @param[in] cgp          moisture [%] and curing [0-1]
+ * @param[in] model        cheney_gould::model_cg98 or ::model_grass_simple
+ * @param[in] pasture      cheney_gould::pasture_*
+ * @param[in] curing_curve cheney_gould::curing_*
  */
 inline CheneyGouldComputed compute_cheney_gould_params(
-    const FireParams::CheneyGouldParams& cgp) noexcept
+    const FireParams::CheneyGouldParams& cgp,
+    int model = cheney_gould::model_cg98,
+    int pasture = cheney_gould::pasture_natural,
+    int curing_curve = cheney_gould::curing_cruz2015) noexcept
 {
-    CheneyGouldComputed cgc;
-
-    // Clamp inputs to valid ranges
-    amrex::Real moisture = amrex::max(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.moisture), static_cast<amrex::Real>(40.0))));  // [%]
-    amrex::Real curing   = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.curing), static_cast<amrex::Real>(1.0))));      // [0-1]
-    cgc.moisture = moisture;
-    cgc.curing   = curing;
-
-    // CSIRO grassfire relations for backing ROS
-    // Simplified empirical fit: ros_backing increases with curing, decreases with moisture
-    // Base backing rate at full curing: ~0.08 m/s
-    amrex::Real base_backing = 0.08 * curing;
-    cgc.ros_backing = base_backing * std::exp(-0.01 * moisture);  // Exponential moisture decay
-    cgc.ros_backing = amrex::max(static_cast<amrex::Real>(cgc.ros_backing), static_cast<amrex::Real>(0.001));  // Minimum backing
-
-    // Flank ROS (perpendicular to fire spread)
-    // Typically 0.3 of forward ROS; CSIRO gives empirical relations
-    // Simplified: flank ≈ 0.5 × backing
-    cgc.ros_flank = 0.5 * cgc.ros_backing;
-
-    // Gamma factor for slope enhancement (CSIRO formula)
-    // gamma ≈ 1 + a × tan(slope) for gentle slopes
-    // Used downstream in fill_cheney_gould_ros()
-    cgc.gamma = 1.0;
-
-    return cgc;
+    CheneyGouldComputed cg;
+    cg.model    = model;
+    cg.pasture  = pasture;
+    cg.moisture = amrex::max(amrex::Real(1.0), amrex::min(cgp.moisture, amrex::Real(40.0)));   // [%]
+    cg.curing   = amrex::max(amrex::Real(0.0), amrex::min(cgp.curing,   amrex::Real(1.0)));    // [0-1]
+    cg.phi_C    = cheney_gould_phi_C(amrex::Real(100.0) * cg.curing, curing_curve);
+    // grass_simple: backing rate 0.08 c e^{-0.01 M}, floored at 1 mm/s
+    cg.ros_backing = amrex::max(amrex::Real(0.08) * cg.curing * std::exp(amrex::Real(-0.01) * cg.moisture),
+                                amrex::Real(0.001));
+    return cg;
 }
 
 /**
- * @brief Forward ROS prediction using wind-only adjustment
+ * @brief Fill fire_ros [m/s] with the head rate of the selected grass model
  *
- * Cheney-Gould empirical wind effect: forward ROS increases roughly exponentially
- * with wind speed, but with moisture and curing modulation.
- *
- * @param[in] u_wind       Wind speed in forward direction [m/s]
- * @param[in] ros_backing  Base (no-wind) ROS [m/s]
- * @param[in] moisture     Dead fine fuel moisture [%]
- * @param[in] curing       Curing degree [0-1]
- * @return Forward ROS [m/s]
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real cheney_gould_ros(
-    amrex::Real u_wind,
-    amrex::Real ros_backing,
-    amrex::Real moisture,
-    amrex::Real curing) noexcept
-{
-    // Empirical Cheney-Gould relation:
-    // ROS_forward ≈ ROS_backing × (1 + wind_factor)
-    // where wind_factor grows with wind speed and curing
-    amrex::Real wind_factor = 0.15 * u_wind * (curing + 0.2);
-
-    // Moisture attenuation factor (inverse relationship)
-    constexpr amrex::Real moisture_scale = 20.0;  // Reference moisture [%]
-    amrex::Real moisture_factor = moisture_scale / (moisture + 1.0);
-
-    amrex::Real ros_forward = ros_backing * (1.0 + wind_factor) * moisture_factor;
-    return amrex::max(static_cast<amrex::Real>(ros_forward), static_cast<amrex::Real>(0.0));
-}
-
-/**
- * @brief CSIRO grassfire acceleration factor for wind and slope
- *
- * Combines wind and slope effects into a multiplicative factor.
- * Based on CSIRO empirical relations from Catchpole et al. (1998).
- *
- * @param[in] u_wind    Wind speed [m/s]
- * @param[in] slope     Terrain slope [radians]
- * @param[in] curing    Curing degree [0-1]
- * @return Acceleration factor (dimensionless, typically 1–4)
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real csiro_grassfire_acceleration(
-    amrex::Real u_wind,
-    amrex::Real slope,
-    amrex::Real curing) noexcept
-{
-    // Wind effect on forward ROS (log scale)
-    amrex::Real wind_accel = 1.0 + 0.2 * std::log1p(u_wind);
-
-    // Slope effect (upslope enhancement)
-    amrex::Real slope_mag = std::abs(slope);
-    amrex::Real slope_accel = 1.0 + 5.0 * slope_mag * (curing + 0.1);
-
-    // Combined effect
-    return wind_accel * slope_accel;
-}
-
-/**
- * @brief Cheney-Gould ROS with acceleration for wind and slope
- *
- * Full formula combining backing ROS, wind effect, and slope effect.
- *
- * @param[in] u_wind       Wind speed in fire spread direction [m/s]
- * @param[in] slope        Terrain slope in fire spread direction [radians]
- * @param[in] ros_backing  Base (no-wind, no-slope) ROS [m/s]
- * @param[in] moisture     Dead fine fuel moisture [%]
- * @param[in] curing       Curing degree [0-1]
- * @return Total forward ROS [m/s]
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real cheney_gould_ros_with_acceleration(
-    amrex::Real u_wind,
-    amrex::Real slope,
-    amrex::Real ros_backing,
-    amrex::Real moisture,
-    amrex::Real curing) noexcept
-{
-    // Base wind effect
-    amrex::Real ros_wind = cheney_gould_ros(u_wind, ros_backing, moisture, curing);
-
-    // Additional slope acceleration (upslope only)
-    amrex::Real slope_accel = 1.0;
-    if (slope > 0.0) {  // upslope
-        slope_accel = csiro_grassfire_acceleration(u_wind, slope, curing);
-    }
-
-    return ros_wind * slope_accel;
-}
-
-/**
- * @brief Fill fire_ros [m/s] using Cheney-Gould (1998) grassland model
- *
- * Implements the Cheney-Gould empirical grassland ROS prediction.
- * Suitable only for open grassland fuels (FM1–FM3); not appropriate for
- * forest or shrub fuels (FM4–FM13).
- *
- * @param[out] fire_ros        Rate of spread [m/s]
- * @param[in]  fire_wind_eff   Effective wind after WAF + terrain [m/s]
- * @param[in]  cgc             Cheney-Gould computed parameters
+ * @param[out] fire_ros   Rate of spread [m/s]
+ * @param[in]  fire_wind  The wind the model consumes (reference or midflame, see
+ *                        cheney_gould_ros) [m/s]
+ * @param[in]  cg         Precomputed state
  */
 inline void fill_cheney_gould_ros(
     amrex::MultiFab& fire_ros,
-    const amrex::MultiFab& fire_wind_eff,
-    const CheneyGouldComputed& cgc)
-{
-    // Note: For a more complete implementation, would need access to:
-    // - Per-cell fuel moisture (currently uses default from cgc)
-    // - Per-cell slope (already available)
-    // For now, uses domain-averaged moisture from parameters
-
-    for (amrex::MFIter mfi(fire_ros, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const amrex::Box& bx = mfi.tilebox();
-        auto ros_arr = fire_ros.array(mfi);
-        auto wind_arr = fire_wind_eff.const_array(mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) {
-            int i = iv[0];
-            int j = iv[1];
-            int k = 0;
-
-            // Get effective wind
-            amrex::Real u = wind_arr(i, j, k, 0);
-            amrex::Real v = wind_arr(i, j, k, 1);
-            amrex::Real wind_mag = std::sqrt(u*u + v*v);
-
-            // Compute Cheney-Gould ROS with the moisture and curing the
-            // coefficients were built with (the deck values, or the dynamic
-            // 1-h moisture), the same inputs the directional kernel uses.
-            // No slope here: fill_cheney_gould_ros_with_slope carries it.
-            amrex::Real ros = cheney_gould_ros(
-                wind_mag,
-                cgc.ros_backing,
-                cgc.moisture,
-                cgc.curing);
-
-            ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
-            ros_arr(i, j, k, 0) = ros;
-        });
-    }
-}
-
-/**
- * @brief Fill fire_ros with slope effects using Cheney-Gould model
- *
- * Extended version that includes slope effects. Requires fire_slopes parameter.
- * Not currently used in ERF_FireLayer; kept for future enhancement.
- *
- * @param[out] fire_ros        Rate of spread [m/s]
- * @param[in]  fire_wind_eff   Effective wind after WAF + terrain [m/s]
- * @param[in]  fire_slopes     Terrain slopes [dz/dx, dz/dy]
- * @param[in]  cgc             Cheney-Gould computed parameters
- */
-inline void fill_cheney_gould_ros_with_slope(
-    amrex::MultiFab& fire_ros,
-    const amrex::MultiFab& fire_wind_eff,
-    const amrex::MultiFab& fire_slopes,
-    const CheneyGouldComputed& cgc)
+    const amrex::MultiFab& fire_wind,
+    const CheneyGouldComputed& cg)
 {
     for (amrex::MFIter mfi(fire_ros, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
-        auto ros_arr = fire_ros.array(mfi);
-        auto wind_arr = fire_wind_eff.const_array(mfi);
-        auto slopes_arr = fire_slopes.const_array(mfi);
+        auto ros_arr  = fire_ros.array(mfi);
+        auto wind_arr = fire_wind.const_array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) {
-            int i = iv[0];
-            int j = iv[1];
-            int k = 0;
-
-            // Get wind and slopes
-            amrex::Real u = wind_arr(i, j, k, 0);
-            amrex::Real v = wind_arr(i, j, k, 1);
-            amrex::Real wind_mag = std::sqrt(u*u + v*v);
-
-            amrex::Real dzdx = slopes_arr(i, j, k, 0);
-            amrex::Real dzdy = slopes_arr(i, j, k, 1);
-            amrex::Real slope_mag = std::sqrt(dzdx*dzdx + dzdy*dzdy);
-            amrex::Real slope_angle = std::atan(slope_mag);
-
-            // Project slope onto wind direction
-            amrex::Real wind_dir = std::atan2(v, u);
-            amrex::Real slope_dir = std::atan2(dzdy, dzdx);
-            amrex::Real angle_diff = wind_dir - slope_dir;
-            amrex::Real slope_proj = slope_angle * std::cos(angle_diff);
-
-            // Compute ROS with slope effects
-            amrex::Real ros = cheney_gould_ros_with_acceleration(
-                wind_mag,
-                slope_proj,
-                cgc.ros_backing,
-                10.0,   // placeholder: default moisture [%]
-                1.0);   // placeholder: default curing [0-1]
-
-            ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
-            ros_arr(i, j, k, 0) = ros;
+            const int i = iv[0];
+            const int j = iv[1];
+            const int k = 0;
+            const amrex::Real u = wind_arr(i, j, k, 0);
+            const amrex::Real v = wind_arr(i, j, k, 1);
+            const amrex::Real wind_mag = std::sqrt(u*u + v*v);
+            ros_arr(i, j, k, 0) = cheney_gould_ros(wind_mag, cg);
         });
     }
 }

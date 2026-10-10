@@ -25,8 +25,18 @@ cell, taken from the atmospheric terrain even when
 since the wind profile being interpolated belongs to that column. The
 face-staggered velocities are averaged to cell centres and interpolated
 linearly in height between the two cell centres that bracket the target.
+A target below the first cell centre takes the lowest centre's wind scaled
+by the neutral log profile :math:`\ln(z/z_0) / \ln(z_1/z_0)` of
+:cpp:`erf.fire.wind_sample_z0` (default 0.1 m), :math:`z_1` the centre's
+height above ground, with :cpp:`erf.fire.wind_below_first_cell = "log"`;
+the default ``"clamp"`` takes the centre's wind unchanged (a 6.1 m target
+under a 10 m first centre reads the 10 m wind, 12 % high at :math:`z_0` =
+0.1 m), kept as the default because 112 fire decks sample below their first
+centre and carry its numbers; ``log`` is the recommended setting whenever the
+first cell is above the reference height.
 With :cpp:`erf.fire.use_per_fuel_wind_ht` the height comes instead from a
-per-fuel table in the WRF-SFIRE ``fcwh`` convention (all 6.096 m by default).
+per-fuel table in the WRF-SFIRE ``fcwh`` convention (6.096 m for every fuel),
+with or without a fuel map.
 
 **Horizontal mapping.** :cpp:`erf.fire.wind_interp` selects how atmospheric
 columns map to the finer fire cells. ``"bilinear"`` (default) blends the four
@@ -65,20 +75,29 @@ corrections:
   model can bypass the factor with
   :cpp:`erf.fire.balbi.wind_source = "reference"`, since it normalises the
   wind by its own vertical velocity scale.
-- The FARSITE terrain corrections (:cpp:`erf.fire.use_terrain_wind`, default
-  true) scale and rotate the wind from the slope and curvature on the fire
-  grid: a ridge speed-up :cpp:`erf.fire.k_ridge`, lee sheltering
-  :cpp:`erf.fire.k_shelter`, valley channelling :cpp:`erf.fire.k_valley` in
-  concave terrain, and a deflection :cpp:`erf.fire.k_deflect` of the wind
-  vector toward the slope. These are empirical stand-ins for flow that a
-  resolved LES already contains, so switch them off when the atmosphere
-  resolves the terrain.
-- The Rothermel and BEHAVE kernels additionally cap the effective wind at the maximum
-  effective wind speed of Rothermel (1972), 300 ft/min for fine fuels
+- The terrain wind factors (:cpp:`erf.fire.use_terrain_wind`, default
+  false since October 2026) scale and rotate the wind from the slope and
+  curvature on the fire grid: a ridge speed-up :cpp:`erf.fire.k_ridge`, lee
+  sheltering :cpp:`erf.fire.k_shelter`, valley channelling
+  :cpp:`erf.fire.k_valley` in concave terrain, and a deflection
+  :cpp:`erf.fire.k_deflect` of the wind vector toward the slope. They are
+  not FARSITE's (Finney 1998 has no such corrections), they step from 1 to
+  :math:`k_{ridge}` at a 2.9° slope, and they are stand-ins for flow that a
+  resolved atmosphere already contains; most decks switched them off, which
+  is now the default. Turn them on only with a wind that does not resolve the
+  terrain, and expect a discontinuity at the slope threshold.
+- The Rothermel and BEHAVE kernels additionally bound the effective wind by
+  Rothermel's (1972, eq. 87) limit :math:`U \le 0.9\, I_R` (ft/min, with
+  the reaction intensity in BTU/ft²/min) when :cpp:`erf.fire.use_wind_limit`
+  is true (default). The limit scales with the fuel's reaction intensity:
+  about 690 ft/min (3.5 m/s midflame) for Anderson 1 at 8 % moisture. The
+  fuel-class rule, 300 ft/min for fine fuels
   (surface-area-to-volume ratio above 1000 ft⁻¹) and 500 ft/min otherwise,
-  when :cpp:`erf.fire.use_wind_limit` is true (default). Wind-driven
-  conflagrations exceed this cap; turn it off, or hand the high-wind regime to
-  a model without a cap through the hybrid ``wind`` selector.
+  which this code applied until October 2026 and which held every grass fire
+  above a 4.2 m/s reference wind at the 1.52 m/s rate, is kept as
+  :cpp:`erf.fire.wind_limit = "fuel_class"`. Wind-driven conflagrations may
+  exceed either bound; turn the limit off, or hand the high-wind regime to a
+  model without one through the hybrid ``wind`` selector.
 
 Coupling modes
 --------------
@@ -154,7 +173,12 @@ The latent flux follows WRF-SFIRE,
    b = \frac{M_f}{1 + M_f},\ f_w = 0.56,
 
 where :math:`M_f` is the fuel moisture and :math:`f_w` the water yield of
-combustion per unit dry fuel.
+combustion per unit dry fuel. WRF-SFIRE writes these weights for a wet-mass
+burn rate, of which the share :math:`b` is fuel water; :math:`Q/h` here is
+the oven-dry burn rate of the fuel models' loads, for which the water
+released per unit dry fuel is :math:`M_f + f_w`, so the flux above is lower
+than that by the factor :math:`1 + M_f` (8 % at 8 % moisture). The WRF form
+is kept so coupled results match WRF-SFIRE's.
 
 The Community Fire Behavior Model (Jiménez y Muñoz et al., 2026, their
 Eqs. 4 and 5) keeps this latent flux but hands the atmosphere only the
@@ -190,7 +214,9 @@ distributed vertically with an exponential profile,
    H(z) = \frac{Q}{c_p}\, e^{-z/\alpha_g}, \qquad
    \frac{\partial (\rho\theta)}{\partial t} = -\rho\, \frac{\partial H}{\partial z},
 
-where :math:`z` is height above the local terrain and
+where :math:`z` is height above the first cell centre of the column (the
+profile's datum, half a cell above the terrain, so the lowest cell takes the
+share :math:`1 - e^{-\Delta z_1/\alpha_g}` and nothing is lost below it) and
 :math:`\alpha_g` = :cpp:`erf.fire.heat_flux_alfg` (default 45 m) is the
 e-folding depth: 37% of the flux remains at 45 m and 1% at 225 m. The latent
 flux is distributed the same way into the vapour equation when
@@ -209,6 +235,18 @@ flux is distributed the same way into the vapour equation when
    with :cpp:`erf.fire.fire_debug` reads exactly
    :math:`1 - e^{-z_{top}/\alpha_g}` with the default and about
    :math:`\rho` times that with the historical form.
+
+   The tendency above is a :math:`\rho\theta` budget: heating :math:`q`
+   per unit volume gives :math:`\partial\theta/\partial t = q / (\rho c_p
+   \Pi)` with the Exner function :math:`\Pi = (p/p_0)^{R_d/c_p}`, so the
+   enthalpy :math:`c_p \Pi\, \partial(\rho\theta)/\partial t` the column
+   receives is :math:`\Pi` times the flux, 4.5 % short at 850 hPa.
+   :cpp:`erf.fire.heat_tendency_exner = true` divides the tendency by
+   :math:`\Pi` of each cell so that the enthalpy integrates to the flux; the
+   default omits the factor, as WRF-SFIRE does
+   (``ERF_GTestFireAtmInjection`` checks both). Set together with
+   :cpp:`heat_tendency_density = true` the two factors stack
+   (:math:`\rho / \Pi`).
 
 :cpp:`erf.fire.fire_atm_feedback` multiplies both fluxes before injection;
 zero gives one-way coupling with the fire still responding to the wind, one

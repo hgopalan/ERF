@@ -12,7 +12,7 @@ using namespace amrex;
 void inject_smoke_from_fire(
     MultiFab&       cc_source,
     const MultiFab& fire_heat_atm,
-    const MultiFab& z_phys_cc,
+    const MultiFab* z_phys_nd,
     const Geometry& geom_atm,
     Real            emission_factor,
     Real            heat_of_combustion,
@@ -30,23 +30,38 @@ void inject_smoke_from_fire(
 
     for (MFIter mfi(cc_source, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx  = mfi.tilebox();
-        // Only inject at k=klo
-        const Box& bx0 = makeSlab(bx, 2, klo);
-        if (bx0.isEmpty()) continue;
+        // Only inject at k = klo, and only from the tile that holds it:
+        // makeSlab of a tile above klo is a non-empty box outside the tile,
+        // so every z tile of the column added the source once more.
+        if (bx.smallEnd(2) > klo || bx.bigEnd(2) < klo) continue;
+        const Box bx0 = makeSlab(bx, 2, klo);
 
         auto src  = cc_source.array(mfi, smoke_comp);
         auto heat = fire_heat_atm.const_array(mfi);
-        auto zcc  = z_phys_cc.const_array(mfi);
+        const bool has_nd = (z_phys_nd != nullptr);
+        Array4<const Real> znd;
+        if (has_nd) { znd = z_phys_nd->const_array(mfi); }
 
         const Real ef  = emission_factor;
         const Real hoc = heat_of_combustion;
         const Real dz  = dx[2];
 
         ParallelFor(bx0, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // Cell height — use terrain-aware dz if available
-            Real dz_cell = (k < khi)
-                ? amrex::max(zcc(i,j,k+1) - zcc(i,j,k), dz * 0.1_rt)
-                : dz;
+            // Thickness of the k = 0 cell: the mean of its four node pairs on a
+            // terrain-fitted grid (the centre-to-centre spacing used before is
+            // the mean of two cells on a stretched grid, which put a mass
+            // flux x dz_cell / dz_cc into the column instead of flux), the
+            // uniform dz without terrain. The injected mass per column,
+            // src dz_cell, then equals the flux.
+            Real dz_cell = dz;
+            if (has_nd) {
+                dz_cell = 0.25_rt * ( (znd(i,  j,  k+1) - znd(i,  j,  k))
+                                    + (znd(i+1,j,  k+1) - znd(i+1,j,  k))
+                                    + (znd(i,  j+1,k+1) - znd(i,  j+1,k))
+                                    + (znd(i+1,j+1,k+1) - znd(i+1,j+1,k)) );
+                dz_cell = amrex::max(dz_cell, dz * 0.1_rt);
+            }
+            amrex::ignore_unused(khi);
             // smoke_flux [kg/m2/s] = ef * Q [W/m2] / hoc [J/kg]
             Real smoke_flux = ef * amrex::max(heat(i,j,k), 0.0_rt) / hoc;
             // inject as volumetric source [kg/m3/s] = flux / dz

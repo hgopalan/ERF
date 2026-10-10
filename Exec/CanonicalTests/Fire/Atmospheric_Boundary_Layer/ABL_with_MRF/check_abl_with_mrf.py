@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Sanity checks on the fire output of the ABL_with_MRF tests.
 
-    python3 check_abl_with_mrf.py [plt_fire_<prefix>NNNNN] [--stats fire_stats.csv]
+    python3 check_abl_with_mrf.py [plt_fire_<prefix>NNNNN] [--prefix P] [--stats fire_stats.csv]
 
-With no plotfile the last plt_fire*NNNNN in the directory is used (the decks
-set erf.fire_plot_file = plt_fire_abl_<case>_); with no
+With no plotfile the highest step of the plt_fire*NNNNN plotfiles in the
+directory is used (decks may set their own erf.fire_plot_file prefix). When
+plotfiles of more than one prefix are present, name the plotfile or the
+prefix (--prefix PREFIX): the check refuses to guess between
+prefixes. Decks that share a prefix overwrite each other's plotfiles, so run
+each in its own folder; a prefix that ends in a digit needs --prefix. With no
 --stats every fire_stats*.csv present is checked. Each check prints PASS or FAIL
 and the script exits 1 if any fails, so it can follow the run in CTest:
 
@@ -54,6 +58,27 @@ def load(pf):
         return np.asarray(g[("boxlib", cand[0])])[:, :, 0]
     return ds, get
 
+def pick_plotfile(prefix=None):
+    """The highest-step plt_fire*NNNNN directory here, of `prefix` if given
+    (the name is the prefix and then only digits); (None, why) when there is
+    none or, with no prefix, when more than one prefix is present."""
+    pfs = [p for p in glob.glob("plt_fire*[0-9][0-9][0-9][0-9][0-9]") if os.path.isdir(p)]
+    if prefix is not None:
+        files = [p for p in pfs if p.startswith(prefix) and p[len(prefix):].isdigit()]
+        if not files:
+            return None, f"no plt_fire*NNNNN plotfile with prefix {prefix} here"
+        return max(files, key=lambda p: int(p[len(prefix):])), ""
+    by_prefix = {}
+    for p in pfs:
+        by_prefix.setdefault(p.rstrip("0123456789"), []).append(p)
+    if not by_prefix:
+        return None, "no plt_fire*NNNNN plotfile here"
+    if len(by_prefix) > 1:
+        return None, ("plotfiles of several prefixes here (" + ", ".join(sorted(by_prefix))
+                      + "): name the plotfile or pass --prefix")
+    files = next(iter(by_prefix.values()))
+    return max(files, key=lambda p: int(p[len(p.rstrip("0123456789")):])), ""
+
 results = []
 def check(name, ok, detail):
     results.append(ok)
@@ -62,17 +87,17 @@ def check(name, ok, detail):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("plotfile", nargs="?")
+    ap.add_argument("--prefix")
     ap.add_argument("--stats", action="append")
     ap.add_argument("--allow-no-fire", action="store_true")
     args = ap.parse_args()
 
     pf = args.plotfile
     if pf is None:
-        pfs = sorted(p for p in glob.glob("plt_fire*[0-9][0-9][0-9][0-9][0-9]") if os.path.isdir(p))
-        if not pfs:
-            print("  no plt_fire*NNNNN plotfile here: FAIL")
+        pf, why = pick_plotfile(args.prefix)
+        if pf is None:
+            print(f"  {why}: FAIL")
             sys.exit(1)
-        pf = pfs[-1]
     ds, get = load(pf)
     t = float(ds.current_time)
     print(f"ABL_with_MRF: {pf} at t = {t:.3f} s")
@@ -106,7 +131,9 @@ def main():
         check("arrival", ok_b and ok_u, detail)
 
     if fuel is not None:
-        f0_pfs = sorted(p for p in glob.glob("plt_fire*00000") if os.path.isdir(p))
+        # the same deck's start: the chosen plotfile's prefix at step 0
+        pre = args.prefix if args.prefix is not None else pf.rstrip("/").rstrip("0123456789")
+        f0_pfs = [p for p in [pre + "00000"] if os.path.isdir(p)]
         ok_neg = float(np.nanmin(fuel)) >= -TOL
         if f0_pfs and f0_pfs[0] != pf:
             _, get0 = load(f0_pfs[0])
@@ -114,7 +141,7 @@ def main():
             grew = int((fuel > f0 + 1.0e-9).sum()) if f0 is not None else 0
             check("fuel", ok_neg and grew == 0, f"min {np.nanmin(fuel):.4g}, {grew} cells above their start")
         else:
-            check("fuel", ok_neg, f"min {np.nanmin(fuel):.4g} kg/m2")
+            check("fuel", ok_neg, f"min {np.nanmin(fuel):.4g} kg/m2 (no start plotfile {pre}00000: growth not checked)")
 
     stats = args.stats or sorted(glob.glob("fire_stats*.csv"))
     for sf in stats:

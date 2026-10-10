@@ -20,7 +20,9 @@
  * - Dynamic load transfer from live herbaceous to dead category based on moisture
  * - Per-class reaction intensity with separate dead and live damping coefficients
  * - Live moisture of extinction computed from dead/live fuel ratio
- * - Separate heat sink for dead and live fuels
+ * - Surface-area-weighted net loads and heat sink of Rothermel (1972) eqs. 53-57
+ *   (erf.fire.behave.net_load = "weighted", default; "sum" is the plain class sum
+ *   this code used until October 2026)
  *
  * This model is selected by ros_model = "behave" in ParmParse configuration.
  * Selected references:
@@ -148,7 +150,18 @@ FuelModelParams behave_fuel_params(int code, int fuel_set)
  *                        (erf.fire.behave.dynamic_transfer_lo)
  * @param[in] transfer_hi Live herbaceous moisture at and above which none
  *                        transfers [fraction] (erf.fire.behave.dynamic_transfer_hi)
- * @param[in] use_wind_limit  Apply the MEWS cap (erf.fire.use_wind_limit)
+ * @param[in] use_wind_limit  Apply the wind limit (erf.fire.use_wind_limit)
+ * @param[in] wind_limit_mode Which limit (erf.fire.wind_limit), fire_wind_limit::*
+ * @param[in] net_load_mode   behave_net_load::weighted (default): the net load of
+ *                        each category is the surface-area-weighted mean of its
+ *                        classes, (w_n)_i = sum_j f_ij (w_n)_ij, and the heat sink
+ *                        rho_b sum_i f_i sum_j f_ij eps_ij Q_ig,ij, Rothermel (1972)
+ *                        eqs. 53-57 (Albini 1976, Andrews 2018). behave_net_load::sum:
+ *                        the plain sum of the class loads with one eps_h(sigma_dead)
+ *                        and a load-weighted Q_ig, this code's form until October
+ *                        2026, which carried 3.3x FM10's and 5.2x FM13's net load
+ *                        (3.0x and 4.3x their zero-wind rate, the sink changing too) at
+ *                        zero wind (erf.fire.behave.net_load = "sum")
  *
  * @return BehaveState with all precomputed coefficients
  *
@@ -167,6 +180,12 @@ FuelModelParams behave_fuel_params(int code, int fuel_set)
  *
  * Reference: Andrews (2018) GTR-RMRS-371 pp. 16–38.
  */
+/// How BEHAVE forms the net fuel load of a category, erf.fire.behave.net_load
+namespace behave_net_load {
+    constexpr int weighted = 0;   ///< "weighted": Rothermel's f_ij-weighted loads and heat sink (default)
+    constexpr int sum      = 1;   ///< "sum": the plain sum of the classes (before 2026-10)
+}
+
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 BehaveState compute_behave_state(
     const FuelModelParams& fp,
@@ -177,7 +196,9 @@ BehaveState compute_behave_state(
     amrex::Real mc_woody,
     amrex::Real transfer_lo,
     amrex::Real transfer_hi,
-    bool use_wind_limit = true)
+    bool use_wind_limit = true,
+    int wind_limit_mode = fire_wind_limit::rothermel,
+    int net_load_mode = behave_net_load::weighted)
 {
     BehaveState bs;
 
@@ -299,9 +320,37 @@ BehaveState compute_behave_state(
     // =====================================================================
     // Step 5: Net fuel loads and heat content
     // =====================================================================
-
-    bs.wn_dead = w_dead * (1.0 - S_T);
-    bs.wn_live = w_live * (1.0 - S_T);
+    // Rothermel (1972) eq. 53 with Albini's (1976) revision (Andrews 2018,
+    // eq. 61): the net load of a category is (w_n)_i = sum_j g_ij (w_n)_ij,
+    // where g_ij is the surface-area fraction f_ij summed over the classes
+    // of the same size-class group (boundaries 1200, 192, 96, 48 and 16
+    // ft^-1), so classes that share a size class are added, not averaged,
+    // and g_ij = f_ij where every class is alone in its group (the Anderson
+    // 1-h, 10-h and 100-h classes). The plain sum of the classes, kept as
+    // erf.fire.behave.net_load = "sum", overstates the load that drives the
+    // reaction intensity by the inverse of the 1-h class's area share: 1.8x
+    // for FM2, 3.3x for FM10 and 5.2x for FM13 (the zero-wind rate 1.45x,
+    // 3.0x and 4.3x, since the heat sink changes with it).
+    const bool weighted = (net_load_mode == behave_net_load::weighted);
+    if (weighted) {
+        auto size_class = [](Real s) -> int {
+            return (s >= 1200.0) ? 0 : (s >= 192.0) ? 1 : (s >= 96.0) ? 2 : (s >= 48.0) ? 3 : (s >= 16.0) ? 4 : 5;
+        };
+        const int c_d1 = size_class(fp.sigma_d1), c_d10 = size_class(sigma_d10),
+                  c_d100 = size_class(sigma_d100), c_dh = size_class(fp.sigma_lh);
+        auto g_dead = [&](int c) -> Real {
+            return (c_d1 == c ? f_d1 : 0.0) + (c_d10 == c ? f_d10 : 0.0)
+                 + (c_d100 == c ? f_d100 : 0.0) + (c_dh == c ? f_dh : 0.0);
+        };
+        const int c_lh = size_class(fp.sigma_lh), c_lw = size_class(fp.sigma_lw);
+        auto g_live = [&](int c) -> Real { return (c_lh == c ? f_lh : 0.0) + (c_lw == c ? f_lw : 0.0); };
+        bs.wn_dead = (g_dead(c_d1) * fp.w_d1 + g_dead(c_d10) * fp.w_d10 + g_dead(c_d100) * fp.w_d100
+                      + g_dead(c_dh) * fuelload_herba_dead) * (1.0 - S_T);
+        bs.wn_live = (g_live(c_lh) * fuelload_herba_live + g_live(c_lw) * fp.w_lw) * (1.0 - S_T);
+    } else {
+        bs.wn_dead = w_dead * (1.0 - S_T);
+        bs.wn_live = w_live * (1.0 - S_T);
+    }
 
     bs.fuelheat_dead = fp.heat_content;  // Dead heat content per Anderson
     bs.fuelheat_live = fp.heat_content;  // Live heat content assumed same
@@ -344,12 +393,30 @@ BehaveState compute_behave_state(
     // =====================================================================
     // Step 9: Heat sink
     // =====================================================================
-    // Combined dead + live heat sink per Rothermel
-    // heat_sink = ρ_b * ε_h * (Σ(ε_k * q_ig_k))
-    // Simplified: use constant ε_h and q_ig
-
-    Real eps_h = std::exp(-138.0 / sigma);
-    bs.heat_sink = rho_b * eps_h * Q_ig;
+    // Rothermel (1972) eqs. 55-57: rho_b sum_i f_i sum_j f_ij eps_ij Q_ig,ij
+    // with eps_ij = exp(-138/sigma_ij), Q_ig,ij = 250 + 1116 M_ij and the
+    // category weights f_i the surface-area shares. The "sum" form keeps the
+    // one eps_h(sigma_dead) and the load-weighted Q_ig of the earlier code.
+    if (weighted) {
+        const Real tiny_sav = 1.0;
+        const Real eps_d1   = std::exp(-138.0 / amrex::max(fp.sigma_d1, tiny_sav));
+        const Real eps_d10  = std::exp(-138.0 / sigma_d10);
+        const Real eps_d100 = std::exp(-138.0 / sigma_d100);
+        const Real eps_lh   = std::exp(-138.0 / amrex::max(fp.sigma_lh, tiny_sav));
+        const Real eps_lw   = std::exp(-138.0 / amrex::max(fp.sigma_lw, tiny_sav));
+        const Real sink_dead = f_d1   * eps_d1   * (250.0 + 1116.0 * mc_1hr)
+                             + f_d10  * eps_d10  * (250.0 + 1116.0 * mc_10hr)
+                             + f_d100 * eps_d100 * (250.0 + 1116.0 * mc_100hr)
+                             + f_dh   * eps_lh   * (250.0 + 1116.0 * mc_1hr);
+        const Real sink_live = f_lh * eps_lh * (250.0 + 1116.0 * mc_herba)
+                             + f_lw * eps_lw * (250.0 + 1116.0 * mc_woody);
+        const Real A_T = amrex::max(A_d_total + A_l_total, tiny);
+        const Real f_dead_A = (A_d_total + A_l_total > 1.0e-12) ? A_d_total / A_T : 1.0;
+        bs.heat_sink = rho_b * (f_dead_A * sink_dead + (1.0 - f_dead_A) * sink_live);
+    } else {
+        Real eps_h = std::exp(-138.0 / sigma);
+        bs.heat_sink = rho_b * eps_h * Q_ig;
+    }
 
     // =====================================================================
     // Step 10: Reaction intensity and no-wind ROS
@@ -378,8 +445,9 @@ BehaveState compute_behave_state(
     bs.beta_ratio_E = std::pow(beta_ratio, -E);
     bs.phi_s_const = 5.275 * std::pow(beta, -0.3);
 
-    // MEWS wind speed cap (Andrews 2018), none when erf.fire.use_wind_limit = false
-    bs.U_max_ftmin = rothermel_wind_cap_ftmin(sigma, use_wind_limit);
+    // Wind limit (Rothermel's 0.9 I_R, or the fuel-class rule), none when
+    // erf.fire.use_wind_limit = false
+    bs.U_max_ftmin = rothermel_wind_cap_ftmin(sigma, I_R, use_wind_limit, wind_limit_mode);
     bs.wind_conv = 196.85;  // m/s → ft/min
 
     return bs;
@@ -447,7 +515,9 @@ amrex::Real behave_ros_cell(
  * @param[in]  transfer_hi     Live herbaceous transfer window, upper edge [fraction]
  * @param[in]  fire_fuel_mc    Per-cell fuel moisture (5 components, optional)
  * @param[in]  moisture_dynamic Whether per-cell moisture should be used
- * @param[in]  use_wind_limit  MEWS cap of the per-cell states (erf.fire.use_wind_limit)
+ * @param[in]  use_wind_limit  Wind limit of the per-cell states (erf.fire.use_wind_limit)
+ * @param[in]  wind_limit_mode Which limit (erf.fire.wind_limit), fire_wind_limit::*
+ * @param[in]  net_load_mode   behave_net_load::weighted or ::sum (erf.fire.behave.net_load)
  */
 inline void fill_behave_ros(
     amrex::MultiFab& fire_ros,
@@ -459,7 +529,9 @@ inline void fill_behave_ros(
     amrex::Real transfer_hi,
     const amrex::MultiFab* fire_fuel_mc = nullptr,
     bool moisture_dynamic = false,
-    bool use_wind_limit = true)
+    bool use_wind_limit = true,
+    int wind_limit_mode = fire_wind_limit::rothermel,
+    int net_load_mode = behave_net_load::weighted)
 {
     // When moisture_dynamic and fire_fuel_mc is provided, compute per-cell
     // BehaveState using per-cell moisture. Otherwise use bs_default for all cells.
@@ -509,7 +581,7 @@ inline void fill_behave_ros(
                 const BehaveState bs = compute_behave_state(fp,
                     mc(i,j,0,0), mc(i,j,0,1), mc(i,j,0,2),
                     mc(i,j,0,3), mc(i,j,0,4),
-                    transfer_lo, transfer_hi, use_wind_limit);
+                    transfer_lo, transfer_hi, use_wind_limit, wind_limit_mode, net_load_mode);
 
                 ros(i, j, 0) = behave_ros_cell(wind(i,j,0,0), wind(i,j,0,1),
                                                slopes(i,j,0,0), slopes(i,j,0,1),

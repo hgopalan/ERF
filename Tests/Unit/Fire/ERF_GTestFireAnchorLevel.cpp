@@ -326,16 +326,75 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
     MultiFab wind(fg.ba, fg.dm, 2, 0);
     MultiFab ez(fg.ba, fg.dm, 1, 0);
 
+    // The 10 m target sits below the first cell centre (12.5 m); with
+    // erf.fire.wind_below_first_cell = clamp the lowest centre's wind is taken
+    // as it is, so the horizontal maps can be read alone (the log form is
+    // WindBelowTheFirstCentreFollowsTheLogProfile).
+    const bool below_first_log = false;
+
     // Bilinear: a field linear in position is reproduced at the fire cell centre
-    fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4);
+    fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
+                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, 0.1, below_first_log);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) { return x + 0.5_rt * y; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) { return y + 0.25_rt * x; }), 1.0e3 * TOL);
 
     // Nearest: the value at the centre of the column holding the fire cell
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 0);
+                                      nullptr, nullptr, 0, 0, nullptr, nullptr, 0.0, 0.1, below_first_log);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) {
         return (column_of(x) + 0.5_rt) * DX + 0.5_rt * (column_of(y) + 0.5_rt) * DX; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) {
         return (column_of(y) + 0.5_rt) * DX + 0.25_rt * (column_of(x) + 0.5_rt) * DX; }), 1.0e3 * TOL);
+}
+
+/**
+ * A target below the first cell centre takes the lowest centre's wind scaled
+ * by the neutral log profile ln(z / z0) / ln(z1 / z0) (the opt-in
+ * erf.fire.wind_below_first_cell = log), not the centre's wind unchanged
+ * (the default clamp).
+ * Here z_ref = 10 m under a first centre at 12.5 m with z0 = 0.1 m: the
+ * factor is ln(100) / ln(125) = 0.95379, 4.6 % below the clamp. A target at
+ * the first centre is unchanged, and the ground height enters the heights.
+ */
+TEST(FireAnchorLevel, WindBelowTheFirstCentreFollowsTheLogProfile)
+{
+    AtmLevel L = region_level();
+    FireGrid fg = create_fire_grid(L.ba, L.dm, L.geom, C);
+
+    MultiFab xvel(convert(L.ba, IntVect(1, 0, 0)), L.dm, 1, 2);
+    MultiFab yvel(convert(L.ba, IntVect(0, 1, 0)), L.dm, 1, 2);
+    MultiFab zcc(L.ba, L.dm, 1, 2);
+    fill_linear_wind(xvel, yvel, zcc);
+
+    MultiFab zs(fg.ba, fg.dm, 1, 0);
+    zs.setVal(0.0);
+    MultiFab grounds(fg.ba, fg.dm, 4, 0);
+    grounds.setVal(0.0);
+    MultiFab wind(fg.ba, fg.dm, 2, 0);
+    MultiFab ez(fg.ba, fg.dm, 1, 0);
+
+    const Real z0 = 0.1_rt;
+    const Real z1 = 0.5_rt * DX;                                   // first centre, 12.5 m
+    const Real f10 = std::log(10.0_rt / z0) / std::log(z1 / z0);   // 0.95379
+
+    fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
+                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+    EXPECT_LT(max_rel_error(wind, fg, 0, [=](Real x, Real y) { return f10 * (x + 0.5_rt * y); }), 1.0e3 * TOL);
+    EXPECT_LT(max_rel_error(wind, fg, 1, [=](Real x, Real y) { return f10 * (y + 0.25_rt * x); }), 1.0e3 * TOL);
+    EXPECT_NEAR(f10, 0.95379_rt, 1.0e-5) << "the factor itself";
+
+    // at the first centre the profile factor is 1
+    fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, z1, 4,
+                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+    EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) { return x + 0.5_rt * y; }), 1.0e3 * TOL);
+
+    // a ground 2.5 m up: the first centre is 10 m above it and the 5 m target
+    // takes ln(50) / ln(100) = 0.84949
+    zs.setVal(2.5_rt);
+    grounds.setVal(2.5_rt);
+    const Real f5 = std::log(5.0_rt / z0) / std::log(10.0_rt / z0);
+    fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 5.0, 4,
+                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+    EXPECT_LT(max_rel_error(wind, fg, 0, [=](Real x, Real y) { return f5 * (x + 0.5_rt * y); }), 1.0e3 * TOL);
+    EXPECT_NEAR(f5, 0.84949_rt, 1.0e-5);
 }

@@ -25,10 +25,15 @@ them (0.00 s here).
 
 On two ranks:
 
-- burned area 0.23 to 0.33 cell widths of perimeter short of the union
+- burned area 0.05 to 0.26 cell widths of perimeter short of the union
   formula from 10 s to 80 s;
-- arrival time over 8272 cells: mean error +0.167, 95th percentile 0.283 cell
-  crossings (2 s); across the neck, 744 cells, +0.161 and 0.283.
+- arrival time over 8272 cells: mean error +0.152, 95th percentile 0.231 cell
+  crossings (2 s); across the neck, 744 cells, +0.152 and 0.228.
+
+Re-measured 2026-10-09. The code before it gives the same areas and arrival
+errors of +0.028 / 0.178 and +0.030 / 0.173 (the crossing interpolated within
+the substep is half a substep later than its start-of-substep stamp); the
+0.23 to 0.33 and +0.167 / 0.283 this README carried until then predate both.
 
 The discs start small (6 m on 2 m cells) and the default level set's artificial
 viscosity slows a tightly curved front most, which is where the area deficit

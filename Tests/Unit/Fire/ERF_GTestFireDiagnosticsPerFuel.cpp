@@ -14,12 +14,12 @@
  * @brief Byram's fireline intensity and the wind adjustment factor on a fuel
  *        map read the cell's own fuel model, not erf.fire.fuel_model_id.
  *
- * Byram is I_B = h (w_0 - w) R. Under erf.fire.fuel_map.load_from_map each cell
- * starts at its own model's load, so a uniform w_0 differenced against a
- * per-cell w is a different fire: where the uniform model is the lighter of the
- * two the difference clamps and the intensity is exactly zero. The wind
- * adjustment factor is a function of the fuel bed depth alone, so on a map it
- * is a field rather than one number.
+ * Byram is I_B = h w_0 R on every burning cell, with w_0 the load the cell
+ * started with: its own model's under erf.fire.fuel_map.load_from_map, the
+ * uniform one otherwise. The heat-release diagnostic keeps the pre-2026-10
+ * form h (w_0 - w) R, which clamps to zero on a heavy cell differenced
+ * against a light uniform w_0. The wind adjustment factor is a function of the
+ * fuel bed depth alone, so on a map it is a field rather than one number.
  */
 
 using namespace amrex;
@@ -65,7 +65,7 @@ struct Grid
 
     BoxArray ba;
     DistributionMapping dm;
-    MultiFab model, phi, ros, load, I_B, L;
+    MultiFab model, phi, ros, load, I_B, L, HR;
 
     Grid ()
     {
@@ -79,11 +79,13 @@ struct Grid
         load.define(ba, dm, 1, 0);
         I_B.define(ba, dm, 1, 0);
         L.define(ba, dm, 1, 0);
+        HR.define(ba, dm, 1, 0);
 
         phi.setVal(BURNED);
         ros.setVal(ROS_MS);
         I_B.setVal(-1.0);
         L.setVal(-1.0);
+        HR.setVal(-1.0);
 
         for (MFIter mfi(model); mfi.isValid(); ++mfi) {
             auto const& m = model.array(mfi);
@@ -119,31 +121,40 @@ TEST(FireDiagnosticsPerFuel, ByramUsesTheCellsOwnLoadAndHeat)
                           /*h_fuel_kJ_per_kg=*/params_of(CODE_LIGHT).heat_content * 2.326,
                           &g.model, FUEL_SET_SCOTT_BURGAN40, M_LIVE,
                           /*fp_tbl=*/nullptr, /*fp_tbl_size=*/0,
-                          /*load_from_map=*/true, /*sb40=*/true);
+                          /*load_from_map=*/true, /*sb40=*/true, &g.HR);
 
     for (MFIter mfi(g.I_B); mfi.isValid(); ++mfi) {
         auto const& I = g.I_B.const_array(mfi);
         auto const& Lf = g.L.const_array(mfi);
+        auto const& Hr = g.HR.const_array(mfi);
         const Box& bx = mfi.validbox();
         for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
             for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
                 const int c = code_at(i, j);
                 const Real w0 = load_of(c);
                 const Real h = params_of(c).heat_content * 2.326;
-                const Real want = h * (w0 - Grid::REMAIN_FRACTION * w0) * ROS_MS;
+                // Byram: the cell's own load and heat content, whatever it has burned so far
+                const Real want = h * w0 * ROS_MS;
                 EXPECT_NEAR(I(i, j, 0), want, tol() * std::max(want, Real(1.0)))
                     << "cell (" << i << ", " << j << "), code " << c;
                 EXPECT_NEAR(Lf(i, j, 0), compute_flame_length_m(want),
                             tol() * std::max(compute_flame_length_m(want), Real(1.0)));
+                // the heat release: what it has burned so far
+                const Real want_hr = h * (w0 - Grid::REMAIN_FRACTION * w0) * ROS_MS;
+                EXPECT_NEAR(Hr(i, j, 0), want_hr, tol() * std::max(want_hr, Real(1.0)))
+                    << "cell (" << i << ", " << j << "), code " << c;
             }
         }
     }
 }
 
-// The defect this guards: with the uniform initial load the heavy cells consume
-// a load smaller than what they still hold, the difference clamps, and the
-// intensity of the heavier half of the grid is exactly zero.
-TEST(FireDiagnosticsPerFuel, TheUniformInitialLoadClampsTheHeavyCellsToZero)
+// With load_from_map off every cell started at the uniform (light) load, so
+// that is the load the front consumes on every burning cell: the heavy cells
+// carry the uniform load's intensity with their own heat content. The
+// heat-release diagnostic keeps the pre-2026-10 clamp: the heavy cells still
+// hold more than the uniform load, so their consumed load is negative and
+// clamps to zero.
+TEST(FireDiagnosticsPerFuel, TheUniformInitialLoadReachesEveryBurningCell)
 {
     Grid g;
     fill_fire_diagnostics(g.I_B, g.L, g.phi, g.ros, g.load,
@@ -151,21 +162,26 @@ TEST(FireDiagnosticsPerFuel, TheUniformInitialLoadClampsTheHeavyCellsToZero)
                           params_of(CODE_LIGHT).heat_content * 2.326,
                           &g.model, FUEL_SET_SCOTT_BURGAN40, M_LIVE,
                           nullptr, 0,
-                          /*load_from_map=*/false, /*sb40=*/true);
+                          /*load_from_map=*/false, /*sb40=*/true, &g.HR);
 
-    int zero_heavy = 0, positive_heavy = 0;
+    int zero_heavy_hr = 0, positive_heavy = 0, wrong_heavy = 0;
     for (MFIter mfi(g.I_B); mfi.isValid(); ++mfi) {
         auto const& I = g.I_B.const_array(mfi);
+        auto const& Hr = g.HR.const_array(mfi);
         const Box& bx = mfi.validbox();
         for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
             for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
                 if (code_at(i, j) != CODE_HEAVY) { continue; }
-                if (I(i, j, 0) == 0.0) { ++zero_heavy; } else { ++positive_heavy; }
+                const Real want = params_of(CODE_HEAVY).heat_content * 2.326 * load_of(CODE_LIGHT) * ROS_MS;
+                if (I(i, j, 0) > 0.0) { ++positive_heavy; }
+                if (std::abs(I(i, j, 0) - want) > tol() * want) { ++wrong_heavy; }
+                if (Hr(i, j, 0) == 0.0) { ++zero_heavy_hr; }
             }
         }
     }
-    EXPECT_GT(zero_heavy, 0);
-    EXPECT_EQ(positive_heavy, 0);
+    EXPECT_GT(positive_heavy, 0);
+    EXPECT_EQ(wrong_heavy, 0);
+    EXPECT_EQ(zero_heavy_hr, positive_heavy);
 }
 
 // Non-burnable Scott-Burgan codes start with no load, exactly as
@@ -232,16 +248,21 @@ TEST(FireDiagnosticsPerFuel, NoFuelMapKeepsTheUniformScalars)
     Grid g;
     const Real w0 = load_of(CODE_LIGHT);
     const Real h = params_of(CODE_LIGHT).heat_content * 2.326;
-    fill_fire_diagnostics(g.I_B, g.L, g.phi, g.ros, g.load, w0, h);
+    fill_fire_diagnostics(g.I_B, g.L, g.phi, g.ros, g.load, w0, h, nullptr, 0, -1.0, nullptr, 0, false, false, &g.HR);
 
     for (MFIter mfi(g.I_B); mfi.isValid(); ++mfi) {
         auto const& I = g.I_B.const_array(mfi);
+        auto const& Hr = g.HR.const_array(mfi);
         const Box& bx = mfi.validbox();
         for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
             for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
                 const Real w = Grid::REMAIN_FRACTION * load_of(code_at(i, j));
-                const Real want = (w0 > w) ? h * (w0 - w) * ROS_MS : 0.0;
+                // burning (the non-burnable column holds no fuel): the uniform h w0 R
+                const Real want = (w > FIRE_BURNED_OUT_FRACTION * w0) ? h * w0 * ROS_MS : 0.0;
                 EXPECT_NEAR(I(i, j, 0), want, tol() * std::max(want, Real(1.0)))
+                    << "cell (" << i << ", " << j << ")";
+                const Real want_hr = (w0 > w) ? h * (w0 - w) * ROS_MS : 0.0;
+                EXPECT_NEAR(Hr(i, j, 0), want_hr, tol() * std::max(want_hr, Real(1.0)))
                     << "cell (" << i << ", " << j << ")";
             }
         }

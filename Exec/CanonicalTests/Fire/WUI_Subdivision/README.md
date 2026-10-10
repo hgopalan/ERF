@@ -43,12 +43,19 @@ The runs are two boxes, so at most two ranks; each variant runs 2100 s.
 ## The checks (`check_wui.py`)
 
 1. **Spread rate.** Head ROS along the centreline between x = 400 and 470 m
-   of the `wildland` run, from the arrival-time field, within 15% of
-   Rothermel's FM1 rate at 6% moisture and the midflame wind that the
-   Andrews wind adjustment factor gives from 10 m/s at 6.1 m, capped at the
-   model's 300 ft/min maximum effective wind for fine fuels. The reference is
-   Rothermel (1972) written out in `check_wui.py`, independent of the code;
-   it gives 0.2501 m/s where the model reports 0.2501505838 m/s.
+   of the `wildland` run, from the arrival-time field, no more than 15% above
+   Rothermel's FM1 rate at 6% moisture and no lower than the Wulff tip of the
+   projection formula at the same wind. The wind is the effective (midflame)
+   wind the fire samples on the head's path (y = 240 m, x = 400 to 470 m), read
+   from the fire plotfile nearest the middle of the arrival window, and bounded
+   by Rothermel's limit 0.9 I_R. The reference is Rothermel (1972) written out
+   in `check_wui.py`, independent of the code, and the model's own rate is
+   never used. The wind is the model's, so the checker also holds its ratio
+   to the reference wind to the Andrews WAF (0.362104) at every cell of the
+   path: a defect in the rate kernel or in the WAF moves the head but not the
+   bracket. A doubled head fails the check, and so does a halved WAF. The
+   lower bound is loose: it fails only a head below 36 % of the Rothermel
+   rate, 2.65 times slower than the measured head, so a halved rate passes.
 2. **Fuel conservation.** Fuel consumed over the burned area of `wildland`
    equals the initial load over the burned area within 5% (cells the front
    reached in the last minute are still burning).
@@ -80,44 +87,92 @@ future work.
 
 Two ranks, 2100 s, level set with the default hybrid WENO5-Z/first-order
 derivatives and the near-front artificial viscosity of 0.1
-(`erf.fire.levelset.gradient = weno5z_front`, `eps_visc_front = 0.1`,
-2026-09-05):
+(`erf.fire.levelset.gradient = weno5z_front`, `eps_visc_front = 0.1`). All six
+variants were re-measured 2026-10-09 on the validated code, where the
+Rothermel wind limit (0.9 I_R) replaces the 300 ft/min fuel-class cap and a
+burning cell's Byram intensity uses its full fuel load:
 
-| variant            | x = 780 m at [s] | burned cells | houses reached | peak intensity [kW/m] | max heat load [MJ/m²] | ember landings |
-|--------------------|-----------------:|-------------:|---------------:|----------------------:|----------------------:|---------------:|
-| wildland           |             1610 |         4352 |              - |                     - |                     - |              - |
-| wildland_spotting  |             1255 |         5986 |              - |                     - |                     - |              - |
-| subdivision        |             1705 |         4398 |          13/24 |                   773 |                  3.11 |             47 |
-| defensible         |            never |         1752 |           0/24 |                     0 |                  0.00 |              0 |
-| coupled            |             1921 |         5339 |          14/24 |                   773 |                  3.11 |              7 |
-| ignition           |         1460 |   5583 | 17/24 |              773 |                99.0 |     104 |
+| variant            | x = 780 m at [s] | burned cells | houses reached | peak intensity [kW/m] | max heat load [MJ/m²] | ember landings on footprints |
+|--------------------|-----------------:|-------------:|---------------:|----------------------:|----------------------:|-----------------------------:|
+| wildland           |             1025 |         3452 |              - |                     - |                     - |                            - |
+| wildland_spotting  |              571 |         5074 |              - |                     - |                     - |                            - |
+| subdivision        |             1318 |         4025 |          12/24 |                  4057 |                  3.09 |                            0 |
+| defensible         |             1241 |         2995 |           0/24 |                     0 |                  0.00 |                            0 |
+| coupled            |             1498 |         4818 |          13/24 |                  2362 |                  3.09 |                            8 |
+| ignition           |              661 |         5427 |          13/24 |                  4057 |                114.22 |                           40 |
 
-The `ignition` variant was run on 2026-09-16 with the same binary as a fresh
-`subdivision` run (which reached x = 780 m at 1277 s with 4864
-burned cells, 13/24 houses reached and 3.11 MJ/m² maximum heat
-load; the arrival and the burned area differ from the 2026-09-11 row above,
-which was measured before the fire-grid and coupling changes merged into
-ERF-Fire since then, while the house exposure numbers are unchanged; the
-ignition-off path of the 2026-09-16 binary is byte-identical to the previous
-head on the FireStructureIgnition deck). **At the documented default thresholds (6 MJ/m², 50 brands, 1000 kW/m
-for 60 s) no house ignited in 2100 s**: 13 of 24 houses reached by the front, largest wall heat load 3.11 MJ/m², peak intensity 773 kW/m, 86 brands landed with at most 15 on one footprint, the same numbers as `subdivision`, since a house that never ignites changes nothing. A short-grass fire at
-10 m/s does not reach those placeholders by radiation at the ground next to a
-wall, and the seeded spotting drops too few brands on any one footprint; that
-is in line with the field finding that homes in grass fires ignite from
-embers and adjacent fuels rather than from the flame front (Cohen 2004), and
-it says nothing about the thresholds' calibration. With the thresholds at a
-third of the defaults (the committed `inputs_ignition`): 19 of 24 houses ignited, all by the heat-load criterion, the first (first row, house 4) at 250 s from a spot fire burning at its wall ahead of the front and the last at 1880 s; 7, 6 and 6 houses in the three rows. Nine of the nineteen ignited before the front had reached their wall band, and two (houses 8 and 18) have a wall band the front never reached, so they ignited from their neighbours' radiation alone: house-to-house spread at the scale of the subdivision. Every ignited house was still burning at 2100 s (the Eurocode curve lasts 74 minutes), each releasing its 250 kW/m² peak; the largest wall heat load rose to 99 MJ/m² under the radiation of neighbours. The brands launched from the burning houses raise the landings to 104 and the burned area by 15%, and change the seeded brand sequence, so the front reaches x = 780 m at 1460 s instead of 1277 s. The fire itself is unchanged by an ignition: no footprint cell burns or loses fuel, and the exposure numbers of the houses the front reaches are those of `subdivision`
+What the table shows, and why it differs from the 2026-09 table:
 
-The wildland head moves at 0.250 m/s between x = 400 and 470 m against
-Rothermel's 0.2501 m/s for FM1 at 6% moisture and the 300 ft/min wind cap;
-the fuel consumed over its burned area is within 1.5% of the initial load.
-No footprint cell burns or loses fuel in any variant. The subdivision's first
-contacts are at 383, 723 and 963 s for the three rows; the coupled run's at
-371, 645 and 966 s, with a plume of 20 m/s at the end. `wui_spread.png` in
+- **Brands now fly as far as the fuel allows.** A brand rises with the Byram
+  intensity of its cell's full load, so in this 10 m/s grass fire every brand
+  reaches FM1's 200 m landing cap (the run logs give 200 m for every launch:
+  20 in `subdivision`, 10 in `defensible`, 29 in `coupled`, 59 in
+  `ignition`). The front therefore jumps ahead of itself: `wildland_spotting`
+  reaches x = 780 m at 571 s instead of 1255 s, and in `defensible` brands
+  carry the fire across the fuel break, so the front reaches x = 780 m at
+  1241 s (it never did before) while still reaching no house.
+- **A brand lands on a footprint only by chance.** Each brand lands on the
+  200 m-shifted copy of its launch band, so a footprint is hit only when it
+  sits exactly there: 0 landings in `subdivision`, 8 in `coupled`, 40 in
+  `ignition` (where the burning houses launch brands too). `check_wui.py`
+  therefore requires a footprint landing over the three structure variants,
+  not in `subdivision` alone (it had 47 there in 2026-09).
+- **The first contact comes from a brand.** At about 4 s the ignition disc
+  throws one brand 200 m to the wall of house 4 (x = 530 m, y = 190 m); the
+  spot fire burns 3 of its 21 wall cells at 4057 kW/m. That is the first
+  contact of row 1 at 4 s in `subdivision` and `coupled` (rows 2 and 3 at 48
+  and 275 s in `subdivision`, 253 and 518 s in `coupled`). The peak intensity
+  is the full-load Byram intensity of such a spot fire (773 kW/m in 2026-09).
+
+With the thresholds at a third of the defaults (the committed
+`inputs_ignition`), 20 of 24 houses ignite, all by the heat-load criterion,
+7, 7 and 6 in the three rows. The first is house 4 at 8.25 s, when the heat
+load of the spot fire at its wall passes 2 MJ/m²; the last ignites at 1954 s,
+and none has burned out by 2100 s. Thirteen houses ignited before the front
+reached their wall band, from a neighbour's radiation or from a spot fire:
+house-to-house spread at the scale of the subdivision. The largest wall heat
+load rises to 114 MJ/m² under the radiation of burning neighbours. In 2026-09
+the same deck ignited 19 houses, the first at 250 s, also from a spot fire at
+its wall; the earlier start now comes from the disc's first brand. The
+2026-09 binary was not rerun on this deck: the attribution above comes from
+the run logs and the changes listed in the fire validation, not from a
+side-by-side run.
+
+At the documented default thresholds (6 MJ/m², 50 brands, 1000 kW/m for
+60 s) no house ignited in 2100 s in the 2026-09 run (not re-measured). A
+short-grass fire does not reach those placeholders by radiation at the ground
+next to a wall, which is in line with the field finding that homes in grass
+fires ignite from embers and adjacent fuels rather than from the flame front
+(Cohen 2004); it says nothing about the thresholds' calibration. The fire
+itself is unchanged by an ignition: no footprint cell burns or loses fuel in
+any variant.
+
+The wildland head moves at 0.599 m/s between x = 400 and 470 m. Rothermel's
+rate for FM1 at 6% moisture is 1.385 m/s at the sounding's 10 m/s (the run's
+value at t = 0, below the 0.9 I_R limit of 743 ft/min) and 0.632 m/s at the
+2.455 m/s midflame wind on the head's path at t = 100 s, once the surface
+layer has slowed the 6.1 m wind (0.632 to 0.642 m/s for every plotfile from
+100 to 700 s). The head is 95 % of that on average, between the Wulff tip of
+the projection formula at that wind (0.226 m/s, 36 %) and the Rothermel
+rate. It is not steady. The window opens at 19 s, while the wind is still
+falling from its start-up value: at 20 s the log's largest and mean rates
+are both 1.005 m/s, Rothermel's rate at the wind of that moment. From there
+the head slows the whole way toward the Wulff tip. Its local speed along y = 240 m (over
+the 10 m centred on each point, from the arrival times) against Rothermel at
+the local wind of the 100 s plotfile is 1.01 against 0.67 m/s at x = 402.5 m,
+0.72 against 0.65 at 422.5 m, 0.55 against 0.62 at 442.5 m, 0.48 against
+0.60 at 462.5 m, and 0.25 against 0.47 at 642.5 m, where the tip is 0.19.
+That slowing of a curved front's head comes from
+the default directional coupling that FireAdvectiveWindCoupling documents
+(`erf.fire.directional_wind_coupling = advective` holds it at the model's
+rate). The 0.250 m/s of the 2026-09 table was the 300 ft/min cap, which any
+wind above 1.52 m/s reached. The fuel consumed over the burned area is within
+0.5% of the initial load (14251 against 14326 kg).
+The coupled run ends with a plume of 17 m/s (20 m/s in 2026-09). `wui_spread.png` in
 the docs figures shows the four arrival-time maps; it predates the fuel map
 fix below.
 
-These numbers were regenerated on 2026-09-11 after the fuel map fix
+The 2026-09 table was regenerated on 2026-09-11 after the fuel map fix
 (hgopalan/ERF#411). The reader had put the first row of each fuel map on the
 south edge, which moved the 20 m streets of `fuel_map_subdivision.asc` under
 the house rows and left grass where the streets belong. With the streets in

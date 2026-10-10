@@ -1,7 +1,9 @@
 FILE = inputs_base
 
-# wind5 with the midflame wind cap on (erf.fire.use_wind_limit = true, the default):
-# the head can run no faster than Rothermel at the maximum effective wind speed,
-# 300 ft/min (1.52 m/s) for fuel model 1, whatever the wind above it.
+# wind5 with the midflame wind limit on (erf.fire.use_wind_limit = true, the
+# default): Rothermel's (1972, eq. 87) U <= 0.9 I_R, about 750 ft/min (3.8 m/s)
+# for fuel model 1 at 5.5 % moisture, so the head can run no faster than
+# Rothermel at that wind whatever the wind above it. inputs_wind5_cap_fuel_class
+# keeps the 300 ft/min rule this deck ran with until 2026-10.
 erf.input_sounding_file = "input_sounding_u5"
 erf.fire.use_wind_limit = true

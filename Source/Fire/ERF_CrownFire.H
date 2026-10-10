@@ -2,7 +2,13 @@
 #define ERF_CROWN_FIRE_H
 
 #include <AMReX_MultiFab.H>
+#include <AMReX_Geometry.H>
+#include <AMReX_Gpu.H>
+#include <AMReX_ParallelDescriptor.H>
+#include <AMReX_Reduce.H>
+#include <ERF_FireGrid.H>
 #include <cmath>
+#include <utility>
 
 /**
  * @file ERF_CrownFire.H
@@ -15,6 +21,15 @@
  *   4. Van Wagner proxy model for crown ROS
  *   5. Van Wagner passive-to-active blending
  *   6. Crown Fraction Burned (CFB) diagnostic
+ *   7. The extension of the crown rate into the band the front can reach
+ *      (extend_crown_ros_to_front), without which the level-set paths never
+ *      moved the front at the crown rate
+ *
+ * The per-cell crown state (activation, rate, canopy load) lives in
+ * FireLayer::apply_crown_fire_ros() and compute_heat_flux_and_diagnostics();
+ * the two MultiFab kernels this header carried until 2026-10
+ * (update_crown_fire_status, fill_crown_heat_flux) had no caller and a
+ * different physics from the live path, and were removed.
  *
  * Assumptions:
  *   - Canopy parameters are uniform across the domain (erf.fire.crown.*);
@@ -242,136 +257,137 @@ amrex::Real compute_crown_fraction_burned(
 }
 
 /**
- * @brief Update crown fire status and rate of spread
+ * @brief Carry the crown rate of burned cells into the unburned band the front
+ *        can reach, and return the per-cell factor the directional level-set
+ *        paths apply.
  *
- * GPU kernel over fire grid cells. For each burned cell (phi < 0):
- *   - If fireline intensity >= I_B_crit, activate crown fire (set flag to 1.0)
- *   - If already crown-active or just activated, replace ROS with crown value
- *   - Once activated, the flag is never reset to 0.0
+ * apply_crown_fire_ros() writes the crown rate into fire_ros in burned cells
+ * only. The isotropic level set advances each cell at its own rate, so the
+ * unburned cells next to the front kept the surface rate and a crown fire
+ * never moved the front on that path; the directional, hybrid and Balbi
+ * paths rebuild the rate from the model inside every Runge-Kutta stage and
+ * never read fire_ros at all. Only the FARSITE front_cell update, which takes
+ * the larger of a front cell's own rate and its burned neighbours', saw it.
  *
- * @param[out] fire_crown_active  Crown fire status: 1.0=active, 0.0=surface
- * @param[out] fire_ros           Rate of spread field [m/s]
- * @param[in]  fire_phi           Level-set field (<0 = burned)
- * @param[in]  fireline_intensity Byram intensity [kW/m]
- * @param[in]  I_B_crit           Critical intensity for initiation [kW/m]
- * @param[in]  R_crown_ms         Crown fire ROS [m/s]
- * @param[in]  fire_debug         Print debug diagnostics if true
+ * As apply_fire_acceleration_front() does for its clock, every unburned cell
+ * within n_ext = 2 + ceil(R_max dt / dx) cells of a crowned cell (the cells
+ * the front can reach within the step plus the stencil's neighbours) takes the
+ * largest crown rate of its burned or already reached 4-neighbours, if that
+ * is above its own surface rate; the factor R_crown / R_surface (1 elsewhere)
+ * is written to `factor`, which the per-stage paths multiply into the rate
+ * they rebuild, the way the acceleration and suppression factors are.
+ *
+ * @param[in,out] ros       Rate of spread [m/s]: the crown rate in crowned
+ *                          cells on entry, extended into the band on return
+ * @param[in]     ros_surf  Surface rate of spread [m/s], the factor's denominator
+ * @param[in]     phi       Level set (< 0 burned)
+ * @param[in]     crown_ros Crown rate of spread [m/s] in crowned cells
+ * @param[in]     crown_act Crown activation flag (>= 0.5 crowned)
+ * @param[in]     geom      Fire-grid geometry
+ * @param[in]     dt        Atmospheric step [s]
+ * @param[out]    factor    ros / ros_surf per cell, 1 where nothing changed
+ * @param[in]     nonburnable  Mask (> 0.5 non-burnable); a mask cell neither
+ *                          takes nor passes on a crown rate, so a firebreak or
+ *                          a structure stops the extension (nullptr: no mask)
+ * @return the number of cells that took a crown rate from a neighbour (over ranks)
  */
-inline void update_crown_fire_status(amrex::MultiFab& fire_crown_active,
-                                      amrex::MultiFab& fire_ros,
-                                      const amrex::MultiFab& fire_phi,
-                                      const amrex::MultiFab& fireline_intensity,
-                                      amrex::Real I_B_crit,
-                                      amrex::Real R_crown_ms,
-                                      bool fire_debug = false)
+inline amrex::Long extend_crown_ros_to_front(amrex::MultiFab& ros,
+                                             const amrex::MultiFab& ros_surf,
+                                             const amrex::MultiFab& phi,
+                                             const amrex::MultiFab& crown_ros,
+                                             const amrex::MultiFab& crown_act,
+                                             const amrex::Geometry& geom,
+                                             amrex::Real dt,
+                                             amrex::MultiFab& factor,
+                                             const amrex::MultiFab* nonburnable = nullptr)
 {
     using namespace amrex;
+    const bool use_mask = (nonburnable != nullptr);
+    using namespace amrex::literals;
 
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-    for (MFIter mfi(fire_crown_active); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.tilebox();
-        auto ca  = fire_crown_active[mfi].array();
-        auto ros = fire_ros[mfi].array();
-        auto phi = fire_phi[mfi].const_array();
-        auto I_B = fireline_intensity[mfi].const_array();
+    const auto dx    = geom.CellSizeArray();
+    const Real h     = amrex::min(dx[0], dx[1]);
+    const Real R_max = amrex::max(ros.max(0), 0.0_rt);
+    const int  n_ext = 2 + static_cast<int>(std::ceil(R_max * dt / h));
 
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            // Only update burned cells
-            if (phi(i, j, k) < 0.0) {
-                // Check if crown fire should be initiated
-                if (ca(i, j, k) < 0.5 && I_B(i, j, k) >= I_B_crit) {
-                    ca(i, j, k) = 1.0;
-                }
-                // If crown fire is active, use crown ROS
-                if (ca(i, j, k) >= 0.5) {
-                    ros(i, j, k) = R_crown_ms;
-                }
-            }
+    // Crown rate of the crowned cells, -1 elsewhere; one ghost cell for the
+    // extension passes, which read the four neighbours across box boundaries.
+    const IntVect ng(1, 1, 0);
+    MultiFab c_ext(ros.boxArray(), ros.DistributionMap(), 1, ng);
+    MultiFab c_tmp(ros.boxArray(), ros.DistributionMap(), 1, ng);
+    ReduceOps<ReduceOpMax> reduce_op;
+    ReduceData<Real> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+    for (MFIter mfi(c_ext); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto ce = c_ext.array(mfi);
+        auto p  = phi.const_array(mfi);
+        auto cr = crown_ros.const_array(mfi);
+        auto ca = crown_act.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            ce(i, j, k) = (p(i, j, k) < 0.0_rt && ca(i, j, k) >= 0.5_rt) ? cr(i, j, k) : -1.0_rt;
+        });
+        reduce_op.eval(bx, reduce_data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+            return { (p(i, j, k) < 0.0_rt && ca(i, j, k) >= 0.5_rt) ? cr(i, j, k) : -1.0_rt };
         });
     }
+    Real c_any = amrex::get<0>(reduce_data.value(reduce_op));
+    ParallelDescriptor::ReduceRealMax(c_any);
+    factor.setVal(1.0_rt);
+    if (!(c_any > 0.0_rt)) { Gpu::streamSynchronize(); return 0; }
 
-    if (fire_debug) {
-        amrex::Real n_crown = fire_crown_active.sum(0);
-        amrex::Real ros_max = fire_ros.max(0);
-        amrex::Print() << "[FIRE CROWN] active_crown_cells=" << static_cast<long>(n_crown)
-                       << "  I_B_crit=" << I_B_crit << " kW/m"
-                       << "  R_crown=" << R_crown_ms << " m/s"
-                       << "  ros_max_after=" << ros_max << " m/s\n";
-    }
-}
-
-/**
- * @brief Compute and accumulate crown fire heat flux
- *
- * GPU kernel. For each cell where crown fire is active (crown_active = 1.0) and
- * cell is burned (phi < 0):
- *   - On first activation, initialize crown load: w = C_BD * canopy_depth [kg/m²]
- *   - Compute crown fuel burnout residence time: tau = canopy_depth / max(R_crown, 1e-10)
- *   - Heat flux from crown: Q = crown_load * h_crown / tau
- *   - Accumulate crown flux into existing surface flux
- *   - Deplete crown load exponentially: w_new = w * exp(-dt / tau)
- *
- * @param[out] fire_heat_flux       Heat flux field [W/m²] (accumulated)
- * @param[out] fire_crown_load      Crown fuel load [kg/m²] (initialized on first call, then depleted)
- * @param[in]  fire_crown_active    Crown fire status (1.0 = active)
- * @param[in]  fire_phi             Level-set field (<0 = burned)
- * @param[in]  canopy_depth         Canopy depth [m]
- * @param[in]  C_BD                 Canopy bulk density [kg/m³]; used to initialize crown load
- * @param[in]  h_crown_J_per_kg     Crown heat content [J/kg]
- * @param[in]  R_crown_ms           Crown fire ROS [m/s]
- * @param[in]  dt_s                 Timestep [s]
- */
-inline void fill_crown_heat_flux(amrex::MultiFab& fire_heat_flux,
-                                  amrex::MultiFab& fire_crown_load,
-                                  const amrex::MultiFab& fire_crown_active,
-                                  const amrex::MultiFab& fire_phi,
-                                  amrex::Real canopy_depth,
-                                  amrex::Real C_BD,
-                                  amrex::Real h_crown_J_per_kg,
-                                  amrex::Real R_crown_ms,
-                                  amrex::Real dt_s)
-{
-    using namespace amrex;
-
-#ifdef AMREX_USE_OMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-    for (MFIter mfi(fire_heat_flux); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.tilebox();
-        auto Q       = fire_heat_flux[mfi].array();
-        auto w_crown = fire_crown_load[mfi].array();
-        auto ca      = fire_crown_active[mfi].const_array();
-        auto phi     = fire_phi[mfi].const_array();
-
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            // Only process cells where crown fire is active and burned
-            if (ca(i, j, k) >= 0.5 && phi(i, j, k) < 0.0) {
-
-                // Initialize crown load on first activation:
-                // load [kg/m²] = bulk density [kg/m³] × canopy depth [m]
-                if (w_crown(i, j, k) <= 0.0) {
-                    w_crown(i, j, k) = C_BD * canopy_depth;
+    // Carry the crowned cells' rate into the unburned band, one cell a pass
+    for (int pass = 0; pass < n_ext; ++pass) {
+        fire_fill_boundary(c_ext, geom);
+        for (MFIter mfi(c_tmp); mfi.isValid(); ++mfi) {
+            auto src = c_ext.const_array(mfi);
+            auto dst = c_tmp.array(mfi);
+            auto p   = phi.const_array(mfi);
+            Array4<const Real> msk;
+            if (use_mask) { msk = nonburnable->const_array(mfi); }
+            ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                Real c = src(i, j, k);
+                const bool blocked = use_mask && msk(i, j, k) > 0.5_rt;
+                if (c < 0.0_rt && p(i, j, k) >= 0.0_rt && !blocked) {
+                    c = amrex::max(amrex::max(src(i-1, j, k), src(i+1, j, k)),
+                                   amrex::max(src(i, j-1, k), src(i, j+1, k)));
                 }
+                dst(i, j, k) = c;
+            });
+        }
+        std::swap(c_ext, c_tmp);
+    }
 
-                // Crown burnout residence time [s]
-                amrex::Real R_safe    = amrex::max(static_cast<amrex::Real>(R_crown_ms), static_cast<amrex::Real>(1.0e-10));
-                amrex::Real tau_crown = amrex::max(static_cast<amrex::Real>(canopy_depth / R_safe), static_cast<amrex::Real>(1.0));
-
-                // Heat flux from crown fuel [W/m²]
-                amrex::Real Q_crown = w_crown(i, j, k) * h_crown_J_per_kg / tau_crown;
-                Q(i, j, k) += Q_crown;
-
-                // Exponential depletion of crown load
-                amrex::Real decay_factor = std::exp(-dt_s / tau_crown);
-                w_crown(i, j, k) *= decay_factor;
-
-                // Floor at zero
-                w_crown(i, j, k) = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(w_crown(i, j, k)));
+    ReduceOps<ReduceOpSum> count_op;
+    ReduceData<unsigned long long> count_data(count_op);
+    using CountTuple = typename decltype(count_data)::Type;
+    for (MFIter mfi(ros); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto R  = ros.array(mfi);
+        auto Rs = ros_surf.const_array(mfi);
+        auto ce = c_ext.const_array(mfi);
+        auto p  = phi.const_array(mfi);
+        auto fc = factor.array(mfi);
+        count_op.eval(bx, count_data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> CountTuple {
+            const Real surf = amrex::max(Rs(i, j, k), 0.0_rt);
+            unsigned long long took = 0ull;
+            if (p(i, j, k) >= 0.0_rt && ce(i, j, k) > surf) {
+                R(i, j, k) = ce(i, j, k);
+                took = 1ull;
             }
+            // the factor the per-stage paths apply to the rate they rebuild;
+            // divide by the floored rate before the select (a non-burnable
+            // cell has surf = 0 and the unselected 0/0 would be speculated)
+            const Real ratio = R(i, j, k) / amrex::max(surf, 1.0e-30_rt);
+            fc(i, j, k) = (surf > 1.0e-30_rt) ? amrex::max(ratio, 1.0_rt) : 1.0_rt;
+            return { took };
         });
     }
+    amrex::Long n_took = static_cast<amrex::Long>(amrex::get<0>(count_data.value(count_op)));
+    ParallelDescriptor::ReduceLongSum(n_took);
+    // The kernels above read c_ext, which is freed on return.
+    Gpu::streamSynchronize();
+    return n_took;
 }
 
 #endif  // ERF_CROWN_FIRE_H

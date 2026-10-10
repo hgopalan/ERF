@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rates of spread of the line fire from the run logs, against Rothermel and Coen et al. (2013).
 
-    python3 check_linefire.py nowind wind2p5 wind5 [wind2p5_2way]
+    python3 check_linefire.py nowind wind2p5 wind5 [wind2p5_2way wind2p5_open_2way]
 
 For each variant the head and backing rates are the distance between
 consecutive probe cells divided by the difference of their arrival times
@@ -21,17 +21,18 @@ import math, re, sys
 
 TOL = 0.10
 M_F = 0.055                       # the decks' fuel moisture (all dead classes)
-DT = 0.25                         # erf.fixed_dt of inputs_base: one wind sample per step
+DT_DEFAULT = 0.25                 # erf.fixed_dt of inputs_base; a log's own "DT =" overrides it
 FT_MIN_TO_M_S = 0.00508
-U_MEWS = 300.0 / 196.85           # erf.fire.use_wind_limit cap for fine fuels (sigma > 1000 1/ft) [m/s]
+U_MEWS = 300.0 / 196.85           # erf.fire.wind_limit = fuel_class: 300 ft/min for fine fuels (sigma > 1000 1/ft) [m/s]
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 # Coen et al. 2013, coupled LES: NoWind crept outward at 0.02 m/s on every side (= R0); Control
 # ran a 0.22 m/s HEAD (backing not quoted; WRF-Fire sets it to R0); WSHi "four-fifths" faster.
 # The one-way heads here are meant to sit below these: the paper's plume doubles the head wind.
 COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control head", 0.22), "wind5": ("WSHi head", 0.40),
-        "wind5_cap": ("WSHi head", 0.40),
+        "wind5_cap": ("WSHi head", 0.40), "wind5_cap_fuel_class": ("WSHi head", 0.40),
         "nowind_2way": ("NoWind", 0.02),
-        "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40)}
+        "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40),
+        "wind2p5_open_2way": ("Control head", 0.22)}
 
 def rothermel_fm1(M_f, U_eff_ms):
     """Rothermel (1972) as Source/Fire/ERF_Rothermel.cpp computes it: (R0, R, phi_w) in m/s."""
@@ -49,16 +50,30 @@ def rothermel_fm1(M_f, U_eff_ms):
     phi_w = C * (U_eff_ms * 196.85) ** B * br ** -E if U_eff_ms > 0 else 0.0
     return R0, R0 * (1 + phi_w), phi_w
 
+def rothermel_wind_limit_ms(M_f):
+    """Rothermel (1972) eq. 87, U <= 0.9 I_R ft/min (erf.fire.wind_limit = rothermel, the default) [m/s]."""
+    fp = FM1
+    w_n = fp['w0'] * (1 - fp['S_T']); rho_b = fp['w0'] / fp['delta']; beta = rho_b / fp['rho_p']; s = fp['sigma']
+    beta_op = 3.348 * s ** -0.8189; s15 = s ** 1.5; Gmax = s15 / (495 + 0.0594 * s15); A = 133 * s ** -0.7913
+    br = beta / beta_op; Gp = Gmax * br ** A * math.exp(A * (1 - br))
+    rm = min(M_f / fp['Mx'], 1.0); etaM = max(0.0, 1 - 2.59 * rm + 5.11 * rm ** 2 - 3.52 * rm ** 3)
+    etas = 0.174 * fp['S_e'] ** -0.19
+    IR = Gp * w_n * fp['h'] * etaM * etas
+    return 0.9 * IR / 196.85
+
 def parse(log):
     """Probe arrivals, and the effective and reference wind with the time of the step that reported it."""
     probes, times, ueff, uref, step = {}, [], [], [], 0
-    for line in open(log):
+    lines = open(log).readlines()
+    dt = next((float(m.group(1)) for m in (re.search(r"Coarse STEP \d+ ends\. TIME = \S+ DT = (\S+)", l) for l in lines) if m),
+              DT_DEFAULT)   # one wind sample per step; wind2p5_open_2way runs at 0.5 s
+    for line in lines:
         m = re.search(r"Coarse STEP (\d+) starts", line)
         if m: step = int(m.group(1))
         m = re.search(r"\[FIRE PROBE\] (\d+) x=([\d.eE+-]+) y=.*arrival_time_s=([\d.eE+-]+)", line)
         if m: probes[int(m.group(1))] = (float(m.group(2)), float(m.group(3)))
         m = re.search(r"Max effective wind: ([\d.eE+-]+) m/s", line)
-        if m: ueff.append(float(m.group(1))); times.append((step - 1) * DT)
+        if m: ueff.append(float(m.group(1))); times.append((step - 1) * dt)
         m = re.search(r"Max reference wind: ([\d.eE+-]+) m/s", line)
         if m: uref.append(float(m.group(1)))
     return probes, times, ueff, uref
@@ -82,12 +97,14 @@ def rate(pts, times, R):
 def main():
     variants = sys.argv[1:]
     status = 0
-    hdr = f"{'variant':14s} {'U6.1':>6s} {'U_eff':>6s} {'R0':>7s} {'R_head':>7s} | {'back':>7s} {'head':>7s} {'n':>3s} | {'Coen (coupled)':>18s}"
+    hdr = f"{'variant':17s} {'U6.1':>6s} {'U_eff':>6s} {'R0':>7s} {'R_head':>7s} | {'back':>7s} {'head':>7s} {'n':>3s} | {'Coen (coupled)':>18s}"
     print(hdr); print("-" * len(hdr))
     for v in variants:
         probes, times, ueff, uref = parse(f"run_{v}.log")
-        if v.endswith("_cap"):
+        if v.endswith("_cap_fuel_class"):
             ueff = [min(u, U_MEWS) for u in ueff]
+        elif v.endswith("_cap"):
+            ueff = [min(u, rothermel_wind_limit_ms(M_F)) for u in ueff]
         if not ueff:
             times, ueff = [0.0], [0.0]
         U = sum(ueff) / len(ueff)
@@ -99,7 +116,7 @@ def main():
         rb, _, nb = rate(back, times, R_head)
         rh, Rh, nh = rate(head, times, R_head)
         name, rc = COEN.get(v, ("", float('nan')))
-        print(f"{v:14s} {Ur:6.2f} {U:6.2f} {R0:7.4f} {Rh:7.4f} | {rb:7.4f} {rh:7.4f} {nb + nh:3d} | {name:>12s} {rc:5.2f}")
+        print(f"{v:17s} {Ur:6.2f} {U:6.2f} {R0:7.4f} {Rh:7.4f} | {rb:7.4f} {rh:7.4f} {nb + nh:3d} | {name:>12s} {rc:5.2f}")
         if v.endswith("_2way"): continue
         eb = abs(rb - R0) / R0 if nb else float('inf'); eh = abs(rh - Rh) / Rh if nh else float('inf')
         spread = (max(ueff) - min(ueff)) / U if U > 0 else 0.0

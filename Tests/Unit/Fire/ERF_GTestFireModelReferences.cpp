@@ -186,15 +186,19 @@ TEST(FireModelReferences, CheneyGouldIsotropicPathUsesTheDeckMoisture)
     FireParams::CheneyGouldParams cgp;
     cgp.moisture = 20.0;
     cgp.curing   = 0.8;
-    const CheneyGouldComputed cgc = compute_cheney_gould_params(cgp);
+    // the grass_simple fit (the model this test was written for); the 1998
+    // model has its own tests in ERF_GTestCheneyGould.cpp
+    const CheneyGouldComputed cgc = compute_cheney_gould_params(cgp, cheney_gould::model_grass_simple);
+    FireParams::CheneyGouldParams cgp_ph;   // the placeholders 10 % and 1
+    const CheneyGouldComputed cgc_ph = compute_cheney_gould_params(cgp_ph, cheney_gould::model_grass_simple);
 
     OneCell c;
     MultiFab ros(c.ba, c.dm, 1, 0), wind(c.ba, c.dm, 2, 0);
     set2(wind, Real(4.0), Real(3.0));   // |U| = 5 m/s
     fill_cheney_gould_ros(ros, wind, cgc);
 
-    const Real expect = cheney_gould_ros(Real(5.0), cgc.ros_backing, Real(20.0), Real(0.8));
-    const Real placeholder = cheney_gould_ros(Real(5.0), cgc.ros_backing, Real(10.0), Real(1.0));
+    const Real expect = cheney_gould_ros(Real(5.0), cgc);
+    const Real placeholder = grass_simple_ros(Real(5.0), cgc.ros_backing, cgc_ph.moisture, cgc_ph.curing);
     ASSERT_GT(std::abs(expect - placeholder), Real(0.05) * expect) << "moisture must change the rate";
     EXPECT_NEAR(host_value(ros, 0, 0), expect, 1e-6 * expect);
 }

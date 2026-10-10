@@ -10,7 +10,7 @@ Rate-of-Spread Models
 Overview
 --------
 
-ERF-Fire provides five rate-of-spread models and a per-cell hybrid of any two, selected with the :cpp:`erf.fire.ros_model` parameter: Rothermel (1972, the default), the BEHAVE multi-class Rothermel, MacArthur (1966), Cheney-Gould (1998) and Balbi (2009 or 2020). All consume the same effective midflame wind and write to the same ``fire_ros`` MultiFab, so the propagation methods in :ref:`sec:FirePropagation` are independent of the choice.
+ERF-Fire provides seven rate-of-spread models and a per-cell hybrid of two of them, selected with the :cpp:`erf.fire.ros_model` parameter: Rothermel (1972, the default), the BEHAVE multi-class Rothermel, MacArthur (1966), Cheney-Gould (1998), its earlier ``grass_simple`` fit, the Canadian FBP system and Balbi (2009 or 2020), plus a prescribed field. All consume the same effective midflame wind and write to the same ``fire_ros`` MultiFab, so the propagation methods in :ref:`sec:FirePropagation` are independent of the choice.
 
 Sub-phase A adds per-fuel wind extraction height following WRF-SFIRE :cpp:`fcwh` convention. This is controlled by the :cpp:`erf.fire.use_per_fuel_wind_ht` parameter and is backward-compatible with the global wind reference height approach.
 
@@ -63,13 +63,19 @@ comparison option, not a correction. It does not make ERF reproduce WRF-Fire:
 - ERF's :math:`M` is the dead moisture only, while it deflates the whole load,
   live included; WRF-Fire's moisture average includes live fuel where there is
   some (Anderson 2, 4, 5, 7, 10 and the GR, GS, SH and TU fuels).
-- ERF keeps its own heat contents and the MEWS wind cap
-  (:cpp:`erf.fire.use_wind_limit`); WRF-Fire caps the rate itself at 6 m/s.
+- ERF keeps its own heat contents and its wind limit
+  (:cpp:`erf.fire.use_wind_limit`, by default Rothermel's
+  :math:`U \le 0.9\,I_R`, which both options move through :math:`I_R`);
+  WRF-Fire caps the rate itself at 6 m/s.
 - The fuel consumed and the heat released still use the full dry load.
 
 A lower load changes the no-wind rate either way: it is slower for short grass
 (FM1) and faster for FM8, 9, 12 and 13. It also raises the wind factor through
-:math:`(\beta/\beta_{op})^{-E}`, so for FM1 at 4 m/s the two nearly cancel.
+:math:`(\beta/\beta_{op})^{-E}`, so for FM1 at 4 m/s with the wind limit off
+the two nearly cancel (+0.006 % in the head rate). Under the default wind
+limit :math:`U \le 0.9\,I_R` the lower :math:`I_R` also lowers the limit,
+which binds at that wind: the head rate drops 12.8 % (1.509 to 1.316 m/s; 0.09 %
+under the fuel-class cap).
 
 Both options act wherever the Rothermel coefficients are built: the uniform
 fuel, the per-fuel table of a fuel map (deck-defined fuels included) and the
@@ -83,6 +89,32 @@ the head rate of each combination.
 - Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
 - Albini, F.A. (1976). Estimating wildfire behavior and effects. USDA Forest Service General Technical Report INT-30.
 
+**Per-cell moisture.** With :cpp:`erf.fire.moisture_dynamic` the dead
+moistures differ between cells, and with
+:cpp:`erf.fire.rothermel_cell_moisture = true` (the default since October
+2026) the Rothermel coefficients are built once per fire step in every cell
+from that cell's own 1-h, 10-h and 100-h moistures (clamped to [0.01, 0.40]
+as the domain means are) into a coefficient field that the isotropic and
+directional kernels read; the cell's fuel enters that field only with
+:cpp:`rothermel_per_fuel`, so a fuel map without it keeps the uniform fuel
+as before. ``false`` restores the earlier form, every cell on the
+coefficients of the domain-mean moistures, which a wet valley or a dry ridge
+could not change. Every coupled Rothermel run moves with this default
+(``ERF_GTestRothermelCellMoisture``).
+
+**Wind limit.** Rothermel (1972, eq. 87) bounds the wind factor by the
+condition :math:`U \le 0.9\, I_R` (:math:`U` in ft/min, :math:`I_R` the
+reaction intensity in BTU/ft²/min), beyond which the rate was not fitted;
+:cpp:`erf.fire.use_wind_limit` (default true) applies it to the Rothermel
+and BEHAVE kernels, on every path. For Anderson model 1 at 8 % moisture
+:math:`I_R` is about 765 BTU/ft²/min, so the limit is about 690 ft/min
+(3.5 m/s midflame), and at a 2.2 m/s midflame wind (a 6 m/s reference wind)
+the head rate is 0.43 m/s against 0.22 m/s under the fuel-class rule.
+That rule, 300 ft/min for fuels with a surface-area-to-volume ratio above
+1000 ft⁻¹ and 500 ft/min otherwise, is not a published rule; it was this
+code's default until October 2026 and it is kept as :cpp:`erf.fire.wind_limit =
+"fuel_class"`. ``ERF_GTestWindLimit`` checks both.
+
 MacArthur (1966) Australian Formula
 ------------------------------------
 
@@ -94,7 +126,7 @@ This model implements the MacArthur (1966) Mark 5 Forest Fire Danger Meter formu
 
    R = R_b \cdot \exp(0.8424 \cdot \max(U,\,0))
 
-where :math:`R_b = 0.18\ \text{m/s}` is the backing (no-wind) rate of spread and :math:`U` is the effective midflame wind speed [m/s].
+where :math:`R_b = 0.18\ \text{m/s}` is the backing (no-wind) rate of spread and :math:`U` is the effective midflame wind speed [m/s]. The exponential is capped at :cpp:`erf.fire.macarthur.ros_max` (default 6 m/s, WRF-Fire's cap; it would reach 12 m/s at a 5 m/s midflame wind); 0 removes the cap. The wind is bounded where the rate reaches the cap before the exponential is taken, and the exponent at 40 in every case (a rate of 4e16 m/s, finite with its square in single precision), so no wind and no cap overflows it; uncapped, the rate is finite there but not physical.
 
 The model is appropriate for Australian grassland and open forest fuels. It is not calibrated for North American FBFM13 fuel models.
 
@@ -351,19 +383,50 @@ Cheney-Gould (1998) Grassland Model
 
 **Key parameter:** :cpp:`ros_model = "cheney_gould"`
 
-This model is calibrated for Australian open grassland fuels and is based on empirical relations from CSIRO research. The forward rate of spread is computed as:
+The grassland model of Cheney, Gould and Catchpole (1998), fitted to the
+CSIRO Annaburroo experiments. The head rate in km/h for natural (undisturbed)
+pasture is their eqs. 2 and 3,
 
 .. math::
 
-   R = R_b \cdot (1 + w_f) \cdot f_m
+   R = (0.054 + 0.269\, U_{10})\, \phi_M\, \phi_C \qquad (U_{10} < 5),
 
-   w_f = 0.15 \cdot U \cdot (\text{curing} + 0.2)
+   R = \bigl(1.4 + 0.838\,(U_{10} - 5)^{0.844}\bigr)\, \phi_M\, \phi_C \qquad (U_{10} \ge 5),
 
-   f_m = \frac{20}{M + 1}
+with :math:`U_{10}` the 10 m open wind in km/h; grazed pasture
+(:cpp:`erf.fire.cheney_gould.pasture = "grazed"`) takes 0.209, 1.1 and 0.715
+in place of 0.269, 1.4 and 0.838 (eqs. 4 and 5). The moisture coefficient is
+piecewise in the dead fine fuel moisture :math:`M` [%],
 
-where :math:`R_b` is the backing rate [m/s], :math:`U` is wind speed [m/s], :math:`M` is dead fine fuel moisture [%], and curing ∈ [0, 1].
+.. math::
 
-The kernel takes :math:`M` and the curing from :cpp:`erf.fire.cheney_gould.moisture` and :cpp:`erf.fire.cheney_gould.curing`, or, with :cpp:`erf.fire.moisture_dynamic = true`, the domain-average 1-h moisture, on both the isotropic and the directional path. (Before October 2026 the isotropic path passed fixed 10 % and 1.0, so the two paths disagreed for any other value.) Per-cell moisture is not passed into the kernel.
+   \phi_M = e^{-0.108 M} \ (M < 12), \qquad
+   \phi_M = 0.684 - 0.0342 M \ (12 \le M < 20,\ U_{10} < 10), \qquad
+   \phi_M = 0.547 - 0.0228 M \ (12 \le M < 20,\ U_{10} \ge 10),
+
+floored at zero, and the curing coefficient of the degree of curing
+:math:`C` [%] is Cruz et al. (2015),
+:math:`\phi_C = 1.036 / (1 + 103.989\, e^{-0.0996 (C - 20)})`
+(:cpp:`erf.fire.cheney_gould.curing_curve = "cruz2015"`, default), or the
+1998 paper's :math:`\phi_C = 1.12 / (1 + 59.2\, e^{-0.124 (C - 50)})`
+(``"cheney1998"``). The model reads the reference wind of
+:cpp:`erf.fire.wind_ref_ht` as its open wind, so set that height to 10 m;
+:cpp:`erf.fire.cheney_gould.wind_source = "midflame"` hands it the
+WAF-reduced midflame wind instead. A backing (negative) wind component is
+treated as calm. At 20 km/h, 6 % moisture and full curing the model gives
+1.40 m/s (5.0 km/h); in calm it gives 0.008 m/s.
+
+The kernel takes :math:`M` and the curing from :cpp:`erf.fire.cheney_gould.moisture` and :cpp:`erf.fire.cheney_gould.curing`, or, with :cpp:`erf.fire.moisture_dynamic = true`, the domain-average 1-h moisture, on both the isotropic and the directional path. Per-cell moisture is not passed into the kernel.
+
+Until October 2026 the name ``cheney_gould`` selected a different formula,
+:math:`R = R_b\,(1 + 0.15\, U\,(c + 0.2))\, 20 / (M + 1)` with
+:math:`R_b = 0.08\, c\, e^{-0.01 M}` m/s on the midflame wind
+:math:`U` [m/s] and the curing :math:`c` in [0, 1], which is not from the
+paper: it runs about 26x the 1998 model in calm and under a third of it at
+20 km/h.
+It is kept, unchanged, as :cpp:`ros_model = "grass_simple"` for reproducing
+earlier results; ``ERF_GTestCheneyGould`` checks both against the equations
+written out independently.
 
 **Not appropriate for forest or shrub fuels (FM4-FM13).**
 
@@ -385,10 +448,23 @@ The kernel takes :math:`M` and the curing from :cpp:`erf.fire.cheney_gould.moist
      - 1.0
      - [0-1]
      - Degree of curing (1 = fully cured)
+   * - :cpp:`erf.fire.cheney_gould.pasture`
+     - "natural"
+     - -
+     - "natural" or "grazed" pasture coefficients
+   * - :cpp:`erf.fire.cheney_gould.curing_curve`
+     - "cruz2015"
+     - -
+     - Curing coefficient: "cruz2015" or "cheney1998"
+   * - :cpp:`erf.fire.cheney_gould.wind_source`
+     - "reference"
+     - -
+     - "reference" (the wind at wind_ref_ht, the model's U10) or "midflame"
 
-**Reference:**
+**References:**
 
 - Cheney, N.P., Gould, J.S. &amp; Catchpole, W.R. (1998). Prediction of fire spread in grasslands. *International Journal of Wildland Fire*, 8(1), 1-13.
+- Cruz, M.G., Gould, J.S., Kidnie, S., Bessell, R., Nichols, D. &amp; Slijepcevic, A. (2015). Effects of curing on grassfires: II. Effect of grass senescence on the rate of fire spread. *International Journal of Wildland Fire*, 24(6), 838-848.
 
 .. _sec:ROS_Behave:
 
@@ -408,7 +484,22 @@ and :math:`M_{x,\mathrm{live}} = 2.9\, W' (1 - M'_f / M_{x,\mathrm{dead}}) - 0.2
 October 2026, which lowered :math:`W'` by about 25 % and damped live fuel
 too strongly), evaluated here with the category-mean SAVs. The fuel-bed SAV
 of the reaction velocity is the dead category's, not the area-weighted mean
-over both categories that BehavePlus uses. With
+over both categories that BehavePlus uses. The net load of each category is
+Rothermel's surface-area-weighted load (eq. 53) with Albini's (1976) size
+classes (Andrews 2018, eq. 61): :math:`w_n = \sum_j g_j\, w_{n,j}` with
+:math:`g_j` the surface-area fraction summed over the classes of the same
+size class (boundaries 1200, 192, 96, 48 and 16 ft⁻¹), so a cured
+herbaceous load adds to the 1-h class while the 10-h and 100-h loads enter by
+their area share, and the heat sink is Rothermel's eqs. 55-57,
+:math:`\rho_b \sum_i f_i \sum_j f_{ij}\, \varepsilon_{ij}\, Q_{ig,ij}`,
+with each class's own :math:`\varepsilon = e^{-138/\sigma}` and
+:math:`Q_{ig} = 250 + 1116 M`. Until October 2026 the net load was the plain
+sum of the classes and the sink used one :math:`\varepsilon` of the dead
+SAV and the load-weighted moisture, which overstated the reaction intensity
+of multi-class fuels by the inverse of the 1-h area share, 3.3x for FM10 and
+5.2x for FM13 (the zero-wind rate 3.0x and 4.3x, the heat sink changing with
+it); that form is kept as
+:cpp:`erf.fire.behave.net_load = "sum"` (``ERF_GTestBehaveNetLoad``). With
 :cpp:`erf.fire.moisture_dynamic = true` the state is rebuilt in every fire
 cell from that cell's moistures, and the directional level-set path reads a
 state rebuilt each step from the domain-average moistures; otherwise it is
@@ -460,8 +551,9 @@ models 2, 4, 5, 7 and 10 (most at :math:`M_{lh} = 0.30`), and lower by up to
 for SH1, TU1 and TU3. SH9's no-wind rate rises by up to 83 % while its rate
 at 5 m/s falls by up to 31 %: moving its cured load from the 1-h class
 (750 1/ft) to the dead herbaceous class (1800 1/ft) raises the dead
-surface-area-to-volume ratio past 1000 1/ft, where the wind cap drops from
-500 to 300 ft/min. Nothing changes at or above
+surface-area-to-volume ratio past 1000 1/ft, where the fuel-class wind cap
+(:cpp:`erf.fire.wind_limit = "fuel_class"`) drops from 500 to 300 ft/min.
+Nothing changes at or above
 :math:`M_{lh} = 1.20`, or for fuels without a live herbaceous load.
 ``ERF_GTestBehaveScottBurgan`` checks that GR2 at :math:`M_{lh} = 0.90`
 carries :math:`w_{d1} + w_{lh}/3` of the untransferred table as dead load,
@@ -477,7 +569,7 @@ Per-Fuel Wind Height (Sub-phase A)
 
 Enabling :cpp:`erf.fire.use_per_fuel_wind_ht = true` causes wind extraction to use a per-fuel-category height following WRF-SFIRE :cpp:`fcwh` convention.
 
-WRF-SFIRE defaults are 6.096 m for all 13 Anderson fuel models, which is identical to the :cpp:`wind_ref_ht` default of 6.1 m. Enabling this flag has no practical effect unless the :cpp:`fcwh` table is modified.
+WRF-SFIRE defaults are 6.096 m for every fuel model, so the flag samples the wind at 6.096 m with or without a fuel map. Next to the :cpp:`wind_ref_ht` default of 6.1 m this changes little; with :cpp:`wind_ref_ht` = 10 or 20 m it lowers the wind the fire reads. Every reader of the wind's height follows it: the range checks of :cpp:`wind_sample_ht` and :cpp:`wind_sample_z0`, the ember drift, and the height of the wind handed to the dust coupling.
 
 **Surface roughness:** the fire model does not carry a per-fuel roughness length.
 The roughness of the wind profile is the surface-layer value :cpp:`erf.most.z0`,
@@ -500,7 +592,9 @@ Setting :cpp:`erf.fire.ros_model = "hybrid"` evaluates two of the models above o
 
    R = (1 - w)\, R_{\text{primary}} + w\, R_{\text{secondary}}
 
-The primary and secondary models are named with :cpp:`erf.fire.hybrid.primary` and :cpp:`erf.fire.hybrid.secondary` and may be any two distinct values of :cpp:`ros_model`; each keeps its own parameter block (for example :cpp:`erf.fire.balbi.*`). Where :math:`w` is exactly 0 or 1 the blend reproduces the single-model result bit for bit, which is what the identity decks in ``Exec/RegTests/FireRosComparison`` check.
+The primary and secondary models are named with :cpp:`erf.fire.hybrid.primary` and :cpp:`erf.fire.hybrid.secondary` and may be any two distinct members of ``rothermel``, ``behave``, ``macarthur``, ``cheney_gould``, ``grass_simple``, ``fbp`` and ``balbi`` (not ``hybrid`` or ``prescribed``; ``cheney_gould`` and ``grass_simple`` share one grass state and may not be paired, which the run refuses at start-up); each keeps its own parameter block (for example :cpp:`erf.fire.balbi.*`). Where :math:`w` is exactly 0 or 1 the blend reproduces the single-model result bit for bit, which is what the identity decks in ``Exec/RegTests/FireRosComparison`` check.
+
+With an FBP member on the directional level-set path the subcycle is set from the larger of the blended field's maximum and the FBP scalar bound; a hybrid stage, :math:`w B_{FBP} + (1 - w) R_{other}`, can exceed that by a few percent where the FBP head is held below its bound by an opposing slope, which the default :cpp:`erf.fire.levelset.cfl` of 0.4 absorbs.
 
 The weight comes from :cpp:`erf.fire.hybrid.selector`:
 

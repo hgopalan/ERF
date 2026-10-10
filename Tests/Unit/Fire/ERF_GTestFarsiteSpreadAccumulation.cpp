@@ -55,9 +55,10 @@ protected:
         // R_mf: ROS field, no ghosts
         R_mf.define(ba, dm, 1, 0);
 
-        // disp_accum: 2-component accumulator the stepper carries between
-        // substeps; arrival_time: -1 until a cell burns
-        disp_accum.define(ba, dm, 2, 0);
+        // disp_accum: 4-component accumulator the stepper carries between
+        // substeps (distance, front flag, distance clock, clock at burn);
+        // arrival_time: -1 until a cell burns
+        disp_accum.define(ba, dm, 4, 0);
         arrival_time.define(ba, dm, 1, 0);
 
         // Initialize: phi = 1 (unburned everywhere)
@@ -300,21 +301,23 @@ TEST_F(FarsiteSpreadTest, NoStallWhenBurnedCellsLoseTheirRate)
 }
 
 /**
- * Test 5: head, flank and backing rates from one burning cell under wind
+ * Test 5: head, flank and backing rates from one burning cell under wind,
+ *         erf.fire.farsite.shape = rectangle (the shape before 2026-10)
  *
  *   - 21x21 cells of 10 m, one burned cell at the centre, R = 0.1 m/s,
  *     a 1.64 m/s wind along +x (Anderson L/W 1.64, Richards a = 1, c = 0.2,
  *     b = 1.2 / (2 L/W))
  *   - The cells downwind burn at m dx / (a R), the first upwind cell at
  *     dx / (c R) = 500 s and the first cells across the wind at dx / (b R)
+ *   - The default ellipse's rates are in ERF_GTestFarsiteShape.cpp
  */
-TEST(FarsiteFrontCell, HeadFlankAndBackRates)
+TEST(FarsiteFrontCell, HeadFlankAndBackRatesRectangle)
 {
     Box domain(IntVect(0, 0, 0), IntVect(20, 20, 0));
     BoxArray ba(domain);
     DistributionMapping dm(ba);
     Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 210.0, 210.0, 1.0), CoordSys::cartesian, {false, false, false});
-    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 2, 0), at(ba, dm, 1, 0);
+    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0);
     MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
     phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); at.setVal(-1.0_rt);
     const Real U = 1.64_rt, R = 0.1_rt, h = 10.0_rt;
@@ -327,6 +330,7 @@ TEST(FarsiteFrontCell, HeadFlankAndBackRates)
     LW_ratio_to_richards_coefficients(anderson_LW_ratio(U * 2.237_rt), a, b, c);
 
     FarsiteParams fp;
+    fp.shape = farsite_shape::rectangle;
     for (int n = 0; n < 60; ++n) {
         advance_fire_subcycle(phi, work, disp, at, vel, ros, geom, 10.0_rt, n * 10.0_rt, fp);
     }
@@ -345,7 +349,7 @@ static MultiFab run_decomposed(int max_grid, const Geometry& geom, const BoxArra
     BoxArray ba(geom.Domain());
     ba.maxSize(max_grid);
     DistributionMapping dm(ba);
-    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 2, 0), at(ba, dm, 1, 0);
+    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0);
     MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0), slopes(ba, dm, 2, 1);
     phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); at.setVal(-1.0_rt);
     vel.setVal(1.2_rt, 0, 1); vel.setVal(0.7_rt, 1, 1);
@@ -399,7 +403,9 @@ TEST(FarsiteFrontCell, DecompositionIndependent)
                 if (a1(i, j, 0) >= 0.0_rt) { ++n_burned; }
             }
     }
-    EXPECT_GT(n_burned, 30) << "the fire should have spread beyond the 3x3 ignition";
+    // the ellipse's back (R / HB) and flanks are slower than the rectangle's,
+    // so fewer cells burn in 400 s than the 30 the rectangle gave
+    EXPECT_GT(n_burned, 20) << "the fire should have spread beyond the 3x3 ignition";
     EXPECT_EQ(max_diff, 0.0_rt) << "one box and 64 boxes must give the same arrival times";
 }
 

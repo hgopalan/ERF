@@ -43,51 +43,13 @@
  * of the observed length-to-width ratio and a backing rate below the no-wind
  * rate, both of which the projection lacks, and it is what the other fire
  * models compute, so it is the right thing to run when comparing with them.
- * It is selected with erf.fire.levelset.ellipse and is off by default.
+ * It is selected with erf.fire.levelset.ellipse and is off by default. The
+ * same ellipse is the default spread shape of the FARSITE path
+ * (erf.fire.farsite.shape, ERF_FarsiteEllipse.H).
  */
 
-/// Shape of the spread ellipse from the head rate and the midflame wind.
-struct SpreadEllipse
-{
-    amrex::Real a = 0.0;   ///< semi-minor rate (flank) [m/s]
-    amrex::Real b = 0.0;   ///< semi-major rate [m/s]
-    amrex::Real c = 0.0;   ///< centre offset rate [m/s]
-    amrex::Real LB = 1.0;  ///< length-to-width ratio
-    amrex::Real HB = 1.0;  ///< head-to-back ratio
-};
-
-/**
- * @brief Ellipse rates for a head rate R and a midflame wind speed.
- * @param R        Head rate of spread [m/s]
- * @param U_mps    Midflame wind speed [m/s]
- * @param lw_fixed Length-to-width ratio to use when > 0, else Anderson (1983) from the wind
- * @param lw_max   Cap on the length-to-width ratio (Anderson caps at 8)
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-SpreadEllipse spread_ellipse(amrex::Real R, amrex::Real U_mps,
-                             amrex::Real lw_fixed, amrex::Real lw_max) noexcept
-{
-    SpreadEllipse e;
-    amrex::Real LB = (lw_fixed > 0.0) ? lw_fixed : anderson_LW_ratio(U_mps * 2.23694);
-    LB = amrex::max(amrex::Real(1.0), amrex::min(LB, lw_max));
-    e.LB = LB;
-    const amrex::Real s = std::sqrt(amrex::max(static_cast<amrex::Real>(LB * LB - 1.0),  amrex::Real(0.0)));
-    // (LB + s)/(LB - s) = (LB + s)^2 (since (LB - s)(LB + s) = 1): no cancelling
-    // difference in the divisor, so a large LB cannot give 0/0 in single precision
-    e.HB = (LB - s > 1.0e-12) ? (LB + s) * (LB + s) : amrex::Real(1.0e12);
-    const amrex::Real Rb = R / e.HB;
-    e.b = 0.5 * (R + Rb);
-    e.a = e.b / LB;
-    e.c = e.b - Rb;
-    return e;
-}
-
-/// Normal speed of the ellipse for an outward normal at angle theta to the wind.
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real ellipse_normal_speed(const SpreadEllipse& e, amrex::Real cos_th, amrex::Real sin_th) noexcept
-{
-    return e.c * cos_th + std::sqrt(e.b * e.b * cos_th * cos_th + e.a * e.a * sin_th * sin_th);
-}
+// SpreadEllipse, spread_ellipse() and ellipse_normal_speed() live in
+// ERF_FarsiteEllipse.H, which the FARSITE path shares with this one.
 
 /// Below this wind speed [m/s] the ellipse is a circle of radius R.
 inline constexpr amrex::Real ELLIPSE_WIND_MIN = 1.0e-3;
@@ -179,12 +141,13 @@ inline void advect_levelset_ellipse_rk3(amrex::MultiFab& phi,
                                         amrex::Real lw_max,
                                         const amrex::MultiFab* nonburnable = nullptr,
                                         bool wall_extrap = false,
-                                        const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{})
+                                        const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
+                                        fire_levelset::Scratch* scratch = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_ellipse_ros(R, phi_stage, wind, R_head, geom, lw_fixed, lw_max, nonburnable, wall_extrap);
-        }, nonburnable, wall_extrap, grad_scheme);
+        }, nonburnable, wall_extrap, grad_scheme, nullptr, scratch);
 }
 
 #endif

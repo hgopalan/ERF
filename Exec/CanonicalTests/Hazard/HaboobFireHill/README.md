@@ -73,13 +73,13 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 | 600   | 6469 / 6844 | 8.8  | median 0 | behind the front, (6828, 3828) m |
 
 - Along y = 2 km the front moves at 7.9 m/s from 60 to 300 s and 6.2 m/s
-  from 300 to 600 s (flat: 8.2 and 7.4). It is slowest after crossing the
+  from 300 to 600 s (flat: 8.6 and 7.3). It is slowest after crossing the
   crest at about 360 s: 4 to 6 m/s per 30 s on the lee side from 450 s. At
   600 s it is 440 m behind the flat-ground front. Along y = 1 km, 1.7 sigma
   from the hill axis, it is not delayed (6844 m in both cases).
 - The fire's head rate of spread rises from 0.40 m/s to 1.96 m/s at 203 s as
   the front crosses it (flat: 2.11 m/s at 200 s). It burns 15.0 ha by 600 s,
-  against 16.1 ha over flat ground.
+  against 16.0 ha over flat ground.
 - Outside the fire the highest emission is just behind the front until
   450 s (at about 210 s it is at the unburned edge of the fire head, 50 m
   ahead of the front); from 270 s that is on the hill's south flank, about 1 km from the

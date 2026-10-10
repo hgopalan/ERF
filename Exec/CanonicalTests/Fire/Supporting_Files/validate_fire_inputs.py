@@ -17,7 +17,8 @@ Fire prerequisites (``verify_fire_prerequisites``, Source/Fire)
   * no z-decomposition: the z box length must equal ``amr.n_cell`` z, which
     means ``amr.max_grid_size_z`` has to be set whenever n_cell z exceeds the
     AMReX default (32 on CPU, 64 on GPU)
-  * domain height greater than ``erf.fire.wind_ref_ht``
+  * domain depth greater than the wind's sampling height (``erf.fire.wind_ref_ht``,
+    6.096 m with ``use_per_fuel_wind_ht``, or ``wind_sample_ht`` when set)
   * divisors read from the inputs file are positive:
     ``levelset.reinit_every``, ``spotting.spotting_interval``,
     ``levelset.cfl``, ``farsite.cfl_fire``
@@ -25,7 +26,8 @@ Fire prerequisites (``verify_fire_prerequisites``, Source/Fire)
 Ignition reachability
   * ``FireLayer::initialize`` asserts at least one cell is marked burned.  A
     circular ignition only marks a cell when its radius reaches a fire-cell
-    centre, so ``ignition_r`` must be comparable to the fire cell size.
+    centre, so a positive ``ignition_r`` must be comparable to the fire cell
+    size; ``ignition_r = 0`` is no disc (a polygon, line or schedule ignites).
 
 File references
   * fuel maps, polygon/polyline vertex lists, ignition schedules and terrain
@@ -164,18 +166,23 @@ def check(path, repo_root):
             f"z box length {box_nz} != n_cell z {nz}; set amr.max_grid_size_z = {nz} "
             "(fire prerequisite: 'Cannot decompose in z direction')")
 
-    # Domain height vs wind reference height.
-    hi = None
+    # Domain depth vs the wind's sampling height (FirePrerequisites check 12):
+    # the depth, not the top, against wind_ref_ht (6.096 m with
+    # use_per_fuel_wind_ht) or wind_sample_ht when set.
+    lo = real(d, "geometry.prob_lo", 2) or 0.0
+    depth = None
     if "geometry.prob_hi" in d:
-        hi = real(d, "geometry.prob_hi", 2)
+        depth = real(d, "geometry.prob_hi", 2) - lo
     elif "geometry.prob_extent" in d:
-        lo = real(d, "geometry.prob_lo", 2) or 0.0
-        ext = real(d, "geometry.prob_extent", 2)
-        hi = lo + ext if ext is not None else None
+        depth = real(d, "geometry.prob_extent", 2)
     wref = real(d, "erf.fire.wind_ref_ht")
     wref = 6.1 if wref is None else wref
-    if hi is not None and hi <= wref:
-        problems.append(f"domain height {hi} <= wind_ref_ht {wref}")
+    if d.get("erf.fire.use_per_fuel_wind_ht", "false").split()[0].strip('"').lower() in ("true", "1"):
+        wref = 6.096
+    wsample = real(d, "erf.fire.wind_sample_ht") or 0.0
+    z_sample = max(wref, wsample)
+    if depth is not None and depth <= z_sample:
+        problems.append(f"domain depth {depth} <= the wind's sampling height {z_sample}")
 
     # Positive divisors.
     for key, minimum in (("erf.fire.levelset.reinit_every", 1),
@@ -195,10 +202,13 @@ def check(path, repo_root):
     elif "geometry.prob_extent" in d:
         extent_x = real(d, "geometry.prob_extent", 0)
     uses_polygon = bool(d.get("erf.fire.ignition.polygon_file"))
-    if extent_x and C >= 1 and not uses_polygon:
+    r = real(d, "erf.fire.ignition_r")
+    r = 20.0 if r is None else r
+    # ignition_r = 0 is no disc (the polygon, line or schedule ignites; the
+    # zero-radius start no longer marks a cell), so only a positive radius
+    # must reach a cell centre
+    if extent_x and C >= 1 and not uses_polygon and r > 0.0:
         fire_dx = extent_x / (nx * C)
-        r = real(d, "erf.fire.ignition_r")
-        r = 20.0 if r is None else r
         # Worst case the ignition centre sits half a cell from the nearest centre
         # in each direction, so the diagonal is the distance that must be covered.
         if r < 0.71 * fire_dx:

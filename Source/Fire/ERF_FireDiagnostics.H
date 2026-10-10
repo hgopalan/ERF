@@ -1,8 +1,14 @@
 // Fire behavior diagnostics: Byram fireline intensity and flame length.
 //
 // Byram (1959) fireline intensity:
-//   I_B [kW/m] = h_fuel [kJ/kg] * w_consumed [kg/m²] * ros [m/s]
-//   where w_consumed = fuel_load_initial - fuel_load_remain
+//   I_B [kW/m] = h_fuel [kJ/kg] * w_a [kg/m²] * ros [m/s]
+//   with w_a the fuel available to the flaming front, the cell's initial
+//   load, on every burning cell (phi < 0 with fuel left). Until 2026-10 the
+//   code used the fuel consumed so far, w0 - w(t), which is zero on the cell
+//   the front has just reached and largest on burned-out cells, so the crown
+//   criterion could only trigger behind the front and the exposure peak
+//   recorded the burnout; that form is kept as the heat-release diagnostic
+//   fire_heat_release (compute_heat_release_kW_per_m).
 //
 // Thomas (1963) flame length:
 //   L [m] = 0.0775 * I_B^0.46    (I_B in kW/m)
@@ -21,17 +27,23 @@
 #include <cmath>
 #include <string>
 
+/// Share of the initial load below which a burned cell counts as out (no front there)
+inline constexpr amrex::Real FIRE_BURNED_OUT_FRACTION = 0.01;
+
 /**
  * @brief Compute Byram (1959) fireline intensity [kW/m].
  *
- * I_B = h_fuel_kJ_per_kg * (fuel_load_initial - fuel_load_remain) * ros
+ * I_B = h_fuel_kJ_per_kg * w_avail * ros
  *
- * The consumed fuel is the difference between initial and remaining loads.
- * Returns 0 for unburned cells (phi >= 0).
+ * with w_avail the load the front consumes, the cell's initial load, on every
+ * burning cell: phi < 0 with more than FIRE_BURNED_OUT_FRACTION of that load
+ * left. Returns 0 for unburned cells (phi >= 0), burned-out cells and a zero
+ * rate. This is the intensity the crown criterion, the exposure peak, the
+ * structure ignition rule, the flame diagnostics and the Albini launch all read.
  *
  * @param[in] phi                  Level-set field value (burned if < 0)
  * @param[in] ros                  Rate of spread [m/s]
- * @param[in] fuel_load_initial    Initial fuel load [kg/m²]
+ * @param[in] fuel_load_initial    Initial fuel load [kg/m²] (w_avail)
  * @param[in] fuel_load_remain     Remaining fuel load [kg/m²]
  * @param[in] h_fuel_kJ_per_kg     Heat content [kJ/kg]
  * @return Byram fireline intensity [kW/m], non-negative
@@ -44,20 +56,36 @@ amrex::Real compute_fireline_intensity_kW_per_m(
     amrex::Real fuel_load_remain,
     amrex::Real h_fuel_kJ_per_kg) noexcept
 {
-    // Only burned cells contribute to fireline intensity
+    // Only burning cells carry a fireline: burned, with fuel left, spreading
     if (phi >= 0.0) return 0.0;
+    if (fuel_load_initial <= 0.0 || ros <= 0.0) return 0.0;
+    if (fuel_load_remain <= FIRE_BURNED_OUT_FRACTION * fuel_load_initial) return 0.0;
 
-    // Consumed fuel is the difference between initial and remaining
-    amrex::Real w_consumed = fuel_load_initial - fuel_load_remain;
+    // I_B = h * w_avail * ros
+    const amrex::Real I_B = h_fuel_kJ_per_kg * fuel_load_initial * ros;
+    return amrex::max(amrex::Real(0.0), I_B);
+}
 
-    // No intensity if consumed fuel or ROS is negligible
-    if (w_consumed <= 0.0 || ros <= 0.0) {
-        return 0.0;
-    }
-
-    // I_B = h * w_consumed * ros
-    amrex::Real I_B = h_fuel_kJ_per_kg * w_consumed * ros;
-    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(I_B));
+/**
+ * @brief Heat-release diagnostic [kW/m]: h (w0 - w) R, the form the fireline
+ *        intensity took until 2026-10
+ *
+ * Zero where the front has just arrived, h w0 R once the cell is burned out
+ * wherever the wind still gives it a rate; kept as a plotfile diagnostic
+ * (fire_heat_release) so earlier results can be read against it.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real compute_heat_release_kW_per_m(
+    amrex::Real phi,
+    amrex::Real ros,
+    amrex::Real fuel_load_initial,
+    amrex::Real fuel_load_remain,
+    amrex::Real h_fuel_kJ_per_kg) noexcept
+{
+    if (phi >= 0.0) return 0.0;
+    const amrex::Real w_consumed = fuel_load_initial - fuel_load_remain;
+    if (w_consumed <= 0.0 || ros <= 0.0) return 0.0;
+    return amrex::max(amrex::Real(0.0), h_fuel_kJ_per_kg * w_consumed * ros);
 }
 
 /**
@@ -81,7 +109,8 @@ amrex::Real compute_flame_length_m(amrex::Real I_B_kW_per_m) noexcept
 }
 
 /**
- * @brief Fill fireline_intensity [kW/m] and flame_length [m] MultiFabs.
+ * @brief Fill fireline_intensity [kW/m], flame_length [m] and, when given, the
+ *        heat-release diagnostic [kW/m].
  *
  * Reads phi, ros, fuel_load_remain from fire layer fields.
  * Computes Byram fireline intensity and Thomas flame length for each cell.
@@ -92,11 +121,10 @@ amrex::Real compute_flame_length_m(amrex::Real I_B_kW_per_m) noexcept
  * With a per-cell fuel map both of those come from the cell's own model rather
  * than from erf.fire.fuel_model_id: the heat content whenever the map exists,
  * and the initial load under erf.fire.fuel_map.load_from_map, which is what
- * started each cell off. Byram's I_B is h (w_initial - w_remain) R, so a
- * uniform w_initial against a per-cell w_remain is not a scaling error but a
- * different fire: where the uniform model is the lighter of the two the
- * difference clamps at zero and the intensity vanishes, and where it is the
- * heavier the consumed load is whatever erf.fire.fuel_model_id holds.
+ * started each cell off. The intensity is h w_initial R on every burning
+ * cell, and the heat release h (w_initial - w_remain) R; with load_from_map
+ * off every cell started at the uniform load, which is then the right
+ * w_initial for both.
  *
  * This is a local operation: no MPI communication required.
  *
@@ -122,6 +150,7 @@ amrex::Real compute_flame_length_m(amrex::Real I_B_kW_per_m) noexcept
  * @param[in] sb40                 Whether the Scott-Burgan codes are active, so the
  *                                 non-burnable ones carry no initial load, exactly
  *                                 as fill_fuel_load_from_map() started them
+ * @param[out] heat_release        Optional h (w_initial - w_remain) R diagnostic [kW/m]
  */
 inline void fill_fire_diagnostics(
     amrex::MultiFab& fireline_intensity,
@@ -137,7 +166,8 @@ inline void fill_fire_diagnostics(
     const FuelModelParams* fp_tbl = nullptr,
     int fp_tbl_size = 0,
     bool load_from_map = false,
-    bool sb40 = false)
+    bool sb40 = false,
+    amrex::MultiFab* heat_release = nullptr)
 {
     using namespace amrex;
 
@@ -145,6 +175,7 @@ inline void fill_fire_diagnostics(
     // load_from_map off every cell was started at the uniform load and that
     // scalar is the right one.
     const bool w0_per_cell = (fuel_model_mf != nullptr) && load_from_map;
+    const bool has_hr = (heat_release != nullptr);
 
     for (MFIter mfi(fire_phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -154,6 +185,8 @@ inline void fill_fire_diagnostics(
         auto const fuel_arr = fire_fuel_load.const_array(mfi);
         auto I_B_arr = fireline_intensity.array(mfi);
         auto L_arr = flame_length.array(mfi);
+        // aliased to the intensity when no heat-release field is given; never written then
+        auto HR_arr = has_hr ? heat_release->array(mfi) : fireline_intensity.array(mfi);
 
         if (fuel_model_mf != nullptr) {
             auto const fuel_code_arr = fuel_model_mf->const_array(mfi);
@@ -181,6 +214,9 @@ inline void fill_fire_diagnostics(
                 Real I_B = compute_fireline_intensity_kW_per_m(
                     phi_val, ros_val, w_initial, w_remain, h_cell);
                 I_B_arr(i, j, k) = I_B;
+                if (has_hr) {
+                    HR_arr(i, j, k) = compute_heat_release_kW_per_m(phi_val, ros_val, w_initial, w_remain, h_cell);
+                }
 
                 Real L = compute_flame_length_m(I_B);
                 L_arr(i, j, k) = L;
@@ -197,6 +233,10 @@ inline void fill_fire_diagnostics(
                 Real I_B = compute_fireline_intensity_kW_per_m(
                     phi_val, ros_val, fuel_load_initial_kg_m2, w_remain, h_fuel_kJ_per_kg);
                 I_B_arr(i, j, k) = I_B;
+                if (has_hr) {
+                    HR_arr(i, j, k) = compute_heat_release_kW_per_m(phi_val, ros_val, fuel_load_initial_kg_m2,
+                                                                    w_remain, h_fuel_kJ_per_kg);
+                }
 
                 // Compute Thomas flame length from Byram intensity
                 Real L = compute_flame_length_m(I_B);

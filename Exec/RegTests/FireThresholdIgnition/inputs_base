@@ -31,7 +31,12 @@ erf.init_type = "input_sounding"
 erf.input_sounding_file = "input_sounding"
 erf.sounding_type = Ideal
 
-erf.fixed_dt = 0.25
+# 0.125 s: under Rothermel's 0.9 I_R wind limit (the default since 2026-10) the
+# fire runs at up to 1.1 m/s and releases up to 1 MW/m2, and at the 0.25 s step
+# of the 300 ft/min cap's era on_r5 stopped at 20 s with a negative density.
+# 0.125 s runs every deck; the margin was not derived. An adaptive erf.cfl step
+# would be the horizontal acoustic one, about a tenth of this.
+erf.fixed_dt = 0.125
 erf.substepping_cfl = 0.5
 max_step = 100000
 stop_time = 60.0

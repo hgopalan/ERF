@@ -921,6 +921,16 @@ ERF::WriteCheckpointFile () const
               << "anchor_level " << fire_lev << "\n"
               << "fire_region_lo_x " << m_fire_layer->get_fire_grid().atm_lo[0] << "\n"
               << "fire_region_lo_y " << m_fire_layer->get_fire_grid().atm_lo[1] << "\n";
+            // the "already printed" flags of the arrival-time probes and of the
+            // structure first-arrival lines, so a restart does not print them again
+            const auto& pr = m_fire_layer->probe_reported();
+            f << "probe_reported " << pr.size();
+            for (bool b : pr) { f << " " << (b ? 1 : 0); }
+            f << "\n";
+            const auto& er = m_fire_layer->exposure_reported();
+            f << "exposure_reported " << er.size();
+            for (char c : er) { f << " " << (c ? 1 : 0); }
+            f << "\n";
         }
         // Suppression fields, per-line built length, applied-id set and the
         // active actions (erf.fire.suppression.enable).
@@ -2566,18 +2576,56 @@ ERF::ReadCheckpointFileFire ()
                      "Restart with erf.fire.anchor_level = " + std::to_string(chk_fire_lev)
                      + " and the refinement the checkpoint was written with.");
     }
+    // FireState, a small text file of named scalars (and the two flag lists),
+    // read once on the I/O rank and broadcast: every rank opening it was a
+    // metadata storm on a parallel file system at scale. Keys are fixed, so
+    // the parse happens on one rank and the values travel as numbers.
+    int    chk_lo_x = 0, chk_lo_y = 0, chk_subcycles = 0, chk_edge_checked = 0;
+    amrex::Real chk_f_dry = 1.0, chk_edge_time = -1.0, chk_window_end = 0.0;
+    int    has_state = 0, has_subcycles = 0, has_f_dry = 0, has_edge_time = 0, has_edge_checked = 0, has_window = 0;
+    std::vector<int> chk_probe_flags, chk_exposure_flags;
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        std::ifstream f(restart_chkfile + "/FireState");
+        has_state = f ? 1 : 0;
+        std::string key;
+        while (f >> key) {
+            if (key == "fire_region_lo_x")             { f >> chk_lo_x; }
+            else if (key == "fire_region_lo_y")        { f >> chk_lo_y; }
+            else if (key == "levelset_subcycle_count") { f >> chk_subcycles; has_subcycles = 1; }
+            else if (key == "f_dry_prev")              { f >> chk_f_dry; has_f_dry = 1; }
+            else if (key == "edge_contact_time")       { f >> chk_edge_time; has_edge_time = 1; }
+            else if (key == "edge_reach_checked")      { f >> chk_edge_checked; has_edge_checked = 1; }
+            else if (key == "prev_window_end")         { f >> chk_window_end; has_window = 1; }
+            else if (key == "probe_reported" || key == "exposure_reported") {
+                std::size_t n = 0; f >> n;
+                std::vector<int>& v = (key == "probe_reported") ? chk_probe_flags : chk_exposure_flags;
+                v.assign(n, 0);
+                for (std::size_t i = 0; i < n; ++i) { f >> v[i]; }
+            }
+            else { std::string skip; f >> skip; }
+        }
+    }
+    {
+        int ints[10] = {chk_lo_x, chk_lo_y, chk_subcycles, chk_edge_checked, has_state, has_subcycles,
+                        has_f_dry, has_edge_time, has_edge_checked, has_window};
+        amrex::ParallelDescriptor::Bcast(ints, 10, amrex::ParallelDescriptor::IOProcessorNumber());
+        chk_lo_x = ints[0]; chk_lo_y = ints[1]; chk_subcycles = ints[2]; chk_edge_checked = ints[3];
+        has_state = ints[4]; has_subcycles = ints[5]; has_f_dry = ints[6]; has_edge_time = ints[7];
+        has_edge_checked = ints[8]; has_window = ints[9];
+        amrex::Real reals[3] = {chk_f_dry, chk_edge_time, chk_window_end};
+        amrex::ParallelDescriptor::Bcast(reals, 3, amrex::ParallelDescriptor::IOProcessorNumber());
+        chk_f_dry = reals[0]; chk_edge_time = reals[1]; chk_window_end = reals[2];
+        int sizes[2] = {static_cast<int>(chk_probe_flags.size()), static_cast<int>(chk_exposure_flags.size())};
+        amrex::ParallelDescriptor::Bcast(sizes, 2, amrex::ParallelDescriptor::IOProcessorNumber());
+        chk_probe_flags.resize(sizes[0]);
+        chk_exposure_flags.resize(sizes[1]);
+        if (sizes[0] > 0) { amrex::ParallelDescriptor::Bcast(chk_probe_flags.data(), sizes[0], amrex::ParallelDescriptor::IOProcessorNumber()); }
+        if (sizes[1] > 0) { amrex::ParallelDescriptor::Bcast(chk_exposure_flags.data(), sizes[1], amrex::ParallelDescriptor::IOProcessorNumber()); }
+    }
     {
         // Region: its corner from FireState (checkpoints written before the fire
         // could sit on a finer level have none, and their fire grid is level 0's),
         // its size from the checkpointed level set's boxes.
-        int chk_lo_x = 0, chk_lo_y = 0;
-        std::ifstream f(restart_chkfile + "/FireState");
-        std::string key;
-        while (f >> key) {
-            if (key == "fire_region_lo_x")      { f >> chk_lo_x; }
-            else if (key == "fire_region_lo_y") { f >> chk_lo_y; }
-            else { std::string skip; f >> skip; }
-        }
         const amrex::VisMF chk_phi(amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FirePhi"));
         const amrex::Box chk_region = chk_phi.boxArray().minimalBox();
         const amrex::Box run_region = m_fire_layer->get_levelset()->boxArray().minimalBox();
@@ -2628,6 +2676,21 @@ ERF::ReadCheckpointFileFire ()
         // assert naming neither width nor the input.
         const std::string prefix = amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name);
         const int ncomp_disk = VisMF(prefix).nComp();
+        // FireDispAccum grew from 2 to 4 components in 2026-10 (the FARSITE
+        // distance clock and the clock at burn): an older checkpoint's two
+        // are read and the clock starts from zero, which only means that for
+        // one source stencil a cell burned before the restart under-counts
+        // the distance a direct source may claim (the quadrant update covers it).
+        if (std::string(name) == "FireDispAccum" && ncomp_disk == 2 && mf->nComp() == 4) {
+            amrex::MultiFab two(mf->boxArray(), mf->DistributionMap(), 2, mf->nGrowVect());
+            VisMF::Read(two, prefix);
+            mf->setVal(0.0);
+            mf->setVal(-1.0, 3, 1);   // the clock at burn: stamped by the next update from the restarted clock
+            amrex::MultiFab::Copy(*mf, two, 0, 0, 2, 0);
+            amrex::Print() << "[FIRE] Checkpoint FireDispAccum has 2 components (written before 2026-10);"
+                           << " the FARSITE distance clock restarts from zero.\n";
+            return;
+        }
         if (ncomp_disk != mf->nComp()) {
             amrex::Abort("[FIRE] checkpoint field " + std::string(name) + " has " + std::to_string(ncomp_disk)
                          + " components but this run allocates " + std::to_string(mf->nComp())
@@ -2699,29 +2762,26 @@ ERF::ReadCheckpointFileFire ()
     // The level-set subcycle count, so the reinitialisation keeps the schedule of
     // the uninterrupted run; a checkpoint without FireState leaves it at zero,
     // which is right only when the checkpoint step is a multiple of the interval.
-    {
-        std::ifstream f(restart_chkfile + "/FireState");
-        if (f) {
-            std::string key;
-            while (f >> key) {
-                if (key == "levelset_subcycle_count") {
-                    int n; f >> n; m_fire_layer->set_levelset_subcycle_count(n);
-                } else if (key == "f_dry_prev") {   // the smoke emission divides the lagged flux by it
-                    amrex::Real v; f >> v; m_fire_layer->set_f_dry_prev(v);
-                } else if (key == "edge_contact_time") {
-                    amrex::Real v; f >> v; m_fire_layer->set_edge_contact_time(v);
-                } else if (key == "edge_reach_checked") {
-                    int v; f >> v; m_fire_layer->set_edge_reach_checked(v != 0);
-                } else if (key == "prev_window_end") {
-                    amrex::Real v; f >> v; m_fire_layer->set_prev_window_end(v);
-                } else {
-                    std::string skip; f >> skip;
-                }
-            }
-        } else {
-            amrex::Print() << "[FIRE] Checkpoint has no FireState; the reinitialisation"
-                           << " schedule restarts from the checkpoint step.\n";
+    if (has_state) {
+        if (has_subcycles)    { m_fire_layer->set_levelset_subcycle_count(chk_subcycles); }
+        if (has_f_dry)        { m_fire_layer->set_f_dry_prev(chk_f_dry); }   // the smoke emission divides the lagged flux by it
+        if (has_edge_time)    { m_fire_layer->set_edge_contact_time(chk_edge_time); }
+        if (has_edge_checked) { m_fire_layer->set_edge_reach_checked(chk_edge_checked != 0); }
+        if (has_window)       { m_fire_layer->set_prev_window_end(chk_window_end); }
+        // the probes and structures already reported before the checkpoint
+        if (!chk_probe_flags.empty()) {
+            std::vector<bool> pr(chk_probe_flags.size());
+            for (std::size_t n = 0; n < pr.size(); ++n) { pr[n] = (chk_probe_flags[n] != 0); }
+            m_fire_layer->set_probe_reported(pr);
         }
+        if (!chk_exposure_flags.empty()) {
+            std::vector<char> er(chk_exposure_flags.size());
+            for (std::size_t n = 0; n < er.size(); ++n) { er[n] = static_cast<char>(chk_exposure_flags[n] != 0); }
+            m_fire_layer->set_exposure_reported(er);
+        }
+    } else {
+        amrex::Print() << "[FIRE] Checkpoint has no FireState; the reinitialisation"
+                       << " schedule restarts from the checkpoint step.\n";
     }
     // Suppression: the checkpoint's actions (with geometry and state) replace the
     // file's copies of the same ids; the file only adds new ids, as at start-up.

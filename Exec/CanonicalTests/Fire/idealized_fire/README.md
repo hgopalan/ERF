@@ -44,14 +44,19 @@ rotation, so this equals running the precursor with the rotated geostrophic wind
 
 The two columns settle differently under the same 67 m/s forcing:
 
-| | MRF | YSUNew |
+| | MRF (2026-10-09) | YSUNew (2026-09) |
 |---|---|---|
-| 10 m wind after 24 h | 24.61 m/s | 28.40 m/s |
-| 80 m wind | 35.88 m/s | 37.94 m/s |
-| friction velocity | 2.186 m/s | 2.524 m/s |
-| diagnosed PBL height | 3392 m | 2851 m |
-| rotated geostrophic wind for the deck | `61.23815 -27.18252` | `60.18186 -29.44731` |
-| wall time, 1 rank | 170 s | 177 s |
+| 10 m wind after 24 h | 25.72 m/s | 28.40 m/s |
+| 80 m wind | 41.32 m/s | 37.94 m/s |
+| friction velocity | 2.279 m/s | 2.524 m/s |
+| diagnosed PBL height | 4513 m | 2851 m |
+| rotated geostrophic wind for the deck | `64.81900 -16.95574` | `60.18186 -29.44731` |
+| wall time, 1 rank | 210 s (shared machine) | 177 s |
+
+The MRF column and the committed `inflow_mrf.txt` / `sounding_mrf.txt` were regenerated
+2026-10-09 on the validated code; the column this README carried until then (24.61 m/s,
+u* 2.186 m/s, a 3392 m PBL) was measured in 2026-09 on the code of that date and the
+difference was not traced to a change. The YSUNew column was not rerun.
 
 Both are far windier and deeper than the HRRR analysis below. YSUNew mixes momentum down
 harder, which is why its 10 m wind is 15 % stronger and its fire runs faster.
@@ -129,16 +134,26 @@ script then checks:
 
 Burned area and head distance from the ignition, from `check_idealized_fire.py`. Both decks
 carry a fixed spotting seed, so these are reproducible on the same build and rank count.
+Both columns were re-measured 2026-10-09 on the validated code, four ranks, 7 of 7 checks
+each: MRF with the regenerated MRF inflow (751 burned cells, arrivals in [1200, 3896] s),
+YSUNew with the committed 2026-09 inflow (1411 burned cells, arrivals in [1200, 3900] s).
 
 | fire minutes | MRF acres | MRF head | YSUNew acres | YSUNew head |
 |---|---|---|---|---|
-| 5 | 20 | 0.42 km | 28 | 0.54 km |
-| 15 | 89 | 1.54 km | 126 | 1.74 km |
-| 30 | 210 | 2.55 km | 311 | 3.31 km |
-| 45 | 404 | 3.71 km | 678 | 4.66 km |
+| 5 | 21 | 0.38 km | 31 | 0.58 km |
+| 15 | 60 | 1.02 km | 117 | 1.62 km |
+| 30 | 183 | 1.98 km | 256 | 3.07 km |
+| 45 | 297 | 2.83 km | 558 | 4.63 km |
 
-Both pass all seven checks. YSUNew burns 1.7 times the area of MRF and its head runs 0.95 km
-further, entirely because of the stronger 10 m wind its column settles to.
+The table this README carried until 2026-10 (MRF 20, 89, 210 and 404 acres, head 0.42 to
+3.71 km; YSUNew 28, 126, 311 and 678 acres, head 0.54 to 4.66 km) came from the 2026-09
+code and, for MRF, its inflow. Until 2026-10 the level set also
+carried a disc of zero radius at the ignition point from t = 0 (`erf.fire.ignition_r = 0`
+wrote the distance to the point), which on this 40 m fire grid burned two cells by 150 s
+and 70 acres by the scheduled ignition at 1200 s; the fix (every cell starts the domain
+diagonal from a front) is what makes the arrivals start at 1200 s. YSUNew burns 1.9 times
+the area of MRF and its head runs 1.8 km further, because of the stronger 10 m wind its
+column settles to (28.4 against 25.7 m/s) and the weaker spin-down the MRF column shows.
 
 A useful sanity check on the pair: the Superior Costco sits about 5.5 km east-southeast of the
 ignition and was being evacuated roughly 75 minutes in. Extending the MRF deck to a 90 minute

@@ -6,6 +6,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 #include <AMReX_Gpu.H>
+#include <AMReX_ccse-mpi.H>
 #include <algorithm>
 #include <cmath>
 #include <ctime>
@@ -16,7 +17,9 @@
 #include <memory>
 
 #include <ERF_FireParams.H>
-#include <ERF_Rothermel.H>
+#include <ERF_FireGrid.H>
+#include <ERF_FuelModels.H>
+#include <ERF_FireDiagnostics.H>
 #include <ERF_ScottSpottingTable.H>
 #include <ERF_HostFabView.H>
 
@@ -35,11 +38,18 @@
  * Ported from: wildfire_levelset/src/albini_spotting.H
  * Changes from source:
  *   - InputParameters::AlbiniSpottingParams → FireParams::SpottingParams
- *   - RothermelParams replaced by RothermelComputed (from ERF_Rothermel.H)
- *   - plt_wind 3-D wind removed; fire_wind_eff is passed as the 2-D wind source
+ *   - the launch intensity is the fire layer's own Byram intensity field
+ *     (h w0 R with the cell's own fuel, ERF_FireDiagnostics.H), not a second
+ *     formula on the uniform fuel; the Scott distance cap and the re-entry
+ *     fraction are the landing cell's own as well (2026-10)
+ *   - the brand drifts on the reference-height wind scaled with a neutral
+ *     log profile to its height, as Albini's model has it, not on the
+ *     WAF-reduced midflame wind (2026-10)
+ *   - a landing stamps phi only; it no longer removes 95 % of the fuel of
+ *     every cell of the spot disc (2026-10)
+ *   - only the launch set is gathered over the ranks; the landing filters
+ *     (non-burnable mask, re-entry fuel fraction) run on the device (2026-10)
  *   - weise_data/WeiseBigingParams removed
- *   - Fuel system string passed for scott_max_spot_dist lookup
- *   - Operates on CPU host copies for GPU safety (stochastic trajectory is serial)
  *
  * Diagnostic MultiFab layout (4 components):
  *   comp 0: lofting height H_z [m] at source fire-front cells
@@ -47,14 +57,6 @@
  *   comp 2: maximum landing distance [m] from source cell
  *   comp 3: active flag (1.0) at cells that received a spot ignition
  */
-
-// ─── unit conversion constants ─────────────────────────────────────────────
-// 1 BTU/(ft s) = 1.05506 kJ / 0.3048 m = 3.4613 kW/m (Byram fireline intensity).
-// This was 1.055 (BTU to kJ only), so the intensity fed to the launch
-// probability and the lofting height was 3.28x low.
-static constexpr amrex::Real ALBINI_BTU_FTS_TO_KW_M = 3.4613;
-// 1 ft/min = 0.00508 m/s
-static constexpr amrex::Real ALBINI_FT_PER_MIN_TO_M_PER_S = 0.00508;
 
 // ─── Albini lofting height ──────────────────────────────────────────────────
 
@@ -76,7 +78,27 @@ albini_lofting_height(amrex::Real I_B_kW, amrex::Real I_B_min_kW = 100.0)
     return 12.2 * std::cbrt(I_B_kW);
 }
 
-// ─── Byram fireline intensity ───────────────────────────────────────────────
+/**
+ * @brief Factor that brings the reference-height wind to the brand's height
+ *        above ground with a neutral log profile: ln(z/z0) / ln(z_ref/z0),
+ *        with z floored at z0 (the factor is then 0) and the brand height
+ *        floored at the reference height's own factor of 1 only through the
+ *        profile itself (a brand above z_ref sees a larger wind). Albini
+ *        (1983) drifts the brand with the wind at its height; the midflame
+ *        wind used until 2026-10 was 0.36x the 6.1 m wind for grass and
+ *        carried the terrain factors, so a brand lofted to 120 m travelled a
+ *        quarter of the distance the profile gives.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real albini_wind_profile_factor(amrex::Real z_agl, amrex::Real z_ref, amrex::Real z0) noexcept
+{
+    const amrex::Real z0s = amrex::max(z0, amrex::Real(1.0e-6));
+    const amrex::Real zr  = amrex::max(z_ref, z0s * amrex::Real(1.000001));
+    const amrex::Real z   = amrex::max(z_agl, z0s);
+    return std::log(z / z0s) / std::log(zr / z0s);
+}
+
+// ─── Bilinear interpolation of host fields ──────────────────────────────────
 
 /**
  * @brief Bilinear interpolation of a scalar field at continuous coordinates.
@@ -118,37 +140,6 @@ albini_interp_scalar(const std::vector<amrex::Real>& f,
          + (1.0 - wx) *        wy  * at(i0,     j0 + 1)
          +        wx  *        wy  * at(i0 + 1, j0 + 1);
 }
-
-/**
- * @brief Compute Byram fireline intensity [kW/m] from Rothermel quantities.
- *
- * I_B = R × w0 × h_heat / 60 × BTU_FTS_TO_KW_M
- *
- * where R is ROS in ft/min, w0 is total fuel load [lb/ft²], and h_heat is
- * heat content [BTU/lb].  The factor 1/60 converts lb·BTU/(ft·min) to
- * lb·BTU/(ft·s).
- *
- * @param[in] ros_ms  Rate of spread [m/s]
- * @param[in] fp      Fuel model parameters (load fractions, heat content)
- * @param[in] rc      Precomputed Rothermel coefficients (ros_conv for unit conversion)
- * @return Byram fireline intensity [kW/m].
- */
-inline amrex::Real
-albini_byram_intensity(amrex::Real ros_ms,
-                       const FuelModelParams& fp,
-                       const RothermelComputed& rc)
-{
-    // Total fuel load [lb/ft²]
-    amrex::Real w0 = fp.w_d1 + fp.w_d10 + fp.w_d100 + fp.w_lh + fp.w_lw;
-    // Convert ROS to ft/min using stored conversion factor (1/ros_conv = m/s → ft/min)
-    amrex::Real R_ftmin = (rc.ros_conv > 0.0)
-        ? ros_ms / amrex::max(rc.ros_conv, std::numeric_limits<amrex::Real>::min()) : 0.0;
-    // Byram intensity [BTU/ft·s] then convert to [kW/m]
-    amrex::Real I_B = R_ftmin * w0 * fp.heat_content / 60.0 * ALBINI_BTU_FTS_TO_KW_M;
-    return (I_B > 0.0) ? I_B : 0.0;
-}
-
-// ─── Bilinear wind interpolation ────────────────────────────────────────────
 
 /**
  * @brief Bilinear interpolation of 2-component wind at continuous coordinates.
@@ -208,24 +199,30 @@ albini_interp_wind(const std::vector<amrex::Real>& wind_u,
     return true;
 }
 
-// ─── Helper: build RothermelComputed subset needed by Albini ────────────────
+namespace albini_detail {
 
-/**
- * @brief Build the RothermelComputed subset needed by albini_byram_intensity().
- *
- * Only ros_conv is required from RothermelComputed for the unit conversion in
- * albini_byram_intensity(); all other fields are filled to zero.
- *
- * @param[in] fp  Fuel model parameters.
- * @return RothermelComputed with ros_conv = 0.00508 m/s per ft/min.
- */
-inline RothermelComputed
-make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
+/// Gather one component of a fire-grid field into a flat host array on every rank
+inline void gather_field(std::vector<amrex::Real>& h, const amrex::MultiFab& mf, int comp, int nx)
 {
-    RothermelComputed rc{};
-    rc.ros_conv = ALBINI_FT_PER_MIN_TO_M_PER_S;  // 1 ft/min = 0.00508 m/s
-    return rc;
+    using namespace amrex;
+    std::fill(h.begin(), h.end(), Real(0.0));
+    for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        const ERFHostFabView v(mf[mfi]);
+        auto a = v.array();
+        LoopOnCpu(bx, [&](int i, int j, int /*k*/) { h[static_cast<std::size_t>(j) * nx + i] = a(i, j, 0, comp); });
+    }
+    ParallelDescriptor::ReduceRealSum(h.data(), static_cast<int>(h.size()));
 }
+
+/// Launch-cell record: cell, intensity, distance cap
+struct LaunchCell {
+    int  i, j;
+    amrex::Real I_B;      ///< Byram intensity [kW/m]
+    amrex::Real cap;      ///< maximum spotting distance of the cell's fuel [m]
+};
+
+} // namespace albini_detail
 
 // ─── Main spotting function ─────────────────────────────────────────────────
 
@@ -233,34 +230,47 @@ make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
  * @brief Apply Albini (1983) stochastic firebrand spotting to the fire level-set.
  *
  * Algorithm:
- *  1. Build CPU host copies of phi, wind, and ROS (GPU-sync first).
- *  2. Identify the launch cells: burned (phi < 0) with ROS > 0, and with
- *     spotting.launch_from = front only those within front_band cells of an
- *     unburned cell.
- *  3. Compute Byram intensity I_B for each front cell.
- *  4. Compute lofting height H_z = 12.2 × I_B^(1/3).
- *  5. Stochastic launch: draw uniform random; launch if draw < P_launch.
- *  6. Forward-Euler trajectory over n_traj_steps sub-steps.
- *  7. Apply Scott/Albini per-fuel-model maximum distance cap.
- *  8. Apply P_catch catching probability filter.
- *  9. Skip if the landing cell's remaining fuel fraction < reentry_fuel_thresh.
- * 10. Stamp phi negative within spot_radius of landing location.
- * 11. Record diagnostics in albini_data.
- * 12. MPI: the host copies are built by ReduceRealSum of every rank's
- *     zero-initialised buffer (step 1) and the random seed is broadcast, so
- *     every rank draws the same brands and stamps identical spots.
+ *  1. Launch set on the device: burned cells (phi < 0) with a Byram intensity
+ *     of at least I_B_min (with spotting.launch_from = front only those within
+ *     front_band cells of an unburned cell), plus the extra launch sites of
+ *     burning structures. Each rank's list is gathered to every rank and sorted
+ *     by cell, so the random draws below do not depend on the decomposition.
+ *  2. The lofting height H_z = 12.2 × I_B^(1/3) of each launch cell.
+ *  3. Stochastic launch: draw uniform random; launch if draw < P_launch.
+ *  4. Forward-Euler trajectory over n_traj_steps sub-steps, drifting on the
+ *     reference-height wind scaled to the brand's height above ground with a
+ *     neutral log profile of roughness z0 (albini_wind_profile_factor); the
+ *     wind and terrain fields are gathered to every rank for it.
+ *  5. The landing distance is capped at the Scott/Albini maximum distance of
+ *     the source cell's fuel.
+ *  6. Catching probability filter P_catch.
+ *  7. On the device, per landing: a brand on a non-burnable cell is dropped
+ *     (counted in ember_landings when given); one on a cell whose remaining
+ *     fuel is below reentry_fuel_thresh of that cell's initial load is dropped.
+ *  8. Stamp phi negative within spot_radius of every accepted landing.
+ *  9. Record diagnostics in albini_data.
  *
  * @param[in,out] phi              Fire level-set MultiFab (modified at landing sites)
  * @param[in,out] albini_data      4-component diagnostic MultiFab (comp 0-3)
- * @param[in]     wind_eff         2-component effective wind on fire grid [m/s]
- * @param[in]     ros              Rate-of-spread MultiFab [m/s]
+ * @param[in]     wind_ref         2-component reference-height wind on the fire grid [m/s]
+ * @param[in]     intensity        Byram fireline intensity [kW/m] (fill_fire_diagnostics)
  * @param[in]     geom             Fire grid geometry
- * @param[in]     fp               Fuel model parameters
  * @param[in]     sp               Spotting parameters (FireParams::SpottingParams)
  * @param[in]     step             Current simulation step (for deterministic seeding)
- * @param[in]     fuel_load        Optional residual fuel MultiFab (for re-entry filter)
+ * @param[in]     fuel_load        Remaining fuel [kg/m2] (the re-entry filter); nullptr skips it
+ * @param[in]     fuel_w0          Initial fuel load per cell [kg/m2] (the re-entry fraction's
+ *                                 denominator); nullptr takes fuel_load_initial_kg_m2
+ * @param[in]     fuel_load_initial_kg_m2  Uniform initial load [kg/m2] when fuel_w0 is null
+ * @param[in]     fuel_model       Per-cell fuel code for the distance cap; nullptr takes fuel_model_id
  * @param[in]     fuel_system      Fuel system string ("13" or "40") for distance table
- * @param[in]     fuel_model_id    Anderson/Scott-Burgan model ID for distance table lookup
+ * @param[in]     fuel_model_id    Uniform fuel code for the distance cap
+ * @param[in]     z_ref            Height of the reference wind above ground [m]
+ * @param[in]     z0               Roughness length of the log profile [m]
+ * @param[in]     fire_debug       Print the launch summary
+ * @param[in]     terrain_z        Ground elevation per fire cell [m]; nullptr = flat
+ * @param[in]     nonburnable      Non-burnable mask; a brand landing in it is dropped
+ * @param[in]     ember_landings   Brands dropped on mask cells, counted per cell (exposure)
+ * @param[in]     phi_normalized   FARSITE [-1, 1] stamp convention when true, metres when false
  * @param[in]     extra_launch_intensity  Optional equivalent fireline intensity [kW/m] of
  *                                 cells that launch brands although they are not burning fuel
  *                                 (the footprint cells of a burning structure); a cell with a
@@ -269,18 +279,20 @@ make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
 inline void
 compute_albini_spotting(amrex::MultiFab&                  phi,
                         amrex::MultiFab&                  albini_data,
-                        const amrex::MultiFab&            wind_eff,
-                        const amrex::MultiFab&            ros,
+                        const amrex::MultiFab&            wind_ref,
+                        const amrex::MultiFab&            intensity,
                         const amrex::Geometry&            geom,
-                        const FuelModelParams&            fp,
                         const FireParams::SpottingParams& sp,
                         int                               step,
                         const amrex::MultiFab*            fuel_load,
-                        const std::string*                fuel_system,
-                        int                               fuel_model_id = 1,
+                        const amrex::MultiFab*            fuel_w0,
+                        amrex::Real                       fuel_load_initial_kg_m2,
+                        const amrex::MultiFab*            fuel_model,
+                        const std::string&                fuel_system,
+                        int                               fuel_model_id,
+                        amrex::Real                       z_ref,
+                        amrex::Real                       z0,
                         bool                              fire_debug = false,
-                        amrex::MultiFab*                  fire_fuel_load_ptr = nullptr,
-                        amrex::Real                       fuel_load_initial_kg_m2 = 0.0,
                         const amrex::MultiFab*            terrain_z = nullptr,
                         const amrex::MultiFab*            nonburnable = nullptr,
                         amrex::MultiFab*                  ember_landings = nullptr,
@@ -294,175 +306,125 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     const auto dx      = geom.CellSizeArray();
     const auto prob_lo = geom.ProbLoArray();
 
-    // Fire grid dimensions
     const Box domain = geom.Domain();
-    int nx = domain.length(0);
-    int ny = domain.length(1);
+    const int nx = domain.length(0);
+    const int ny = domain.length(1);
+    const int ncells = nx * ny;
 
-    // Build flat CPU host copies of phi, wind (u,v), ROS, and fuel_load.
-    // This is necessary because stochastic trajectory integration is serial.
+    // ---------------------------------------------------------------------
+    // 1. Launch set, on the device: intensity (or the extra launch intensity)
+    //    where a cell launches, 0 elsewhere, and the cell's fuel code.
+    // ---------------------------------------------------------------------
+    const bool front_only = (sp.launch_from == "front");
+    const int  band       = sp.front_band;
+    const Real I_min      = sp.I_B_min;
+    const bool has_extra  = (extra_launch_intensity != nullptr);
+    const bool has_codes  = (fuel_model != nullptr);
+
+    // phi with enough ghost cells for the front-band test (its own three
+    // suffice for the default band of 2; a wider band gets a copy)
+    const MultiFab* phi_g = &phi;
+    std::unique_ptr<MultiFab> phi_copy;
+    if (front_only && band > phi.nGrow(0)) {
+        phi_copy = std::make_unique<MultiFab>(phi.boxArray(), phi.DistributionMap(), 1, IntVect(band, band, 0));
+        MultiFab::Copy(*phi_copy, phi, 0, 0, 1, 0);
+        fire_fill_boundary(*phi_copy, geom);
+        phi_g = phi_copy.get();
+    }
+    const IntVect dlo = domain.smallEnd();
+    const IntVect dhi = domain.bigEnd();
+
+    MultiFab launch(phi.boxArray(), phi.DistributionMap(), 2, 0);
+    for (MFIter mfi(launch); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto L   = launch.array(mfi);
+        auto p   = phi_g->const_array(mfi);
+        auto ib  = intensity.const_array(mfi);
+        Array4<const Real> ex, code;
+        if (has_extra) { ex = extra_launch_intensity->const_array(mfi); }
+        if (has_codes) { code = fuel_model->const_array(mfi); }
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            Real I = 0.0;
+            if (p(i, j, k) < 0.0 && ib(i, j, k) >= I_min) {
+                bool near_unburned = !front_only;
+                if (front_only) {
+                    for (int dj = -band; dj <= band && !near_unburned; ++dj) {
+                        for (int di = -band; di <= band; ++di) {
+                            const int ii = i + di, jj = j + dj;
+                            if (ii < dlo[0] || ii > dhi[0] || jj < dlo[1] || jj > dhi[1]) { continue; }
+                            if (p(ii, jj, k) >= 0.0) { near_unburned = true; break; }
+                        }
+                    }
+                }
+                if (near_unburned) { I = ib(i, j, k); }
+            } else if (has_extra && ex(i, j, k) > 0.0) {
+                // A burning structure: not fuel, not behind the front, but a
+                // launch site with the equivalent intensity it was given.
+                I = ex(i, j, k);
+            }
+            L(i, j, k, 0) = I;
+            L(i, j, k, 1) = has_codes ? code(i, j, k) : Real(-1.0);
+        });
+    }
     Gpu::streamSynchronize();
 
-    int ncells = nx * ny;
-    std::vector<Real> h_phi(ncells, 0.0);
-    std::vector<Real> h_u(ncells, 0.0);
-    std::vector<Real> h_v(ncells, 0.0);
-    std::vector<Real> h_ros(ncells, 0.0);
-    std::vector<Real> h_fuel(ncells, 1.0);
-    // Ground elevation under each fire cell. Left at zero when no terrain is
-    // supplied, which reproduces the flat-earth trajectory exactly.
-    std::vector<Real> h_terrain(ncells, 0.0);
-
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        const Box& bx    = mfi.validbox();
-        const ERFHostFabView phi_v (phi[mfi]);
-        const ERFHostFabView wind_v(wind_eff[mfi]);
-        const ERFHostFabView ros_v (ros[mfi]);
-        auto phi_arr     = phi_v.array();
-        auto wind_arr    = wind_v.array();
-        auto ros_arr     = ros_v.array();
-        std::unique_ptr<ERFHostFabView> fuel_v;
-        amrex::Array4<const amrex::Real> fuel_arr;
-        bool has_fuel = false;
-        if (fuel_load) {
-            fuel_v   = std::make_unique<ERFHostFabView>((*fuel_load)[mfi]);
-            fuel_arr = fuel_v->array();
-            has_fuel = true;
-        }
-
+    // This rank's launch cells, packed as (i, j, I_B, cap) for the gather
+    std::vector<Real> local_rec;
+    for (MFIter mfi(launch); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        const ERFHostFabView Lv(launch[mfi]);
+        auto L = Lv.array();
         LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
-            int idx = j * nx + i;
-            h_phi[idx]  = phi_arr(i, j, 0, 0);
-            h_u[idx]    = wind_arr(i, j, 0, 0);
-            h_v[idx]    = wind_arr(i, j, 0, 1);
-            h_ros[idx]  = ros_arr(i, j, 0, 0);
-            if (has_fuel) { h_fuel[idx] = fuel_arr(i, j, 0, 0); }
+            const Real I = L(i, j, 0, 0);
+            if (I <= 0.0) { return; }
+            const int code = (L(i, j, 0, 1) >= 0.0) ? static_cast<int>(L(i, j, 0, 1) + Real(0.5)) : fuel_model_id;
+            local_rec.push_back(static_cast<Real>(i));
+            local_rec.push_back(static_cast<Real>(j));
+            local_rec.push_back(I);
+            local_rec.push_back(scott_max_spot_dist(code, fuel_system));
         });
     }
 
-    // MPI: all ranks build the same global view of phi/wind/ROS.
-    // Each rank owns disjoint boxes; ReduceRealSum gives each rank the complete field.
-    ParallelDescriptor::ReduceRealSum(h_phi.data(),  ncells);
-    ParallelDescriptor::ReduceRealSum(h_u.data(),    ncells);
-    ParallelDescriptor::ReduceRealSum(h_v.data(),    ncells);
-    ParallelDescriptor::ReduceRealSum(h_ros.data(),  ncells);
-    // Host copy of the non-burnable mask, gathered the same way as the fuel.
-    // Extra launch sites (burning structures): reduced like the other fields.
-    const bool has_extra = (extra_launch_intensity != nullptr);
-    std::vector<Real> h_extra(has_extra ? ncells : 0, 0.0);
-    if (has_extra) {
-        for (MFIter mfi(*extra_launch_intensity); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.validbox();
-            const ERFHostFabView e_v((*extra_launch_intensity)[mfi]);
-            auto e_arr = e_v.array();
-            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
-                h_extra[j * nx + i] = e_arr(i, j, 0, 0);
-            });
-        }
-        ParallelDescriptor::ReduceRealSum(h_extra.data(), ncells);
+    // Gather every rank's list; sort by (j, i) so the random draws below are
+    // consumed in the same order whatever the decomposition.
+    const int nranks = ParallelDescriptor::NProcs();
+    std::vector<int> n_all(nranks, 0), displs(nranks + 1, 0);
+    int n_local = static_cast<int>(local_rec.size());
+#ifdef AMREX_USE_MPI
+    MPI_Allgather(&n_local, 1, MPI_INT, n_all.data(), 1, MPI_INT, ParallelDescriptor::Communicator());
+#else
+    n_all[0] = n_local;
+#endif
+    for (int r = 0; r < nranks; ++r) { displs[r + 1] = displs[r] + n_all[r]; }
+    std::vector<Real> all_rec(displs[nranks]);
+#ifdef AMREX_USE_MPI
+    MPI_Allgatherv(local_rec.data(), n_local, ParallelDescriptor::Mpi_typemap<Real>::type(),
+                   all_rec.data(), n_all.data(), displs.data(),
+                   ParallelDescriptor::Mpi_typemap<Real>::type(), ParallelDescriptor::Communicator());
+#else
+    all_rec = local_rec;
+#endif
+    std::vector<albini_detail::LaunchCell> front_cells;
+    front_cells.reserve(all_rec.size() / 4);
+    for (std::size_t n = 0; n + 3 < all_rec.size(); n += 4) {
+        front_cells.push_back({static_cast<int>(all_rec[n]), static_cast<int>(all_rec[n + 1]), all_rec[n + 2], all_rec[n + 3]});
     }
-
-    const bool has_mask = (nonburnable != nullptr);
-    std::vector<Real> h_mask(has_mask ? ncells : 0, 0.0);
-    if (has_mask) {
-        for (MFIter mfi(*nonburnable); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.validbox();
-            const ERFHostFabView m_v((*nonburnable)[mfi]);
-            auto m_arr = m_v.array();
-            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
-                h_mask[j * nx + i] = m_arr(i, j, 0, 0);
-            });
-        }
-        ParallelDescriptor::ReduceRealSum(h_mask.data(), ncells);
-    }
-    if (fuel_load) {
-        // h_fuel is initialised to 1.0; ReduceRealSum of disjoint patches would double-count
-        // the default 1.0 values.  Initialise to 0.0, then reduce, then set unowned cells to 1.0.
-        // Reset h_fuel to 0 and re-fill only owned cells:
-        std::fill(h_fuel.begin(), h_fuel.end(), 0.0);
-        for (MFIter mfi(*fuel_load); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.validbox();
-            const ERFHostFabView fuel_v((*fuel_load)[mfi]);
-            auto fuel_arr = fuel_v.array();
-            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
-                h_fuel[j * nx + i] = fuel_arr(i, j, 0, 0);
-            });
-        }
-        ParallelDescriptor::ReduceRealSum(h_fuel.data(), ncells);
-    }
-
-    if (terrain_z) {
-        for (MFIter mfi(*terrain_z); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.validbox();
-            const ERFHostFabView terr_v((*terrain_z)[mfi]);
-            auto terr_arr = terr_v.array();
-            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
-                h_terrain[j * nx + i] = terr_arr(i, j, 0, 0);
-            });
-        }
-        ParallelDescriptor::ReduceRealSum(h_terrain.data(), ncells);
-    }
-    const Real z_ground_min = *std::min_element(h_terrain.begin(), h_terrain.end());
-
-    RothermelComputed rc = make_rothermel_params_for_albini(fp);
-
-    // Identify fire-front cells using the global (reduced) fields.
-    // All ranks see identical data after the reduce, so they generate identical spots.
-    struct FrontCell {
-        int  i, j;
-        Real I_B;
-        Real H_z;
-        Real src_x, src_y;
-        Real src_z;   // ground elevation at the source cell [m]
-    };
-
-    // Launch set: every burned cell (legacy), or only burned cells with
-    // unburned fuel within front_band cells of them (the fireline).
-    const bool front_only = (sp.launch_from == "front");
-    const int  band       = sp.front_band;
-    auto near_unburned = [&](int i, int j) -> bool {
-        for (int dj = -band; dj <= band; ++dj) {
-            const int jj = j + dj;
-            if (jj < 0 || jj >= ny) { continue; }
-            for (int di = -band; di <= band; ++di) {
-                const int ii = i + di;
-                if (ii < 0 || ii >= nx) { continue; }
-                if (h_phi[jj * nx + ii] >= 0.0) { return true; }
-            }
-        }
-        return false;
-    };
-
-    std::vector<FrontCell> front_cells;
-    for (int j = 0; j < ny; ++j) {
-        for (int i = 0; i < nx; ++i) {
-            int idx  = j * nx + i;
-            Real pv  = h_phi[idx];
-            Real rsp = h_ros[idx];
-            if (pv < 0.0 && rsp > 0.0 && (!front_only || near_unburned(i, j))) {
-                Real I_B = albini_byram_intensity(rsp, fp, rc);
-                Real H_z = albini_lofting_height(I_B, sp.I_B_min);
-                if (H_z > 0.0) {
-                    Real cx = prob_lo[0] + (i + 0.5) * dx[0];
-                    Real cy = prob_lo[1] + (j + 0.5) * dx[1];
-                    front_cells.push_back({i, j, I_B, H_z, cx, cy, h_terrain[idx]});
-                }
-            } else if (has_extra && h_extra[idx] > 0.0) {
-                // A burning structure: not fuel, not behind the front, but a
-                // launch site with the equivalent intensity it was given.
-                Real I_B = h_extra[idx];
-                Real H_z = albini_lofting_height(I_B, sp.I_B_min);
-                if (H_z > 0.0) {
-                    Real cx = prob_lo[0] + (i + 0.5) * dx[0];
-                    Real cy = prob_lo[1] + (j + 0.5) * dx[1];
-                    front_cells.push_back({i, j, I_B, H_z, cx, cy, h_terrain[idx]});
-                }
-            }
-        }
-    }
-
-    int n_front = static_cast<int>(front_cells.size());
+    std::sort(front_cells.begin(), front_cells.end(),
+              [](const albini_detail::LaunchCell& a, const albini_detail::LaunchCell& b) {
+                  return (a.j != b.j) ? (a.j < b.j) : (a.i < b.i);
+              });
+    const int n_front = static_cast<int>(front_cells.size());
     if (n_front == 0) { return; }
+
+    // ---------------------------------------------------------------------
+    // 2. The fields the trajectory reads at arbitrary points: the reference
+    //    wind and the ground, gathered to every rank.
+    // ---------------------------------------------------------------------
+    std::vector<Real> h_u(ncells, 0.0), h_v(ncells, 0.0), h_terrain(ncells, 0.0);
+    albini_detail::gather_field(h_u, wind_ref, 0, nx);
+    albini_detail::gather_field(h_v, wind_ref, 1, nx);
+    if (terrain_z) { albini_detail::gather_field(h_terrain, *terrain_z, 0, nx); }
+    const Real z_ground_min = *std::min_element(h_terrain.begin(), h_terrain.end());
 
     // RNG: fixed seed when sp.random_seed > 0, otherwise time+step based.
     unsigned seed = (sp.random_seed > 0)
@@ -475,45 +437,34 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     std::mt19937 rng(seed);
     std::uniform_real_distribution<Real> uniform(0.0, 1.0);
 
-    // Maximum spotting distance cap from Scott/Albini table.
-    std::string fuel_sys = fuel_system ? *fuel_system : "13";
-    Real max_dist_cap = scott_max_spot_dist(fuel_model_id, fuel_sys);
-
-    // Brands dropped on a non-burnable cell, counted for the exposure diagnostics.
-    std::vector<std::pair<int, int>> mask_landings;
-
-    // Collect landing sites to stamp (avoid double-stamping during iteration).
     struct LandingSite {
         Real x, y;
         int  src_i, src_j;
         Real dist;
-        Real H_z;     // lofting height at the source (a structure's is not derivable from h_ros)
+        Real H_z;
     };
     std::vector<LandingSite> landings;
 
     for (int fc = 0; fc < n_front; ++fc) {
-        int  si  = front_cells[fc].i;
-        int  sj  = front_cells[fc].j;
-        Real I_B = front_cells[fc].I_B;
-        Real H_z = front_cells[fc].H_z;
-        Real cx  = front_cells[fc].src_x;
-        Real cy  = front_cells[fc].src_y;
-        Real cz  = front_cells[fc].src_z;
+        const int  si  = front_cells[fc].i;
+        const int  sj  = front_cells[fc].j;
+        const Real I_B = front_cells[fc].I_B;
+        const Real H_z = albini_lofting_height(I_B, sp.I_B_min);
+        if (H_z <= 0.0) { continue; }
+        const Real cx  = prob_lo[0] + (si + 0.5) * dx[0];
+        const Real cy  = prob_lo[1] + (sj + 0.5) * dx[1];
+        const Real cz  = h_terrain[static_cast<std::size_t>(sj) * nx + si];
 
         // Stochastic launch: P_launch = P_base × min(1, I_B / I_B_min)
-        Real P_launch = sp.P_base * std::min(Real(1.0), I_B / sp.I_B_min);
+        const Real P_launch = sp.P_base * std::min(Real(1.0), I_B / sp.I_B_min);
         if (uniform(rng) >= P_launch) { continue; }
 
         // Forward-Euler trajectory. The brand is lofted H_z above the ground at
         // the source and descends at its terminal velocity until it meets the
-        // ground beneath it, which is not the same height it started from: a
-        // brand drifting downslope falls further and lands further away, and one
-        // drifting upslope meets the rising ground sooner.
-        //
-        // The step size is set from the longest fall the brand could make, down
-        // to the lowest ground in the domain, so the fixed step count always
-        // covers the descent. With no terrain every elevation is zero and this
-        // reduces to the flat-earth flight time H_z / w_terminal.
+        // ground beneath it, drifting on the reference wind scaled to its
+        // height above that ground. The step size is set from the longest fall
+        // the brand could make, down to the lowest ground in the domain, so the
+        // fixed step count always covers the descent.
         Real z_brand  = cz + H_z;
         Real t_max    = (sp.terminal_velocity > 0.0)
                       ? (z_brand - z_ground_min) / sp.terminal_velocity : 0.0;
@@ -530,8 +481,11 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                                            prob_lo[0], prob_lo[1],
                                            px, py, u_w, v_w);
             if (!in_domain) { break; }
-            px += u_w * dt_traj;
-            py += v_w * dt_traj;
+            const Real z_ground_here = albini_interp_scalar(h_terrain, nx, ny, dx[0], dx[1],
+                                                            prob_lo[0], prob_lo[1], px, py);
+            const Real f = albini_wind_profile_factor(z_brand - z_ground_here, z_ref, z0);
+            px += f * u_w * dt_traj;
+            py += f * v_w * dt_traj;
             z_brand -= dz_step;
 
             const Real z_ground = albini_interp_scalar(h_terrain, nx, ny, dx[0], dx[1],
@@ -541,134 +495,124 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
 
         if (!in_domain) { continue; }
 
-        // Maximum distance cap
+        // Maximum distance cap of the source cell's fuel
         Real dist = std::sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-        if (dist > max_dist_cap) {
-            // Clamp landing to max_dist_cap along trajectory direction
-            if (dist > 0.0) {
-                px = cx + (px - cx) / dist * max_dist_cap;
-                py = cy + (py - cy) / dist * max_dist_cap;
-                dist = max_dist_cap;
-            }
+        const Real max_dist_cap = front_cells[fc].cap;
+        if (dist > max_dist_cap && dist > 0.0) {
+            px = cx + (px - cx) / dist * max_dist_cap;
+            py = cy + (py - cy) / dist * max_dist_cap;
+            dist = max_dist_cap;
         }
 
         // Catching probability filter
         if (sp.P_catch < 1.0 && uniform(rng) >= sp.P_catch) { continue; }
 
-        // Re-entry fuel filter: skip if residual fuel below threshold
-        int li = static_cast<int>((px - prob_lo[0]) / dx[0]);
-        int lj = static_cast<int>((py - prob_lo[1]) / dx[1]);
-        li = std::max(0, std::min(nx - 1, li));
-        lj = std::max(0, std::min(ny - 1, lj));
-        // A brand landing on a non-burnable cell (structure, non-burnable fuel
-        // code, masked firebreak) does not ignite. With the exposure
-        // diagnostics on it is counted on the cell it fell on instead.
-        if (has_mask && h_mask[lj * nx + li] > 0.5) {
-            if (ember_landings) { mask_landings.push_back({li, lj}); }
-            continue;
-        }
-        if (fuel_load) {
-            // reentry_fuel_thresh is documented as a residual fuel *fraction*,
-            // but the load it is compared against is an absolute kg/m2. That
-            // made the filter fuel-model dependent: FM1 carries 0.166 kg/m2 in
-            // total, so any threshold above that rejected every brand however
-            // much fuel was left, while for a heavy fuel the same threshold was
-            // met by a cell that had already burned almost everything. Compare
-            // the fraction of the load the cell started with, as the name says.
-            const Real rf = h_fuel[lj * nx + li];
-            const Real frac = (fuel_load_initial_kg_m2 > 0.0)
-                            ? rf / amrex::max(fuel_load_initial_kg_m2, std::numeric_limits<Real>::min())
-                            : Real(1.0);
-            if (frac < sp.reentry_fuel_thresh) { continue; }
-        }
-
         landings.push_back({px, py, si, sj, dist, H_z});
-
-        // Update diagnostics comp 0 (H_z) and comp 1 (brand count) at source cell
-        // These are done after the loop to avoid MultiFab conflicts mid-loop.
     }
 
-    // Count the brands that fell on non-burnable cells, one kernel over the
-    // owned cells against the (short) list, like the stamping below.
-    if (ember_landings && !mask_landings.empty()) {
-        const int nml = static_cast<int>(mask_landings.size());
-        Gpu::DeviceVector<int> d_mi(nml), d_mj(nml);
-        {
-            std::vector<int> h_mi(nml), h_mj(nml);
-            for (int n = 0; n < nml; ++n) { h_mi[n] = mask_landings[n].first; h_mj[n] = mask_landings[n].second; }
-            Gpu::copy(Gpu::hostToDevice, h_mi.begin(), h_mi.end(), d_mi.begin());
-            Gpu::copy(Gpu::hostToDevice, h_mj.begin(), h_mj.end(), d_mj.begin());
+    const int nland = static_cast<int>(landings.size());
+    if (nland == 0) {
+        if (fire_debug) {
+            amrex::Print() << "[FIRE SPOTTING] front_cells=" << n_front << "  launched=0\n";
         }
-        const int* p_mi = d_mi.data();
-        const int* p_mj = d_mj.data();
-        for (MFIter mfi(*ember_landings); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.validbox();
-            auto e = ember_landings->array(mfi);
-            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
-                int c = 0;
-                for (int n = 0; n < nml; ++n) { if (p_mi[n] == i && p_mj[n] == j) { ++c; } }
-                if (c > 0) { e(i, j, 0) += Real(c); }
-            });
-        }
-        Gpu::streamSynchronize();
+        return;
     }
 
-    // Stamp phi at landing sites and update source-cell diagnostics.
-    //
-    // Both of these were host loops over MultiFab data, which faults under CUDA.
-    // They are plain per-cell geometry, so they move onto the device as one fused
-    // kernel over the landing list.
-    //
-    // Equivalent to the two host loops it replaces: the phi min-stamp is
-    // order-independent, the active-spot flag and the fuel cap are idempotent,
-    // H_z is identical for every landing sharing a source cell (it is derived
-    // from h_ros at that cell), the brand count adds one per landing, and the
-    // landing distance is a max. Doing them in one pass over cells rather than
-    // one pass per landing also drops the cost from O(n_landings * ncells).
-    if (!landings.empty()) {
-        const int nland = static_cast<int>(landings.size());
+    // ---------------------------------------------------------------------
+    // 3. Landing filters on the device: the mask and the re-entry fraction of
+    //    the landing cell, decided by the rank that owns it and agreed by all.
+    // ---------------------------------------------------------------------
+    Gpu::DeviceVector<Real> d_lx(nland), d_ly(nland), d_ldist(nland), d_lhz(nland);
+    Gpu::DeviceVector<int>  d_lsi(nland), d_lsj(nland), d_li(nland), d_lj(nland), d_ok(nland);
+    {
+        std::vector<Real> h_lx(nland), h_ly(nland), h_ldist(nland), h_lhz(nland);
+        std::vector<int>  h_lsi(nland), h_lsj(nland), h_li(nland), h_lj(nland), h_ok(nland, 0);
+        for (int n = 0; n < nland; ++n) {
+            const auto& ls = landings[n];
+            h_lx[n] = ls.x;  h_ly[n] = ls.y;  h_ldist[n] = ls.dist;  h_lhz[n] = ls.H_z;
+            h_lsi[n] = ls.src_i;  h_lsj[n] = ls.src_j;
+            int li = static_cast<int>((ls.x - prob_lo[0]) / dx[0]);
+            int lj = static_cast<int>((ls.y - prob_lo[1]) / dx[1]);
+            h_li[n] = std::max(0, std::min(nx - 1, li));
+            h_lj[n] = std::max(0, std::min(ny - 1, lj));
+        }
+        Gpu::copy(Gpu::hostToDevice, h_lx.begin(),    h_lx.end(),    d_lx.begin());
+        Gpu::copy(Gpu::hostToDevice, h_ly.begin(),    h_ly.end(),    d_ly.begin());
+        Gpu::copy(Gpu::hostToDevice, h_ldist.begin(), h_ldist.end(), d_ldist.begin());
+        Gpu::copy(Gpu::hostToDevice, h_lhz.begin(),   h_lhz.end(),   d_lhz.begin());
+        Gpu::copy(Gpu::hostToDevice, h_lsi.begin(),   h_lsi.end(),   d_lsi.begin());
+        Gpu::copy(Gpu::hostToDevice, h_lsj.begin(),   h_lsj.end(),   d_lsj.begin());
+        Gpu::copy(Gpu::hostToDevice, h_li.begin(),    h_li.end(),    d_li.begin());
+        Gpu::copy(Gpu::hostToDevice, h_lj.begin(),    h_lj.end(),    d_lj.begin());
+        Gpu::copy(Gpu::hostToDevice, h_ok.begin(),    h_ok.end(),    d_ok.begin());
+    }
+    const Real* p_lx    = d_lx.data();
+    const Real* p_ly    = d_ly.data();
+    const Real* p_ldist = d_ldist.data();
+    const Real* p_lhz   = d_lhz.data();
+    const int*  p_lsi   = d_lsi.data();
+    const int*  p_lsj   = d_lsj.data();
+    const int*  p_li    = d_li.data();
+    const int*  p_lj    = d_lj.data();
+    int*        p_ok    = d_ok.data();
 
-        Gpu::DeviceVector<Real> d_lx(nland), d_ly(nland), d_ldist(nland), d_lhz(nland);
-        Gpu::DeviceVector<int>  d_lsi(nland), d_lsj(nland);
-        {
-            std::vector<Real> h_lx(nland), h_ly(nland), h_ldist(nland), h_lhz(nland);
-            std::vector<int>  h_lsi(nland), h_lsj(nland);
-            for (int n = 0; n < nland; ++n) {
-                const auto& ls = landings[n];
-                h_lx[n]    = ls.x;
-                h_ly[n]    = ls.y;
-                h_ldist[n] = ls.dist;
-                h_lsi[n]   = ls.src_i;
-                h_lsj[n]   = ls.src_j;
-                // The source cell's lofting height, as the launch loop computed it
-                // (from h_ros for a fuel cell, from the extra intensity for a structure).
-                h_lhz[n] = ls.H_z;
+    const bool has_mask  = (nonburnable != nullptr);
+    const bool has_fuel  = (fuel_load != nullptr);
+    const bool has_w0    = (fuel_w0 != nullptr);
+    const bool count_emb = (ember_landings != nullptr);
+    const Real reentry   = sp.reentry_fuel_thresh;
+    const Real w0_uniform = fuel_load_initial_kg_m2;
+
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        Array4<const Real> mask_arr, fuel_arr, w0_arr;
+        if (has_mask) { mask_arr = nonburnable->const_array(mfi); }
+        if (has_fuel) { fuel_arr = fuel_load->const_array(mfi); }
+        if (has_w0)   { w0_arr   = fuel_w0->const_array(mfi); }
+        Array4<Real> emb_arr;
+        if (count_emb) { emb_arr = ember_landings->array(mfi); }
+        // one thread per landing: the owning box decides
+        ParallelFor(nland, [=] AMREX_GPU_DEVICE (int n) noexcept {
+            const int li = p_li[n], lj = p_lj[n];
+            if (!bx.contains(IntVect(li, lj, 0))) { return; }
+            if (has_mask && mask_arr(li, lj, 0) > 0.5) {
+                // A brand on a non-burnable cell (structure, non-burnable fuel
+                // code, masked firebreak) does not ignite; counted for the
+                // exposure diagnostics when they are on.
+                if (count_emb) { Gpu::Atomic::AddNoRet(&emb_arr(li, lj, 0), Real(1.0)); }
+                return;
             }
-            Gpu::copy(Gpu::hostToDevice, h_lx.begin(),    h_lx.end(),    d_lx.begin());
-            Gpu::copy(Gpu::hostToDevice, h_ly.begin(),    h_ly.end(),    d_ly.begin());
-            Gpu::copy(Gpu::hostToDevice, h_ldist.begin(), h_ldist.end(), d_ldist.begin());
-            Gpu::copy(Gpu::hostToDevice, h_lhz.begin(),   h_lhz.end(),   d_lhz.begin());
-            Gpu::copy(Gpu::hostToDevice, h_lsi.begin(),   h_lsi.end(),   d_lsi.begin());
-            Gpu::copy(Gpu::hostToDevice, h_lsj.begin(),   h_lsj.end(),   d_lsj.begin());
-        }
+            if (has_fuel) {
+                // reentry_fuel_thresh is a fraction of the load the landing
+                // cell started with (its own on a fuel map): brands landing in
+                // the burned area or on consumed fuel are discarded.
+                const Real w0 = has_w0 ? w0_arr(li, lj, 0) : w0_uniform;
+                const Real frac = (w0 > 0.0) ? fuel_arr(li, lj, 0) / amrex::max(w0, std::numeric_limits<Real>::min())
+                                             : Real(1.0);
+                if (frac < reentry) { return; }
+            }
+            p_ok[n] = 1;
+        });
+    }
+    Gpu::streamSynchronize();
+    std::vector<int> h_ok(nland, 0);
+    Gpu::copy(Gpu::deviceToHost, d_ok.begin(), d_ok.end(), h_ok.begin());
+    ParallelDescriptor::ReduceIntMax(h_ok.data(), nland);
+    Gpu::copy(Gpu::hostToDevice, h_ok.begin(), h_ok.end(), d_ok.begin());
+    int n_accepted = 0;
+    Real max_dist = 0.0;
+    for (int n = 0; n < nland; ++n) { if (h_ok[n]) { ++n_accepted; max_dist = std::max(max_dist, landings[n].dist); } }
 
-        const Real* p_lx    = d_lx.data();
-        const Real* p_ly    = d_ly.data();
-        const Real* p_ldist = d_ldist.data();
-        const Real* p_lhz   = d_lhz.data();
-        const int*  p_lsi   = d_lsi.data();
-        const int*  p_lsj   = d_lsj.data();
-
+    // ---------------------------------------------------------------------
+    // 4. Stamp phi at the accepted landings and record the source diagnostics,
+    //    in one pass over the cells against the landing list.
+    // ---------------------------------------------------------------------
+    if (n_accepted > 0) {
         const Real spot_radius = sp.spot_radius;
-        const bool cap_fuel    = (fire_fuel_load_ptr != nullptr) && (fuel_load_initial_kg_m2 > 0.0);
-        const Real fuel_cap    = 0.05 * fuel_load_initial_kg_m2;
-
         for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.validbox();
             auto phi_arr  = phi.array(mfi);
             auto alb_arr  = albini_data.array(mfi);
-            // Aliased to phi when there is no fuel field; never written in that case.
-            auto fuel_arr = fire_fuel_load_ptr ? fire_fuel_load_ptr->array(mfi) : phi.array(mfi);
             Array4<const Real> mask_arr;
             if (has_mask) { mask_arr = nonburnable->const_array(mfi); }
 
@@ -682,12 +626,12 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
 
                 Real phi_new  = phi_arr(i, j, 0, 0);
                 bool spotted  = false;
-
                 Real hz_here  = 0.0;
                 Real n_brands = 0.0;
-                Real max_dist = alb_arr(i, j, 0, 2);
+                Real max_d    = alb_arr(i, j, 0, 2);
 
                 for (int n = 0; n < nland; ++n) {
+                    if (p_ok[n] == 0) { continue; }
                     const Real ddx = ccx - p_lx[n];
                     const Real ddy = ccy - p_ly[n];
                     const Real d   = std::sqrt(ddx*ddx + ddy*ddy);
@@ -703,36 +647,26 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                     if (i == p_lsi[n] && j == p_lsj[n]) {
                         hz_here   = p_lhz[n];
                         n_brands += 1.0;
-                        max_dist  = amrex::max(max_dist, p_ldist[n]);
+                        max_d     = amrex::max(max_d, p_ldist[n]);
                     }
                 }
 
                 phi_arr(i, j, 0, 0) = phi_new;
-
-                if (spotted) {
-                    alb_arr(i, j, 0, 3) = 1.0;  // active spot flag
-                    // Initialize fuel load at newly-ignited spot to a small fraction
-                    // to represent early burning stage before steady state
-                    if (cap_fuel) {
-                        fuel_arr(i, j, 0, 0) = amrex::min(fuel_arr(i, j, 0, 0), fuel_cap);
-                    }
-                }
-
+                if (spotted) { alb_arr(i, j, 0, 3) = 1.0; }   // active spot flag; the fuel is left as it is
                 if (n_brands > 0.0) {
                     alb_arr(i, j, 0, 0)  = hz_here;    // lofting height
                     alb_arr(i, j, 0, 1) += n_brands;   // brand count
-                    alb_arr(i, j, 0, 2)  = max_dist;   // max landing dist
+                    alb_arr(i, j, 0, 2)  = max_d;      // max landing dist
                 }
             });
         }
-        Gpu::streamSynchronize();
     }
+    // The kernels above read the device vectors, which are freed on return.
+    Gpu::streamSynchronize();
 
     // Clamp phi to [-1, 1] after all spotting stamps. Only in the normalized
-    // convention: on the level-set path phi is a signed distance in metres,
-    // and clamping it here squashed the whole distance function every
-    // spotting step, which changed the spread even when nothing landed.
-    if (phi_normalized) {
+    // convention: on the level-set path phi is a signed distance in metres.
+    if (phi_normalized && n_accepted > 0) {
         for (amrex::MFIter mfi(phi); mfi.isValid(); ++mfi) {
             auto p = phi.array(mfi);
             amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
@@ -747,11 +681,8 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     fire_fill_boundary(phi, geom);
 
     if (fire_debug) {
-        int n_launched = static_cast<int>(landings.size());
-        amrex::Real max_dist = 0.0;
-        for (const auto& ls : landings) { max_dist = std::max(max_dist, ls.dist); }
         amrex::Print() << "[FIRE SPOTTING] front_cells=" << n_front
-                       << "  launched=" << n_launched
+                       << "  launched=" << n_accepted
                        << "  max_landing_dist=" << max_dist << " m"
                        << "  spot_radius=" << sp.spot_radius << " m"
                        << "  phi_min_after=" << phi.min(0) << "\n";

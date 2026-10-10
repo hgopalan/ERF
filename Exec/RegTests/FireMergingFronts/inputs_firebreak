@@ -1,0 +1,19 @@
+FILE = inputs_base
+
+# A firebreak with a t = 0 polyline ignition: the south line of the parallel
+# pair and a 20 m wide north-south break at x = 240 to 260 m, clear of the line.
+# The break must be held in the non-burnable mask: 10 x 75 = 750 fire cells
+# (2 m cells, centres x = 241 ... 259 m over the full 150 m in y). Until 2026-10
+# the mask read the break back from phi after the polyline was min-merged over
+# the whole grid, which wrote the distance to the line into every break cell,
+# so the mask came out empty.
+erf.fire_plot_file = "plt_fire_firebreak_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.polygon_file = "parallel_south.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 4.0
+erf.fire.firebreak.0.type = "rect"
+erf.fire.firebreak.0.x_lo = 240.0
+erf.fire.firebreak.0.x_hi = 260.0
+erf.fire.firebreak.0.y_lo = 0.0
+erf.fire.firebreak.0.y_hi = 150.0

@@ -1,10 +1,14 @@
 // Sensible heat flux and fuel consumption for the fire layer.
 //
-// The heat flux Q [W/m²] per cell is:
-//   Q = fuel_load_remain [kg/m²] * h_fuel [J/kg] / tau_res [s]
+// The heat flux Q [W/m²] per cell is the mean over the step of the
+// exponential burnout, dw/dt = -w / tau_res:
+//   Q = h_fuel [J/kg] * w_n [kg/m²] * (1 - exp(-dt / tau_res)) / dt
 //
-// This is the instantaneous power from the exponential burnout rate:
-//   dw/dt = -w / tau_res   =>   Q = -h * dw/dt = h * w / tau_res
+// so that the energy handed to the atmosphere over the step, Q dt, is exactly
+// the heat of the fuel consumed in it, h (w_n - w_{n+1}). The instantaneous
+// power at the start of the step, h w_n / tau_res, used until 2026-10, is
+// larger by (dt/tau)/(1 - exp(-dt/tau)): 19 % for short grass (tau = 2.75 s)
+// at dt = 1 s, 13 % for the SFIRE grass burn time at dt = 2 s.
 //
 // tau_res is the effective cell residence time:
 //   tau_res [s] = dx_fire [m] / ROS [m/s]   (time for front to cross one fire cell)
@@ -85,17 +89,20 @@ amrex::Real compute_residence_time_s(amrex::Real sigma_ft, amrex::Real rho_p_lbf
 }
 
 /**
- * @brief Compute sensible heat flux at one cell [W/m²].
+ * @brief Sensible heat flux at one cell over one step [W/m²].
  *
- * Q = fuel_load_remain [kg/m²] * h_fuel [J/kg] / tau_res_s [s]
+ * Q = fuel_load_remain [kg/m²] * h_fuel [J/kg] * (1 - exp(-dt / tau_res)) / dt
  *
- * Instantaneous power from dw/dt = -w/tau_res. Returns 0 for
- * unburned cells (phi >= 0) or when fuel is exhausted.
+ * The mean power of dw/dt = -w/tau_res over the step, so Q dt equals the
+ * heat of the fuel deplete_fuel_load() removes in the same step. Returns 0
+ * for unburned cells (phi >= 0) or when fuel is exhausted; with dt <= 0 the
+ * instantaneous power h w / tau_res.
  *
  * @param[in] phi                  Level-set value (burned if < 0)
  * @param[in] fuel_load_remain     Remaining fuel load [kg/m²]
  * @param[in] h_fuel_J_per_kg      Heat content [J/kg]
  * @param[in] tau_res_s            Cell residence time [s]
+ * @param[in] dt_s                 Step over which the flux is applied [s]
  * @return Heat flux [W/m²], non-negative
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -103,12 +110,21 @@ amrex::Real compute_heat_flux_cell(
     amrex::Real phi,
     amrex::Real fuel_load_remain,
     amrex::Real h_fuel_J_per_kg,
-    amrex::Real tau_res_s) noexcept
+    amrex::Real tau_res_s,
+    amrex::Real dt_s) noexcept
 {
     if (phi >= 0.0)              return 0.0;
     if (fuel_load_remain <= 0.0) return 0.0;
     if (tau_res_s <= 0.0)        return 0.0;
-    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(fuel_load_remain * h_fuel_J_per_kg / tau_res_s));
+    // dt floored at 0 in the exponent, and the divide by 1 at dt = 0, before
+    // the select: both forms are evaluated (an unselected x/0 or e^{+large}
+    // would be speculated, and is evaluated outright at -O0), so a
+    // non-positive dt must not reach either as it is. The divisor is chosen
+    // between two values, so no step, however small, is floored.
+    const amrex::Real dt_pos = amrex::max(dt_s, amrex::Real(0.0));
+    const amrex::Real step_mean = -std::expm1(-dt_pos / tau_res_s) / ((dt_pos > 0.0) ? dt_pos : amrex::Real(1.0));
+    const amrex::Real rate = (dt_s > 0.0) ? step_mean : amrex::Real(1.0) / tau_res_s;
+    return amrex::max(amrex::Real(0.0), fuel_load_remain * h_fuel_J_per_kg * rate);
 }
 
 /**
@@ -148,8 +164,8 @@ amrex::Real deplete_fuel_load(
  * division by zero). This avoids the global-max-ROS bug where one boundary
  * artifact cell (with spuriously high ROS) would set tau for all burned cells.
  *
- *   Q    = fuel_load * h_fuel / tau_cell          [W/m²]
- *   w_new = fuel_load * exp(-dt_atm / tau_cell)   [kg/m²]
+ *   Q    = fuel_load * h_fuel * (1 - exp(-dt_atm / tau_cell)) / dt_atm   [W/m²]
+ *   w_new = fuel_load * exp(-dt_atm / tau_cell)                           [kg/m²]
  *
  * dt_fire_s corresponds to the full atmospheric dt, not the CFL substep.
  *
@@ -256,7 +272,7 @@ inline void fill_fire_heat_flux(
                     tau_cell = d_tau_burnout[slot];
                 }
 
-                Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_cell, tau_cell);
+                Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_cell, tau_cell, dt_fire_s);
                 fuel_arr(i, j, k) = deplete_fuel_load(phi_val, w_cur, tau_cell, dt_fire_s);
             });
         } else {
@@ -273,7 +289,7 @@ inline void fill_fire_heat_flux(
                                ? tau_burnout_uniform
                                : amrex::max(dx_fire / ros_cell, tau_sav_floor);
 
-                Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_J_per_kg, tau_cell);
+                Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_J_per_kg, tau_cell, dt_fire_s);
                 fuel_arr(i, j, k) = deplete_fuel_load(phi_val, w_cur, tau_cell, dt_fire_s);
             });
         }

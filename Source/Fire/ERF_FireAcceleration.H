@@ -142,12 +142,59 @@ inline void apply_fire_acceleration_size_based(amrex::MultiFab&       R_mf,
 }
 
 // ============================================================================
+// count_perimeter_cells
+//
+// Number of burned cells with an unburned 4-neighbour, summed over ranks. The
+// neighbours are read from a one-ghost copy of phi, exchanged across boxes and
+// periodic faces and extrapolated outside a non-periodic face
+// (fire_fill_boundary), and the tests stop at the domain, not at the box: an
+// in-box count dropped the cells whose unburned neighbour lay across a box
+// face, so the count, and the A_point / A_line switch below, depended on the
+// decomposition (the statistics CSV's perimeter had the same defect, fixed
+// first in ERF_FireStatsOutput.H).
+// ============================================================================
+inline amrex::Long count_perimeter_cells(const amrex::MultiFab& phi,
+                                         const amrex::Geometry& geom)
+{
+    using namespace amrex;
+    MultiFab phi_g(phi.boxArray(), phi.DistributionMap(), 1, IntVect(1, 1, 0));
+    MultiFab::Copy(phi_g, phi, 0, 0, 1, 0);
+    fire_fill_boundary(phi_g, geom);
+    const IntVect dlo = geom.Domain().smallEnd();
+    const IntVect dhi = geom.Domain().bigEnd();
+    const bool per_x = geom.isPeriodic(0);
+    const bool per_y = geom.isPeriodic(1);
+
+    ReduceOps<ReduceOpSum> reduce_op;
+    ReduceData<unsigned long long> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+    for (MFIter mfi(phi_g); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto const p  = phi_g.const_array(mfi);
+        reduce_op.eval(bx, reduce_data,
+        [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
+        {
+            if (p(i, j, k) >= 0.0) { return {0ull}; }
+            bool is_perimeter = false;
+            if ((per_x || i + 1 <= dhi[0]) && p(i+1, j, k) >= 0.0) is_perimeter = true;
+            if ((per_x || i - 1 >= dlo[0]) && p(i-1, j, k) >= 0.0) is_perimeter = true;
+            if ((per_y || j + 1 <= dhi[1]) && p(i, j+1, k) >= 0.0) is_perimeter = true;
+            if ((per_y || j - 1 >= dlo[1]) && p(i, j-1, k) >= 0.0) is_perimeter = true;
+            return { is_perimeter ? 1ull : 0ull };
+        });
+    }
+    amrex::Long n = static_cast<amrex::Long>(amrex::get<0>(reduce_data.value(reduce_op)));
+    ParallelDescriptor::ReduceLongSum(n);
+    return n;
+}
+
+// ============================================================================
 // temporal_acceleration_constant
 //
 // Acceleration constant of the temporal model [1/s], shared by both clocks:
 // A_point while the burned perimeter is at most perim_limit, A_line beyond it.
-// The perimeter is the number of burned cells with an unburned 4-neighbour in
-// the same box, times the cell diagonal.
+// The perimeter is the number of burned cells with an unburned 4-neighbour
+// (count_perimeter_cells), times the cell diagonal.
 // ============================================================================
 inline amrex::Real temporal_acceleration_constant(const amrex::MultiFab& phi,
                                                   const amrex::Geometry& geom,
@@ -158,38 +205,7 @@ inline amrex::Real temporal_acceleration_constant(const amrex::MultiFab& phi,
 
     // Compute fire perimeter to determine acceleration constant
     // (point ignition: A_point; line ignition: A_line)
-    // Device reduction for the same reason as the burned count above. Cell
-    // semantics are unchanged, including the in-box-only neighbour guards.
-    amrex::Long n_perimeter = 0;
-    {
-        amrex::ReduceOps<amrex::ReduceOpSum> reduce_op;
-        amrex::ReduceData<unsigned long long> reduce_data(reduce_op);
-        using ReduceTuple = typename decltype(reduce_data)::Type;
-
-        for (amrex::MFIter mfi(phi); mfi.isValid(); ++mfi) {
-            const amrex::Box& bx = mfi.validbox();
-            auto const p         = phi.const_array(mfi);
-            const auto lo        = amrex::lbound(bx);
-            const auto hi        = amrex::ubound(bx);
-
-            reduce_op.eval(bx, reduce_data,
-            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
-            {
-                if (p(i, j, k) >= 0.0) { return {0ull}; }
-
-                // Check if this is a perimeter cell (has unburned neighbor)
-                // Guard all stencil accesses with validbox bounds
-                bool is_perimeter = false;
-                if (i+1 <= hi.x && p(i+1, j, k) >= 0.0) is_perimeter = true;
-                if (i-1 >= lo.x && p(i-1, j, k) >= 0.0) is_perimeter = true;
-                if (j+1 <= hi.y && p(i, j+1, k) >= 0.0) is_perimeter = true;
-                if (j-1 >= lo.y && p(i, j-1, k) >= 0.0) is_perimeter = true;
-                return { is_perimeter ? 1ull : 0ull };
-            });
-        }
-        n_perimeter = static_cast<amrex::Long>(amrex::get<0>(reduce_data.value(reduce_op)));
-    }
-    amrex::ParallelDescriptor::ReduceLongSum(n_perimeter);
+    const amrex::Long n_perimeter = count_perimeter_cells(phi, geom);
 
     // Estimate perimeter length in meters
     const amrex::Real perim_length = static_cast<amrex::Real>(n_perimeter) *
@@ -340,8 +356,12 @@ amrex::Real accel_step_mean_factor(amrex::Real s0, amrex::Real a) noexcept
 {
     using namespace amrex::literals;
     const amrex::Real e0 = std::exp(-s0);
-    // floored a before the early return (0/0 of a = 0 would be speculated)
-    const amrex::Real ratio = (-std::expm1(-a)) / amrex::max(a, amrex::Real(1.0e-30));
+    // evaluated before the early return, so a non-positive a must not reach it
+    // as it is (0/0 of a = 0 would be speculated, e^{+large} of a < 0 is
+    // evaluated outright at -O0): a floored at 0 in the exponent, the divisor
+    // chosen between two values so that no increment is floored
+    const amrex::Real a_pos = amrex::max(a, amrex::Real(0.0));
+    const amrex::Real ratio = (-std::expm1(-a_pos)) / ((a_pos > 0.0_rt) ? a_pos : amrex::Real(1.0));
     if (a <= 0.0_rt) { return 1.0_rt - e0; }
     return 1.0_rt - e0 * ratio;
 }

@@ -41,28 +41,28 @@ from 2 minutes on. The `legacy` decks are reported but not checked.
 `Tests/CTestList.cmake` runs `inputs_levelset_front` for 40 steps as a smoke
 test.
 
-## Measured (2026-09-10, one rank, double precision)
+## Measured (2026-10-09, two ranks, double precision)
 
 Head advance as a share of the unaccelerated advance, with the FARSITE path on
 its default `front_cell` update:
 
 | t [s] | S(t) | FARSITE legacy | FARSITE front | level-set legacy | level-set front |
 |------:|-----:|---------------:|--------------:|-----------------:|----------------:|
-|    60 | 0.368 | 1.000 | 0.370 | 1.000 | 0.428 |
-|   120 | 0.568 | 1.000 | 0.569 | 1.000 | 0.621 |
-|   240 | 0.755 | 1.000 | 0.755 | 1.000 | 0.795 |
-|   360 | 0.834 | 1.000 | 0.834 | 1.000 | 0.857 |
-|   600 | 0.900 | 1.000 | 0.897 | 1.000 | 0.909 |
+|    60 | 0.368 | 1.000 | 0.370 | 1.000 | 0.424 |
+|   120 | 0.568 | 1.000 | 0.569 | 1.000 | 0.614 |
+|   240 | 0.755 | 1.000 | 0.755 | 1.000 | 0.818 |
+|   360 | 0.834 | 1.000 | 0.834 | 1.000 | 0.888 |
+|   600 | 0.900 | 1.000 | 0.897 | 1.000 | 0.914 |
 
 Head rate over each window as a ratio to the unaccelerated head. "ideal" is the
 window mean of `1 - exp(-A t)`:
 
 | window [s] | ideal | FARSITE off [m/s] | legacy | front | level-set off [m/s] | legacy | front |
 |-----------:|------:|------------------:|-------:|------:|--------------------:|-------:|------:|
-|    0-120 | 0.568 | 0.971 | 1.000 | 0.569 | 0.929 | 1.000 | 0.621 |
-|  120-240 | 0.941 | 0.971 | 1.000 | 0.941 | 0.709 | 1.000 | 1.024 |
-|  240-360 | 0.992 | 0.971 | 1.000 | 0.992 | 0.683 | 1.000 | 1.004 |
-|  360-600 | 0.999 | 0.960 | 1.000 | 0.991 | 0.673 | 1.000 | 0.999 |
+|    0-120 | 0.568 | 0.971 | 1.000 | 0.569 | 0.940 | 1.000 | 0.614 |
+|  120-240 | 0.941 | 0.971 | 1.000 | 0.941 | 0.635 | 1.000 | 1.122 |
+|  240-360 | 0.992 | 0.971 | 1.000 | 0.992 | 0.489 | 1.000 | 1.112 |
+|  360-600 | 0.999 | 0.960 | 1.000 | 0.991 | 0.426 | 1.000 | 0.977 |
 
 - With the legacy clock the fire does not accelerate on either path, and both
   runs are identical to acceleration off. The `front_cell` update takes the
@@ -70,9 +70,10 @@ window mean of `1 - exp(-A t)`:
   The directional level-set path rebuilds its rate from the model in every
   Runge-Kutta stage and never reads the accelerated field.
 - With the front clock the FARSITE head follows `S(t)` to within 0.003, at 0.07
-  of the tolerance. The level-set head is within 0.06, at 0.52 of the tolerance:
-  its unaccelerated head is faster over its first two minutes, which the ratio
-  does not remove.
+  of the tolerance. The level-set head is within 0.07, at 0.79 of the tolerance:
+  its unaccelerated head slows from 0.94 to 0.43 m/s over the run as the front
+  sharpens under the projection formula (the degradation FireAdvectiveWindCoupling
+  documents), and the ratio to it does not remove that.
 - On the legacy FARSITE update (`erf.fire.farsite.front_update=legacy` on the
   command line), the head runs at about twice the rate of spread, 1.75 to
   1.83 m/s. The legacy clock gives shares of 1.039, 1.039, 1.017, 1.010 and

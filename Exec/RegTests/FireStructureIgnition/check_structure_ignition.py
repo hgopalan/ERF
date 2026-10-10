@@ -159,8 +159,14 @@ def check_restart():
     names = sorted(pf._read_header(a)["names"])
     _, da = pf.read_fields(a, names); _, db = pf.read_fields(b, names)
     worst = 0.0; bad = []; exact_bad = []
+    # The structure state, ignition times, the radiated flux and the ember
+    # counts restart bit for bit. The heat load and the peak intensity
+    # integrate the fire's Byram intensity h w0 R, whose wind restarts to
+    # about 1e-11 (the atmosphere's own restart round-off), so they are held
+    # to the 1e-9 of the other fields (the fire reaches the houses within the
+    # 40 steps since the 2026-10 wind limit).
     exact = ["fire_structure_state", "fire_structure_ignition_time", "fire_structure_rad_flux",
-             "fire_heat_load", "fire_ember_landings", "fire_peak_intensity"]
+             "fire_ember_landings"]
     for n in names:
         xa = [v for col in da[n] for row in col for v in row]
         xb = [v for col in db[n] for row in col for v in row]
@@ -175,7 +181,7 @@ def check_restart():
     check("step-40 plotfile reproduced after restart", not bad,
           f"{len(names)} fields, largest relative difference {worst:.1e}" + (f"; beyond 1e-9: {bad}" if bad else ""))
     # the structure state, the accumulators and the incident flux restart exactly
-    check("structure fields identical after restart", not exact_bad, ", ".join(exact) + (f"; differ: {exact_bad}" if exact_bad else ""))
+    check("structure state, radiated flux and ember counts identical after restart", not exact_bad, ", ".join(exact) + (f"; differ: {exact_bad}" if exact_bad else ""))
     ra = rows("on"); rb = rows("restart")
     same = True; detail = []
     for s in sorted(ra):
