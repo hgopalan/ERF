@@ -13,9 +13,12 @@
  *
  * Ported from wildfire_levelset/src/barrier_polygons.H
  *
- * Implements rectangular and circular non-burnable zones that are stamped
- * into the level-set phi at initialization. Firebreak cells remain non-burnable
- * throughout the simulation by setting phi to FIREBREAK_PHI_SENTINEL.
+ * Implements rectangular and circular non-burnable zones. Their cells are
+ * stamped into the level-set phi as FIREBREAK_PHI_SENTINEL at initialization,
+ * which only starts them unburned (both propagation paths wear the value
+ * away); with erf.fire.firebreak.use_mask = true (the default) the
+ * non-burnable mask, built from the same shapes by mark_firebreak_cells(),
+ * holds them for the whole run.
  *
  * Reference:
  *   Finney, M.A. (1998). FARSITE: Fire Area Simulator. RMRS-RP-4.
@@ -24,9 +27,11 @@
 /**
  * @brief Sentinel value for firebreak cells in fire_phi.
  *
- * Must be larger than any phi value produced during FARSITE propagation
- * (typically φ ∈ [-large, +large]) and larger than farsite_phi_threshold
- * (default 0.1).
+ * Positive and larger than farsite_phi_threshold (default 0.1), so a stamped
+ * cell starts unburned on both paths. Nothing compares phi against it: the
+ * level-set no-disc start (the domain diagonal) exceeds it on a domain whose
+ * diagonal passes 1000 km, where barrier cells are a basin of lower but still
+ * positive phi, held by the mask.
  */
 constexpr amrex::Real FIREBREAK_PHI_SENTINEL = 1.0e6;
 
@@ -34,7 +39,8 @@ constexpr amrex::Real FIREBREAK_PHI_SENTINEL = 1.0e6;
  * @brief A firebreak is a rectangular or circular non-burnable zone.
  *
  * Cells within the barrier have phi set to FIREBREAK_PHI_SENTINEL at
- * initialization and remain non-burnable for the duration of the simulation.
+ * initialization; with firebreak.use_mask (the default) the non-burnable
+ * mask keeps them unburned for the duration of the simulation.
  *
  * Reference:
  *   Finney, M.A. (1998). FARSITE: Fire Area Simulator. RMRS-RP-4.
@@ -51,14 +57,15 @@ struct FireBreak {
 };
 
 /**
- * @brief Apply firebreak barriers to fire_phi using a GPU ParallelFor kernel.
+ * @brief Set every fire-grid cell whose centre lies in a barrier to `value`.
  *
- * For each cell whose centre falls within any barrier:
- *   phi(i,j,0) = FIREBREAK_PHI_SENTINEL
- *
- * Cells outside all barriers are not modified.
- *
- * Called once in FireLayer::initialize() after ignition stamping.
+ * The one cell test of the firebreaks, shared by apply_firebreaks() (the
+ * level-set sentinel) and the non-burnable mask (FireLayer::
+ * build_nonburnable_mask), so the mask marks exactly the cells the sentinel
+ * marks without reading them back from the level set: an unburned level set
+ * is the domain diagonal from a front, which on a domain wider than the
+ * sentinel's half would read as a firebreak. Cells outside all barriers are
+ * not modified; ghost cells are left to the caller's fill.
  *
  * Cell centre: x = prob_lo[0] + (i + 0.5) * dx[0],
  *              y = prob_lo[1] + (j + 0.5) * dx[1]
@@ -66,13 +73,15 @@ struct FireBreak {
  * Rectangle check: x_lo <= x <= x_hi && y_lo <= y <= y_hi
  * Circle check: sqrt((x-cx)^2 + (y-cy)^2) <= radius
  *
- * @param[inout] fire_phi      Level-set phi to stamp
+ * @param[inout] mf            Field to mark (component 0)
  * @param[in]    breaks        Vector of firebreak barriers
  * @param[in]    geom          Fire grid geometry
+ * @param[in]    value         Value written in barrier cells
  */
-inline void apply_firebreaks(amrex::MultiFab& fire_phi,
-                              const std::vector<FireBreak>& breaks,
-                              const amrex::Geometry& geom)
+inline void mark_firebreak_cells(amrex::MultiFab& mf,
+                                 const std::vector<FireBreak>& breaks,
+                                 const amrex::Geometry& geom,
+                                 amrex::Real value)
 {
     if (breaks.empty()) { return; }
 
@@ -145,9 +154,9 @@ inline void apply_firebreaks(amrex::MultiFab& fire_phi,
     const auto* d_radius_p = d_radius.data();
 
     // ParallelFor over fire grid
-    for (amrex::MFIter mfi(fire_phi); mfi.isValid(); ++mfi) {
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
-        auto phi_arr = fire_phi.array(mfi);  // Array4 by value — required for GPU lambda capture
+        auto phi_arr = mf.array(mfi);  // Array4 by value — required for GPU lambda capture
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             amrex::Real x = prob_lo[0] + (i + 0.5) * dx[0];
@@ -168,9 +177,9 @@ inline void apply_firebreaks(amrex::MultiFab& fire_phi,
                     in_barrier = (dist_sq <= d_radius_p[nb] * d_radius_p[nb]);
                 }
 
-                // Stamp firebreak sentinel if cell is in barrier
+                // Mark the cell if it is in the barrier
                 if (in_barrier) {
-                    phi_arr(i, j, k) = FIREBREAK_PHI_SENTINEL;
+                    phi_arr(i, j, k) = value;
                 }
             }
         });
@@ -178,6 +187,23 @@ inline void apply_firebreaks(amrex::MultiFab& fire_phi,
     // The ParallelFor above is asynchronous while the Gpu::DeviceVectors free their
     // device allocations at scope exit; let the kernels finish reading them first.
     amrex::Gpu::streamSynchronize();
+}
+
+/**
+ * @brief Apply firebreak barriers to fire_phi: phi = FIREBREAK_PHI_SENTINEL in
+ * every cell whose centre falls within a barrier (rectangle:
+ * x_lo <= x <= x_hi && y_lo <= y <= y_hi; circle: distance to the centre
+ * <= radius, at the cell centre x = prob_lo + (i + 0.5) dx).
+ *
+ * Called once in FireLayer::initialize(), after the ignition disc and before
+ * a t = 0 polygon, polyline or scheduled ignition, which min-merges its
+ * distance over the barrier and so removes the sentinel there.
+ */
+inline void apply_firebreaks(amrex::MultiFab& fire_phi,
+                             const std::vector<FireBreak>& breaks,
+                             const amrex::Geometry& geom)
+{
+    mark_firebreak_cells(fire_phi, breaks, geom, FIREBREAK_PHI_SENTINEL);
 }
 
 #endif  // ERF_FIREBREAK_H

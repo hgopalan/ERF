@@ -30,7 +30,7 @@ thr_total() { thr $1 | awk '{s += $1} END {print s + 0}'; }
 thr_first() { thr $1 | awk -v off="$(( $(cells $1 | wc -l) - $(thr $1 | wc -l) ))" '$1 > 0 {print NR + off; exit}'; }
 tmax()  { grep 'Threshold ignition:' "run_$1.log" | sed -n 's/.*max surface temp \([0-9.e+-]*\) K.*/\1/p' | sort -g | tail -1; }
 
-printf "%-12s %6s %10s %10s %10s %10s %10s\n" variant steps cells_end thr_steps thr_total thr_first Tmax_K
+printf "%-12s %6s %10s %10s %10s %10s %10s\n" variant steps cells_end thr_armed thr_total thr_first Tmax_K
 printf "%-12s %6s %10s %10s %10s %10s %10s\n" ------------ ------ ---------- ---------- ---------- ---------- ----------
 for v in $VARIANTS; do
     f=$(thr_first $v); [ -z "$f" ] && f=-
@@ -48,15 +48,26 @@ r=$(awk -v n="$(thr_total on)" 'BEGIN { print (n > 0) ? 1 : 0 }')
 check "threshold at 315 K ignites cells ($(thr_total on) over the run, first at step $(thr_first on))" "$r"
 r=$(awk -v a="$(cells off | tail -1)" -v b="$(cells on | tail -1)" 'BEGIN { print (b > a) ? 1 : 0 }')
 check "the fire ends larger with the threshold on ($(cells off | tail -1) -> $(cells on | tail -1) cells)" "$r"
-# The threshold is held off for the steps before 4 s (16 steps of 0.25 s, or
-# 17 when advance() is handed the start of the step), so the threshold line
-# is absent for exactly those steps and the first ignition comes after them.
+# The threshold is held off for the steps before the start time (4 s over the
+# deck's fixed step: 32 steps of 0.125 s, or 33 when advance() is handed the
+# start of the step), so the threshold line is absent for exactly those steps
+# and the first ignition comes after them. Both numbers are read from the decks.
+dt=$(awk -F= '/^erf.fixed_dt/ { split($2, a, "#"); print a[1] + 0 }' inputs_base)
+t0=$(awk -F= '/^erf.fire.ignition.threshold_start_time/ { split($2, a, "#"); print a[1] + 0 }' inputs_on_spinup)
+# floor(t0/dt) to ceil(t0/dt) + 1 steps, whether or not t0 is a whole number of steps
+n0=$(awk -v t="$t0" -v d="$dt" 'BEGIN { printf "%d", t / d + 1e-9 }')
+n1=$(awk -v t="$t0" -v d="$dt" 'BEGIN { x = t / d; c = int(x); if (x - c > 1e-9) c++; printf "%d", c + 1 }')
 fs=$(thr_first on_spinup); [ -z "$fs" ] && fs=0
 gated=$(( $(cells on_spinup | wc -l) - $(thr on_spinup | wc -l) ))
-r=$(awk -v f="$fs" -v g="$gated" -v n="$(thr_total on_spinup)" 'BEGIN { print ((g == 16 || g == 17) && n > 0 && f > g) ? 1 : 0 }')
-check "4 s start time: threshold held off for $gated steps, first ignition at step $fs ($(thr_total on_spinup) cells over the run)" "$r"
-r=$(awk -v a="$(cells on | tail -1)" -v b="$(cells on_r5 | tail -1)" 'BEGIN { print (b >= a) ? 1 : 0 }')
-check "a 5 m disc ends at least as large as a one-cell stamp ($(cells on | tail -1) vs $(cells on_r5 | tail -1) cells)" "$r"
+r=$(awk -v f="$fs" -v g="$gated" -v n0="$n0" -v n1="$n1" -v n="$(thr_total on_spinup)" 'BEGIN { print (g >= n0 && g <= n1 && n > 0 && f > g) ? 1 : 0 }')
+check "${t0} s start time: threshold held off for $gated steps (expected $n0 to $n1), first ignition at step $fs ($(thr_total on_spinup) cells over the run)" "$r"
+# Compared a quarter of the way through: by the end the 5 m disc deck has burned
+# the whole fire grid, which any stamp would pass. The disc deck must still be
+# growing there, or the comparison says nothing.
+q=$(( $(cells on | wc -l) / 4 ))
+a=$(cells on | sed -n "${q}p"); b=$(cells on_r5 | sed -n "${q}p"); e=$(cells on_r5 | tail -1)
+r=$(awk -v a="$a" -v b="$b" -v e="$e" 'BEGIN { print (b >= a && b < e) ? 1 : 0 }')
+check "a 5 m disc burns at least as much as a one-cell stamp at step $q ($a vs $b cells, the disc still growing to $e)" "$r"
 r=$(awk -v n="$(thr_total on_farsite)" -v a="$(cells off_farsite | tail -1)" -v b="$(cells on_farsite | tail -1)" 'BEGIN { print (n > 0 && b >= a) ? 1 : 0 }')
 check "FARSITE path: ignites by threshold ($(thr_total on_farsite) cells) and ends at least as large ($(cells off_farsite | tail -1) vs $(cells on_farsite | tail -1) cells)" "$r"
 

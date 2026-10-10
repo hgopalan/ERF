@@ -44,22 +44,27 @@ void initialize_ignition(
     const auto dx      = geom_fire.CellSizeArray();
     // "No disc" on the level-set path: every cell the domain diagonal from a
     // front, a finite distance the reinitialisation and the advection keep
-    // positive (the advection moves nothing on a uniform field; the
-    // reinitialisation raises it by dtau an iteration, which no consumer of
-    // the magnitude reads before an ignition stamps a distance field over
-    // it). The distance to the ignition point (the form until 2026-10) was a
-    // disc of zero radius that the advection grew from the first step. A
-    // scheduled or polygon ignition min-merges a whole-grid distance field;
-    // a threshold ignition stamps its disc only within a few cells of the hot
-    // cell, so the field steps from the disc to this value there and the
-    // front crosses that ring over ln(far/dx)/CFL steps instead of 1/CFL, as
-    // it did over ln(dist/dx) with the distance to the point.
-    // Capped at 100 km: the firebreak mask reads phi >= 5e5 as the firebreak
-    // sentinel (ERF_FireBreak.H), and the field only needs |grad phi| = 0 and
-    // a value no ignition can reach before it is stamped over.
-    const Real far = amrex::min(std::sqrt(geom_fire.ProbLength(0) * geom_fire.ProbLength(0)
-                                        + geom_fire.ProbLength(1) * geom_fire.ProbLength(1)),
-                                Real(1.0e5));
+    // where it is (the advection moves nothing on a uniform field, and the
+    // reinitialisation ends with min(new, old), so it cannot raise it). The
+    // distance to the ignition point (the form until 2026-10) was a disc of
+    // zero radius that the advection grew from the first step. A scheduled
+    // or polygon ignition min-merges a whole-grid distance field. A
+    // threshold ignition stamps its disc plus a distance band
+    // (apply_threshold_ignition), so the field steps from that band to this
+    // value; the upwind scheme carries the step outward as a smeared step
+    // that the front catches up with late, by a lag that grows slowly with
+    // the distance covered and with ln(far / dx) (
+    // about 20 to 60 steps over 1 to 40 cells in a sweep of the scheme). The
+    // distance to a fire far away gives the same step, so spot landings and
+    // threshold ignitions lagged this way before 2026-10 too; a whole-grid
+    // distance merge for them would remove it.
+    // The full diagonal, never capped: an ignition's distance field
+    // min-merged over it then keeps |grad phi| = 1 everywhere in the domain
+    // (a cap left a flat plateau beyond it on a wider grid). The firebreak
+    // mask marks its cells from the barrier shapes (mark_firebreak_cells in
+    // ERF_FireBreak.H), not from large values of phi.
+    const Real far = std::sqrt(geom_fire.ProbLength(0) * geom_fire.ProbLength(0)
+                             + geom_fire.ProbLength(1) * geom_fire.ProbLength(1));
 
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -135,12 +140,31 @@ amrex::Long apply_threshold_ignition(
 
     const auto dx = geom_fire.CellSizeArray();
     const Real dmin_cell = amrex::min(dx[0], dx[1]);
-    const int ns = amrex::max(1, static_cast<int>(std::ceil(radius / dmin_cell)));
+    // On the level-set path the stamp also writes the (positive) distance to
+    // the hot cell over a band beyond the disc. A stamp of the disc alone
+    // left its cells a deep local minimum in whatever phi the neighbours held
+    // (the no-disc start, the domain diagonal, or the distance to a fire far
+    // away): the artificial viscosity reads that jump as a Laplacian, a lift
+    // of 1.6 eps phi_bg / dx in one substep at CFL 0.4, and a one-cell
+    // ignition went back above zero once phi_bg exceeded about
+    // dx^2 / (1.6 eps) (5.6 km on 30 m cells, 160 m on 5 m cells), sooner over
+    // a few substeps, so the fire went out. The band is three cells (the
+    // reach of the WENO5 stencil and of the Laplacian) and at least 8 m: on
+    // fine cells the viscosity carries the lift in over several cells before
+    // the jump collapses (a three-cell band let a 1 m-cell ignition under a
+    // 14 km background go out within 20 substeps; 8 m holds it, and in a
+    // sweep of the scheme held to 1000 km backgrounds on 1 to 1.5 m cells).
+    // The band cells stay unburned (only a crossing below zero counts as an
+    // ignition); the FARSITE indicator has no gradient to keep and takes the
+    // disc alone.
+    const Real band = normalized ? 0.0_rt : amrex::max(3.0_rt * dmin_cell, Real(8.0));
+    const int ns = amrex::max(1, static_cast<int>(std::ceil((radius + band) / dmin_cell)));
 
     // Pass 1: flag the hot, burnable, unburned cells, with enough ghost cells
-    // for the stencil of pass 2 (filled across ranks and periodic faces, and
-    // copied from the nearest interior cell outside a non-periodic face).
-    MultiFab flag(phi.boxArray(), phi.DistributionMap(), 1, ns);
+    // in x and y for the stencil of pass 2 (filled across ranks and periodic
+    // faces, and copied from the nearest interior cell outside a
+    // non-periodic face); none in z, where the fire grid is one cell.
+    MultiFab flag(phi.boxArray(), phi.DistributionMap(), 1, IntVect(AMREX_D_DECL(ns, ns, 0)));
     flag.setVal(0.0_rt);
     const bool has_nb = (nonburnable != nullptr);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
@@ -155,11 +179,15 @@ amrex::Long apply_threshold_ignition(
             f(i, j, k) = (burnable && p(i, j, k) >= 0.0_rt && T(i, j, k) > T_thr) ? 1.0_rt : 0.0_rt;
         });
     }
+    // Nothing hot anywhere (the usual step): no halo exchange and no stencil
+    // pass. The sum is global, so every rank takes the same branch.
+    if (flag.sum(0) < 0.5_rt) { return amrex::Long(0); }
     fire_fill_boundary(flag, geom_fire);
 
-    // Pass 2: every cell within `radius` of a flagged cell takes the signed
-    // distance to the nearest flagged centre, min-merged with the fire it
-    // already carries. Cells that turn from unburned to burning are counted.
+    // Pass 2: every cell within `radius` (plus the band on the level-set
+    // path) of a flagged cell takes the signed distance to the nearest
+    // flagged centre, min-merged with the fire it already carries. Cells that
+    // turn from unburned to burning are counted.
     ReduceOps<ReduceOpSum> reduce_op;
     ReduceData<amrex::Long> reduce_data(reduce_op);   // amrex::Long: `long` is 32-bit on MSVC
     using ReduceTuple = typename decltype(reduce_data)::Type;
@@ -167,8 +195,12 @@ amrex::Long apply_threshold_ignition(
         const Box& bx = mfi.validbox();
         auto const& f = flag.const_array(mfi);
         auto const& p = phi.array(mfi);
+        Array4<const Real> nb2;
+        if (has_nb) { nb2 = nonburnable->const_array(mfi); }
         reduce_op.eval(bx, reduce_data,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+                // cells in the non-burnable mask take no stamp
+                if (has_nb && nb2(i, j, k) >= 0.5_rt) { return {amrex::Long(0)}; }
                 Real dmin = static_cast<Real>(1.0e30);
                 for (int dj = -ns; dj <= ns; ++dj) {
                     for (int di = -ns; di <= ns; ++di) {
@@ -179,7 +211,7 @@ amrex::Long apply_threshold_ignition(
                         }
                     }
                 }
-                if (dmin >= radius) { return {amrex::Long(0)}; }
+                if (dmin >= radius + band) { return {amrex::Long(0)}; }
                 const Real old   = p(i, j, k);
                 const Real sdf   = dmin - radius;
                 // floored radius (threshold_radius = 0 means one cell and the

@@ -199,7 +199,19 @@ Each hot cell is stamped as a disc of radius
 ``min()`` semantics as the scheduled ignitions, so existing fire is never
 overwritten and neighbouring hot cells merge. The stamp is the signed distance
 to the disc, in metres on the level-set path and normalised to :math:`[-1, 1]`
-on the FARSITE path, matching the primary ignition. Cells in the non-burnable
+on the FARSITE path, matching the primary ignition. On the level-set path the
+stamp also writes the positive distance to the hot cell over a band beyond the
+disc, three cells (the reach of the WENO5 stencil and the viscosity's
+Laplacian) and at least 8 m. Until October 2026 the disc alone was stamped,
+and a one-cell ignition with an unburned neighbourhood far from zero was
+lifted above zero by the artificial viscosity and went out: in one substep
+once the neighbourhood exceeded about :math:`\Delta x^2 / (1.6\,\varepsilon)`
+(5.6 km on 30 m cells, 160 m on 5 m cells, with :math:`\varepsilon` the
+near-front viscosity), and from about half that within a few substeps. On
+fine cells the viscosity carries the lift in over several cells, so a band of
+three cells was not enough (1 m cells under a 14 km neighbourhood went out
+within 20 substeps); 8 m holds there
+(``LevelSetAdvection.AThresholdIgnitionSurvivesTheNextSubstep``). Cells in the non-burnable
 mask (structures, non-burnable fuel codes, firebreaks) neither ignite nor
 receive a stamp. ``erf.fire.ignition.threshold_start_time`` holds the
 threshold off until that time so the atmosphere can spin up first. The

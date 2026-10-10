@@ -32,7 +32,7 @@ indicator clamped to :math:`[-1, 1]`. The disc ignition sets
 where :math:`d` is the distance from the ignition centre
 :cpp:`erf.fire.ignition_x`, :cpp:`erf.fire.ignition_y` and :math:`r` is
 :cpp:`erf.fire.ignition_r`; :math:`r = 0` is no disc, and the level set
-starts at the domain diagonal (100 km at most) everywhere, the FARSITE
+starts at the domain diagonal everywhere, the FARSITE
 indicator at :math:`+1`, until an ignition stamps a front (until 2026-10 the
 level set started at :math:`d`, a disc of zero radius that grew from the
 first step). Polygon, polyline, threshold and scheduled

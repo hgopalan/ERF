@@ -3056,17 +3056,12 @@ void FireLayer::build_nonburnable_mask()
         amrex::Gpu::streamSynchronize();
     }
     if (from_breaks) {
-        // Firebreak cells carry the phi sentinel from apply_firebreaks(); anything
-        // at or above it is a firebreak.
-        const amrex::Real sentinel = 0.5_rt * FIREBREAK_PHI_SENTINEL;
-        for (amrex::MFIter mfi(*fire_nonburnable); mfi.isValid(); ++mfi) {
-            const amrex::Box& bx = mfi.validbox();
-            auto const& m = fire_nonburnable->array(mfi);
-            auto const& p = fire_phi->const_array(mfi);
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                if (p(i, j, k) >= sentinel) { m(i, j, k) = 1.0_rt; }
-            });
-        }
+        // The barrier cells from the firebreak shapes, the cell test that
+        // apply_firebreaks() stamps the sentinel with. Until 2026-10 they were
+        // read back as phi >= half the sentinel, which an unburned level set
+        // (the domain diagonal from a front) also passes on a domain wider
+        // than 500 km, and which a later ignition stamped over a barrier hid.
+        mark_firebreak_cells(*fire_nonburnable, m_params.firebreaks, m_fg.geom, 1.0_rt);
     }
     fire_fill_boundary(*fire_nonburnable, m_fg.geom);
 }

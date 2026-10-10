@@ -5,7 +5,7 @@ The docs table says its fields appear "in this fixed order", so a reader can
 take a field's component index from it. This check reads the order the
 catalog (fire_plotfile_var_names in ERF_FirePlotfileCatalog.H) builds, always
 present fields first and then each optional block in its push_back order, and
-requires the table to list exactly those fields in the same order.
+requires the table to list exactly those fields, each once, in the same order.
 
     check_fire_plotfile_doc.py --catalog ERF_FirePlotfileCatalog.H --doc fire_output.rst
     check_fire_plotfile_doc.py --self-test
@@ -43,11 +43,16 @@ def compare(cat, doc):
         msgs.append(f"in the catalog but not in the table: {missing}")
     if extra:
         msgs.append(f"in the table but not in the catalog: {extra}")
+    dups = sorted({n for n in doc if doc.count(n) > 1})
+    if dups:
+        msgs.append(f"listed more than once in the table: {dups}")
     if not missing and not extra:
         for k, (c, d) in enumerate(zip(cat, doc)):
             if c != d:
                 msgs.append(f"component {k}: the catalog has {c}, the table {d}")
                 break
+    if len(cat) != len(doc):
+        msgs.append(f"the catalog has {len(cat)} fields, the table {len(doc)}")
     return msgs
 
 
@@ -56,9 +61,11 @@ def self_test():
     ok = not compare(cat, list(cat))
     swapped = compare(cat, ["fire_phi", "fire_ros", "fire_heat_release", "fire_arrival_time"])
     dropped = compare(cat, cat[:-1])
-    good = ok and bool(swapped) and "component 2" in swapped[0] and bool(dropped) and "not in the table" in dropped[0]
+    doubled = compare(cat, cat + ["fire_heat_release"])   # Copilot's example on hgopalan/ERF#501
+    good = (ok and bool(swapped) and "component 2" in swapped[0] and bool(dropped) and "not in the table" in dropped[0]
+            and bool(doubled) and "more than once" in doubled[0])
     print(f"self-test {'PASS' if good else 'FAIL'}: match passes {ok}, a swap fails {bool(swapped)},"
-          f" a missing field fails {bool(dropped)}")
+          f" a missing field fails {bool(dropped)}, a duplicated row fails {bool(doubled)}")
     return good
 
 

@@ -7,7 +7,8 @@ with slip walls, 2 m fire cells (10 m atmosphere cells, grid ratio 5) and a
 prescribed rate of spread of 1 m/s, so the front moves one cell a second and
 every point burns when its distance to the nearest ignition, less the
 ignition's own half width, has been covered: T = (d - w) / R. The decks run
-40 steps of 0.5 s (20 s); nothing but the ignition differs between them.
+40 steps of 0.5 s (20 s); nothing but the ignition differs between the three
+merging decks. `inputs_firebreak` adds a firebreak and is checked at start-up only.
 
 | deck | ignition | what happens by 20 s |
 |---|---|---|
@@ -16,6 +17,7 @@ ignition's own half width, has been covered: T = (d - w) / R. The decks run
 | `inputs_parallel` | two 8 m wide polylines in two files, `parallel_south.csv` (y = 40 m) and `parallel_north.csv` (y = 80 m), x from 40 to 200 m | the strip between the lines closes on y = 60 m at 16 s |
 | `inputs_missing_file` | the south line and a second file that does not exist | stops at start-up: `Cannot open polygon vertex file: parallel_missing.csv` |
 | `inputs_one_vertex` | the south line and `one_vertex.csv`, a single vertex | stops at start-up: a polyline needs at least 2 vertices (a polygon 3); the stamp would otherwise mark nothing |
+| `inputs_firebreak` | the south line and a 20 m wide firebreak at x = 240 to 260 m | the break is held in the non-burnable mask, all 750 of its 2 m cells (the start-up line with `erf.fire.fire_debug = 1`); until 2026-10 the mask read the break back from phi after the line's distance field had been merged over it, and held none |
 
 The parallel pair is the reason `erf.fire.ignition.polygon_file` takes a
 list: each file is one perimeter, every file is stamped with the merging rule

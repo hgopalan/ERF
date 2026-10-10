@@ -2507,6 +2507,11 @@ add_test_fire_abort(FireMergingFronts_missing_file_abort FireMergingFronts input
 # a polyline file with one vertex has no segment and would mark nothing: stop naming it
 add_test_fire_abort(FireMergingFronts_one_vertex_abort FireMergingFronts inputs_one_vertex
     "'one_vertex.csv' has 1 vertices; a polyline needs at least 2" "")
+# A firebreak with a t = 0 polyline ignition stays in the non-burnable mask: all
+# 750 break cells. Until 2026-10 the mask read the break back from phi after the
+# polyline's whole-grid distance had been merged over it, and came out empty.
+add_test_fire_abort(FireMergingFronts_firebreak_mask FireMergingFronts inputs_firebreak
+    "Non-burnable mask: 750 cells" "erf.fire.fire_debug=1")
 # Suppression (erf.fire.suppression.*): each scenario on the level-set and the
 # FARSITE path, checked from the last fire plotfile and the suppression log
 add_test_fire_check(FireSuppression_line_early_levelset FireSuppression inputs_line_early 40 check_suppression.py NRANKS 1)
