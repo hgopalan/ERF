@@ -39,7 +39,8 @@ Fire wind and the friction velocity
 ----------------------------------------------
 
 With :cpp:`erf.fire_dust_wind_to_dust` (on by default once the coupling is
-on) the fire's wind at :cpp:`erf.fire.wind_ref_ht` (``fire_wind_ref``, the
+on) the fire's wind at its sampling height (:cpp:`erf.fire.wind_ref_ht`, or
+6.096 m with :cpp:`erf.fire.use_per_fuel_wind_ht`; ``fire_wind_ref``, the
 reference wind before the wind adjustment factor; it is the datum
 :cpp:`erf.fire_dust_wind_zref` names) is copied cell for cell onto the dust
 grid and converted to a friction velocity by the log law
@@ -48,7 +49,7 @@ grid and converted to a friction velocity by the log law
 
    u_{*,\mathrm{fire}} = \frac{\kappa\, |U_\mathrm{fire}|}{\ln(z_\mathrm{ref}/z_0)}
 
-with :cpp:`erf.fire_dust_wind_zref` (which follows :cpp:`erf.fire.wind_ref_ht`)
+with :cpp:`erf.fire_dust_wind_zref` (which follows that height)
 and :cpp:`erf.fire_dust_wind_z0`; inside the fire perimeter (level set below
 zero) the larger of it and the surface-layer value is kept, outside it the
 surface layer's :math:`u_*` stands. The fire's reference wind is the

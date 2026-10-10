@@ -92,7 +92,11 @@ AMREX_GPU_HOST_DEVICE Real disc_phi (int i, int j, Real r0) noexcept
 
 } // namespace
 
-TEST(PerimeterCount, DiscOnOneBoxAndOnMany)
+// nvcc refuses an extended __device__ lambda whose enclosing function is
+// private, as gtest's TestBody is: the bodies that launch kernels are
+// namespace-scope functions, and each TEST calls its own.
+namespace {
+void PerimeterCount_DiscOnOneBoxAndOnMany ()
 {
     const Real r0 = 6.0_rt;
     amrex::Long counts[2];
@@ -117,8 +121,15 @@ TEST(PerimeterCount, DiscOnOneBoxAndOnMany)
     EXPECT_EQ(counts[1], expect) << "36 boxes of 4x4: the stencil crosses the box edges";
     EXPECT_GT(expect, 20);
 }
+}  // namespace
 
-TEST(PerimeterCount, DomainEdgeAndPeriodicSeam)
+TEST(PerimeterCount, DiscOnOneBoxAndOnMany)
+{
+    PerimeterCount_DiscOnOneBoxAndOnMany();
+}
+
+namespace {
+void PerimeterCount_DomainEdgeAndPeriodicSeam ()
 {
     // a strip burned for i < 4: only i = 3 faces unburned cells in a
     // non-periodic domain; with periodic x, i = 0 sees i = 23 as well
@@ -129,15 +140,24 @@ TEST(PerimeterCount, DomainEdgeAndPeriodicSeam)
         EXPECT_EQ(count_perimeter_cells(phi, g.geom), periodic ? 2 * N : N) << "periodic " << periodic;
     }
 }
+}  // namespace
 
-TEST(FuelBlendingParity, OneBoxManyBoxesAndTheFormula)
+TEST(PerimeterCount, DomainEdgeAndPeriodicSeam)
 {
-    // fuel 1 on the left half, 2 on the right, a 3x3 patch of 3 at (6..8, 6..8)
-    auto code = [] AMREX_GPU_DEVICE (int i, int j) -> Real {
+    PerimeterCount_DomainEdgeAndPeriodicSeam();
+}
+
+namespace {
+void FuelBlendingParity_OneBoxManyBoxesAndTheFormula ()
+{
+    // fuel 1 on the left half, 2 on the right, a 3x3 patch of 3 at (6..8, 6..8);
+    // host and device: the kernels fill the fields with them and the host loop
+    // below evaluates the formula with them (HIP refuses a device-only call)
+    auto code = [] AMREX_GPU_HOST_DEVICE (int i, int j) -> Real {
         if (i >= 6 && i <= 8 && j >= 6 && j <= 8) { return 3.0_rt; }
         return (i < 12) ? 1.0_rt : 2.0_rt;
     };
-    auto rate = [=] AMREX_GPU_DEVICE (int i, int j) -> Real {
+    auto rate = [=] AMREX_GPU_HOST_DEVICE (int i, int j) -> Real {
         const Real c = code(i, j);
         return 0.1_rt * c + 0.001_rt * j + 0.0005_rt * i;
     };
@@ -179,8 +199,15 @@ TEST(FuelBlendingParity, OneBoxManyBoxesAndTheFormula)
     EXPECT_LT(err, TOLP);
     EXPECT_GT(n_blended, 40);
 }
+}  // namespace
 
-TEST(CrownFront, CrownRateReachesTheBandAhead)
+TEST(FuelBlendingParity, OneBoxManyBoxesAndTheFormula)
+{
+    FuelBlendingParity_OneBoxManyBoxesAndTheFormula();
+}
+
+namespace {
+void CrownFront_CrownRateReachesTheBandAhead ()
 {
     // a strip 40 x 4 of 10 m, burned for i < 10, crowned at i = 8, 9 with a
     // crown rate of 1 m/s over a surface rate of 0.1 m/s; dt = 10 s puts
@@ -215,8 +242,15 @@ TEST(CrownFront, CrownRateReachesTheBandAhead)
         }
     }
 }
+}  // namespace
 
-TEST(CrownFront, AMaskStopsTheExtension)
+TEST(CrownFront, CrownRateReachesTheBandAhead)
+{
+    CrownFront_CrownRateReachesTheBandAhead();
+}
+
+namespace {
+void CrownFront_AMaskStopsTheExtension ()
 {
     // the strip of the test above with a non-burnable column at i = 11: the
     // crown rate reaches i = 10 and stops, so i = 12 keeps its surface rate
@@ -248,8 +282,15 @@ TEST(CrownFront, AMaskStopsTheExtension)
         }
     }
 }
+}  // namespace
 
-TEST(CrownFront, NoCrownedCellLeavesEverythingAlone)
+TEST(CrownFront, AMaskStopsTheExtension)
+{
+    CrownFront_AMaskStopsTheExtension();
+}
+
+namespace {
+void CrownFront_NoCrownedCellLeavesEverythingAlone ()
 {
     Grid g(N, false);
     MultiFab ros(g.ba, g.dm, 1, 0), surf(g.ba, g.dm, 1, 0), phi(g.ba, g.dm, 1, 0), crown_ros(g.ba, g.dm, 1, 0), cact(g.ba, g.dm, 1, 0), fac(g.ba, g.dm, 1, 0);
@@ -262,4 +303,10 @@ TEST(CrownFront, NoCrownedCellLeavesEverythingAlone)
     EXPECT_NEAR(ros.max(0), 0.1, TOLP);
     EXPECT_NEAR(fac.min(0), 1.0, TOLP);
     EXPECT_NEAR(fac.max(0), 1.0, TOLP);
+}
+}  // namespace
+
+TEST(CrownFront, NoCrownedCellLeavesEverythingAlone)
+{
+    CrownFront_NoCrownedCellLeavesEverythingAlone();
 }

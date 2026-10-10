@@ -11,7 +11,7 @@
 set -u
 EXE=${1:?usage: run_linefire.sh /path/to/erf_exec [extra args]}
 shift || true
-VARIANTS="nowind wind2p5 wind5 wind5_cap wind5_cap_fuel_class nowind_2way wind2p5_2way wind5_2way"
+VARIANTS="nowind wind2p5 wind5 wind5_cap wind5_cap_fuel_class nowind_2way wind2p5_2way wind5_2way wind2p5_open_2way"
 
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi

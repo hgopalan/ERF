@@ -258,7 +258,7 @@ ERF::Evolve ()
                     m_fire_dust_coupling.fire_phi_scratch = nullptr;
                 }
 
-                // Phase 2: fire wind raises dust u*. The wind at erf.fire.wind_ref_ht
+                // Phase 2: fire wind raises dust u*. The wind at FireParams::sampled_wind_ht()
                 // (fire_wind_ref), the datum erf.fire_dust_wind_zref names; the
                 // WAF-reduced midflame wind (fire_wind_eff) used to be handed over as
                 // if it were the 6.1 m wind, 0.36x for grass, so the fire path never
@@ -2186,19 +2186,21 @@ ERF::InitData_post ()
                 pp.query("fire_dust_crust_reduction", m_fire_dust_coupling.post_fire_crust_reduction);
                 pp.query("fire_dust_wind_to_dust",   m_fire_dust_coupling.fire_wind_to_dust);
                 pp.query("fire_dust_wind_z0",        m_fire_dust_coupling.fire_wind_z0);
-                // the datum of the wind handed over is erf.fire.wind_ref_ht: the
-                // dust-side height follows it, and a different value aborts
+                // the datum of the wind handed over is the height the fire samples
+                // it at (erf.fire.wind_ref_ht, or 6.096 m with
+                // erf.fire.use_per_fuel_wind_ht): the dust-side height follows
+                // it, and a different value aborts
                 {
-                    amrex::Real wind_ref_ht = m_fire_layer->get_params().wind_ref_ht;
+                    amrex::Real wind_ref_ht = m_fire_layer->get_params().sampled_wind_ht();
                     m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
                     if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust) {
                     amrex::Real zref_given = wind_ref_ht;
                     if (pp.query("fire_dust_wind_zref", zref_given) &&
                         std::abs(zref_given - wind_ref_ht) > 1.0e-6 * wind_ref_ht) {
                         amrex::Abort("[FIRE-DUST] erf.fire_dust_wind_zref = " + std::to_string(zref_given)
-                                     + " m must match erf.fire.wind_ref_ht = " + std::to_string(wind_ref_ht)
-                                     + " m, the height of the wind the fire hands over (fire_wind_ref);"
-                                     " leave it unset to follow wind_ref_ht");
+                                     + " m must match " + std::to_string(wind_ref_ht)
+                                     + " m, the height of the wind the fire hands over (fire_wind_ref: erf.fire.wind_ref_ht,"
+                                     " or 6.096 m with erf.fire.use_per_fuel_wind_ht); leave it unset to follow it");
                     }
                     amrex::ParmParse pp_most("erf.most");
                     amrex::Real most_z0 = -1.0;

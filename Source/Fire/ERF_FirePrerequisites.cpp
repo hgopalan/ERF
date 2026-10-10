@@ -161,14 +161,14 @@ void verify_fire_prerequisites(const ERF& erf,
         "[FIRE] Domain x and y require start at index 0: the fire-to-atmosphere "
         "index mapping assumes a zero-based domain");
 
-    // Check 12: Domain height > wind_ref_ht
+    // Check 12: Domain height > the height the wind is sampled at
     Real prob_hi_z = erf.Geom(lev).ProbHi(2);
     std::string msg12 = std::string("[FIRE] Domain height ")
                       + std::to_string(prob_hi_z)
-                      + " should exceed wind_ref_ht "
-                      + std::to_string(fire_params.wind_ref_ht)
-                      + ". Increase geometry.prob_hi(2)";
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(prob_hi_z > fire_params.wind_ref_ht, msg12.c_str());
+                      + " should exceed the wind's sampling height "
+                      + std::to_string(fire_params.sampled_wind_ht())
+                      + " (erf.fire.wind_ref_ht, or 6.096 m with erf.fire.use_per_fuel_wind_ht). Increase geometry.prob_hi(2)";
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(prob_hi_z > fire_params.sampled_wind_ht(), msg12.c_str());
 
     // Check 13: divisors and step sizes read straight from the inputs file.
     // ParmParse applies no bounds, and a zero reaches the solver as an integer

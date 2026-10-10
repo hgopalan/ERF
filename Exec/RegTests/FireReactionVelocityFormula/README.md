@@ -16,7 +16,7 @@ together, on the uniform-fuel path and through a fuel map's per-fuel table?
 
 A line fire 250 m long in short grass (Anderson FM1) at 6 % 1-h moisture,
 one-way coupled (`fire_atm_feedback = 0`), under a prescribed wind along the
-spread direction, with the MEWS wind cap off (`use_wind_limit = false`). The
+spread direction, with the wind limit off (`use_wind_limit = false`). The
 head rate is algebraic: `head_ros_ms` in the fire statistics CSV holds its
 final value from the first step, so each run is five steps on a 60 x 30 x 10
 grid (12.5 m fire cells).
@@ -34,7 +34,15 @@ Five decks, each run calm (`prescribed_wind_x = 0`) and at 4.005 m/s:
 Both winds are needed. With wind, the lower load of `wrf_bmst_compat` slows
 the no-wind rate but raises the wind factor through `(beta/beta_op)^-E`, and
 for FM1 at 4.005 m/s the two nearly cancel: the albini pair differs by only
-0.006 %. Without wind every pair differs by more than 1 %.
+0.006 %. Without wind every pair differs by more than 1 %. That is with the
+wind limit off, as these decks run. Under the default limit U <= 0.9 I_R the
+lower I_R of `wrf_bmst_compat` also lowers the limit, which binds at this
+wind: the albini pair's head rate drops 12.8 % (1.50926 to 1.31559 m/s;
+0.09 % under `wind_limit = fuel_class`, 0.250151 to 0.24993 m/s). To see it,
+run `inputs_albini` and `inputs_albini_bmst` with
+`erf.fire.prescribed_wind_x=4.005 erf.fire.use_wind_limit=true` (and
+`erf.fire.wind_limit=fuel_class`) appended and read `head_ros_ms` from the
+fire statistics CSV (measured 2026-10-10).
 
 ## Running
 

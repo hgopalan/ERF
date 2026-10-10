@@ -80,7 +80,7 @@ class ERF;
  * | Name           | ncomp | Description                                  |
  * |----------------|-------|----------------------------------------------|
  * | fire_phi       | 1     | Level-set: <0 burned, >0 unburned, ≈0 front  |
- * | fire_wind_ref  | 2     | u,v at wind_ref_ht above ground, interpolated from the atmospheric columns |
+ * | fire_wind_ref  | 2     | u,v at FireParams::sampled_wind_ht() above ground, interpolated from the atmospheric columns |
  * | fire_wind_eff  | 2     | After WAF + terrain corrections              |
  * | fire_slopes    | 2     | dz/dx, dz/dy (static, computed at init)      |
  * | fire_surface_z | 1     | Ground elevation [m] of the atmospheric column |
@@ -159,7 +159,7 @@ public:
      * Called from ERF::Advance() once per step of the level the fire grid
      * refines, after that level's dycore, with `time` the START of the step
      * (ERF passes t_old). The pipeline, in order:
-     * 1. wind at wind_ref_ht from the atmospheric columns, the WAF and the
+     * 1. wind at sampled_wind_ht() from the atmospheric columns, the WAF and the
      *    terrain corrections (fire_wind_ref -> fire_wind_eff)
      * 2. fuel moisture (time-lag or stick model, rain) when moisture_dynamic
      * 3. per-step coefficient refresh of the ROS models that depend on moisture
@@ -1075,7 +1075,7 @@ private:
     /// (erf.fire.rothermel_cell_moisture with moisture_dynamic; else unset)
     std::unique_ptr<amrex::MultiFab>         fire_rc_cell;
     /// Rothermel coefficients of one fuel at the given dead fuel moistures,
-    /// with the deck's coefficient options (use_wind_limit,
+    /// with the deck's coefficient options (use_wind_limit, wind_limit,
     /// reaction_velocity_formula, wrf_bmst_compat). Every m_rc goes through
     /// here, so the start-up and moisture_dynamic paths cannot differ.
     RothermelComputed rothermel_coefficients(const FuelModelParams& fp, amrex::Real m1,

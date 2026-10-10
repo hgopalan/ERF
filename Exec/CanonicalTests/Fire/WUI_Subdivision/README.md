@@ -43,12 +43,19 @@ The runs are two boxes, so at most two ranks; each variant runs 2100 s.
 ## The checks (`check_wui.py`)
 
 1. **Spread rate.** Head ROS along the centreline between x = 400 and 470 m
-   of the `wildland` run, from the arrival-time field, within 15% of
-   Rothermel's FM1 rate at 6% moisture and the midflame wind that the
-   Andrews wind adjustment factor gives from 10 m/s at 6.1 m, capped at the
-   model's 300 ft/min maximum effective wind for fine fuels. The reference is
-   Rothermel (1972) written out in `check_wui.py`, independent of the code;
-   it gives 0.2501 m/s where the model reports 0.2501505838 m/s.
+   of the `wildland` run, from the arrival-time field, no more than 15% above
+   Rothermel's FM1 rate at 6% moisture and no lower than the Wulff tip of the
+   projection formula at the same wind. The wind is the effective (midflame)
+   wind the fire samples on the head's path (y = 240 m, x = 400 to 470 m), read
+   from the fire plotfile nearest the middle of the arrival window, and bounded
+   by Rothermel's limit 0.9 I_R. The reference is Rothermel (1972) written out
+   in `check_wui.py`, independent of the code, and the model's own rate is
+   never used. The wind is the model's, so the checker also holds its ratio
+   to the reference wind to the Andrews WAF (0.362104) at every cell of the
+   path: a defect in the rate kernel or in the WAF moves the head but not the
+   bracket. A doubled head fails the check, and so does a halved WAF. The
+   lower bound is loose: it fails only a head below 36 % of the Rothermel
+   rate, 2.65 times slower than the measured head, so a halved rate passes.
 2. **Fuel conservation.** Fuel consumed over the burned area of `wildland`
    equals the initial load over the burned area within 5% (cells the front
    reached in the last minute are still burning).
@@ -142,11 +149,20 @@ any variant.
 
 The wildland head moves at 0.599 m/s between x = 400 and 470 m. Rothermel's
 rate for FM1 at 6% moisture is 1.385 m/s at the sounding's 10 m/s (the run's
-value at t = 0, under the 0.9 I_R limit of 743 ft/min) and 0.830 m/s as the
-run mean of the model's own largest rate over the arrival window, once the
-surface layer has slowed the 6.1 m wind; the head is 72 % of that, between
-the Wulff tip of the projection formula at that wind (0.258 m/s, 31 %) and
-the model's rate, which is the degradation of a curved front's head under
+value at t = 0, below the 0.9 I_R limit of 743 ft/min) and 0.632 m/s at the
+2.455 m/s midflame wind on the head's path at t = 100 s, once the surface
+layer has slowed the 6.1 m wind (0.632 to 0.642 m/s for every plotfile from
+100 to 700 s). The head is 95 % of that on average, between the Wulff tip of
+the projection formula at that wind (0.226 m/s, 36 %) and the Rothermel
+rate. It is not steady. The window opens at 19 s, while the wind is still
+falling from its start-up value: at 20 s the log's largest and mean rates
+are both 1.005 m/s, Rothermel's rate at the wind of that moment. From there
+the head slows the whole way toward the Wulff tip. Its local speed along y = 240 m (over
+the 10 m centred on each point, from the arrival times) against Rothermel at
+the local wind of the 100 s plotfile is 1.01 against 0.67 m/s at x = 402.5 m,
+0.72 against 0.65 at 422.5 m, 0.55 against 0.62 at 442.5 m, 0.48 against
+0.60 at 462.5 m, and 0.25 against 0.47 at 642.5 m, where the tip is 0.19.
+That slowing of a curved front's head comes from
 the default directional coupling that FireAdvectiveWindCoupling documents
 (`erf.fire.directional_wind_coupling = advective` holds it at the model's
 rate). The 0.250 m/s of the 2026-09 table was the 300 ft/min cap, which any

@@ -548,7 +548,7 @@ struct FireParams
     // as WRF-Fire does (the slope factor sees the deflated packing ratio too).
     // It does NOT make ERF match WRF-Fire: ERF uses the 1-h SAV as the bed
     // SAV, w_0*(1-S_T) for the net load, dead moisture only (WRF-Fire's
-    // average includes live fuel), its own heat contents and the MEWS wind cap
+    // average includes live fuel), its own heat contents and wind limit
     // (use_wind_limit) but no 6 m/s rate cap, and the fuel consumed and the
     // heat released still use the full dry load. Same readers as above.
     bool              wrf_bmst_compat = false;
@@ -644,8 +644,8 @@ struct FireParams
         amrex::Real curing   = 1.0;   ///< Degree of curing [0-1]; 1 = fully cured
         int         pasture  = 0;     ///< cheney_gould::pasture_natural (0) or ::pasture_grazed (1)
         int         curing_curve = 0; ///< cheney_gould::curing_cruz2015 (0) or ::curing_cheney1998 (1)
-        /// 0 = the reference-height wind (fire_wind_ref; set wind_ref_ht = 10, the
-        /// model's U10), 1 = the midflame wind after the Wind Adjustment Factor
+        /// 0 = the reference-height wind (fire_wind_ref; set wind_ref_ht = 10 without
+        /// use_per_fuel_wind_ht, the model's U10), 1 = the midflame wind after the Wind Adjustment Factor
         int         wind_source = 0;
     } cheney_gould;
 
@@ -665,7 +665,7 @@ struct FireParams
         amrex::Real pc        = 50.0;   ///< Percent conifer (M1, M2)
         amrex::Real pdf       = 50.0;   ///< Percent dead fir (M3, M4)
         bool        use_slope = true;   ///< Slope through the equivalent wind
-        /// 0 = the reference-height wind (fire_wind_ref; set wind_ref_ht = 10),
+        /// 0 = the reference-height wind (fire_wind_ref; set wind_ref_ht = 10 without use_per_fuel_wind_ht),
         /// 1 = the midflame wind after the Wind Adjustment Factor (fire_wind_eff)
         int         wind_source = 0;
     } fbp;
@@ -934,8 +934,14 @@ struct FireParams
        // Per-fuel wind height: the log-law target is then the per-fuel fcwh
        // (6.096 m for every tabulated fuel, ERF_FuelWindHeight.H), not wind_ref_ht
        pp.query("use_per_fuel_wind_ht", use_per_fuel_wind_ht);
+       // with use_per_fuel_wind_ht every datum is the 6.096 m per-fuel height
+       // (sampled_wind_ht), so a wind_ref_ht set to anything else is read but unused
+       if (use_per_fuel_wind_ht && pp.contains("wind_ref_ht") && std::abs(wind_ref_ht - 6.096) > 0.01) {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.wind_ref_ht = " << wind_ref_ht << " m is not used:"
+                          << " with erf.fire.use_per_fuel_wind_ht the wind is sampled at the 6.096 m per-fuel height\n";
+       }
        if (wind_sample_ht > 0.0) {
-           const amrex::Real target_ht = use_per_fuel_wind_ht ? amrex::max(wind_ref_ht, amrex::Real(6.096)) : wind_ref_ht;
+           const amrex::Real target_ht = sampled_wind_ht();
            if (wind_sample_ht <= target_ht) {
                amrex::Abort("erf.fire.wind_sample_ht must exceed the target height (erf.fire.wind_ref_ht, or the"
                             " 6.096 m per-fuel height with erf.fire.use_per_fuel_wind_ht): sample above the target height");
@@ -961,12 +967,19 @@ struct FireParams
            wind_below_first_log = (wb == "log");
        }
        // the roughness of every log profile the layer uses (two-height
-       // resampling, the wind below the lowest centre, the ember drift): a
-       // roughness at or above the reference height would put every brand's
-       // profile factor at ln(z/z0)/ln(1.000001)
-       if (!(wind_sample_z0 > 0.0 && wind_sample_z0 < wind_ref_ht)) {
-           fail("erf.fire.wind_sample_z0 must be positive and below erf.fire.wind_ref_ht, got "
-                + std::to_string(wind_sample_z0) + " with wind_ref_ht = " + std::to_string(wind_ref_ht));
+       // resampling, the wind below the lowest centre, the ember drift),
+       // against the height the reference wind ends up at (sampled_wind_ht:
+       // wind_ref_ht, or the 6.096 m per-fuel height with
+       // use_per_fuel_wind_ht). A roughness at or above it reverses the
+       // two-height scaling (a negative log) and puts every brand's profile
+       // factor at ln(z/z0)/ln(1.000001)
+       {
+           const amrex::Real z_target = sampled_wind_ht();
+           if (!(wind_sample_z0 > 0.0 && wind_sample_z0 < z_target)) {
+               fail("erf.fire.wind_sample_z0 must be positive and below the height of the reference wind"
+                    " (erf.fire.wind_ref_ht, or 6.096 m with erf.fire.use_per_fuel_wind_ht), got "
+                    + std::to_string(wind_sample_z0) + " with that height " + std::to_string(z_target) + " m");
+           }
        }
        pp.query("use_terrain_wind", use_terrain_wind);
        pp.query("k_ridge", k_ridge);
@@ -1882,10 +1895,10 @@ struct FireParams
            cg.wind_source = (ws == "midflame") ? 1 : 0;
        }
        // the 1998 model reads the reference wind as its 10 m open wind
-       if (uses_model("cheney_gould") && cg.wind_source == 0 && std::abs(wind_ref_ht - 10.0) > 1.0e-6) {
-           amrex::Print() << "[FIRE] WARNING: erf.fire.ros_model = cheney_gould reads the wind at erf.fire.wind_ref_ht = "
-                          << wind_ref_ht << " m as the model's 10 m open wind (cheney_gould.wind_source = reference);"
-                          << " set wind_ref_ht = 10 for the published fit\n";
+       if (uses_model("cheney_gould") && cg.wind_source == 0 && std::abs(sampled_wind_ht() - 10.0) > 1.0e-6) {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.ros_model = cheney_gould reads the reference wind, at "
+                          << sampled_wind_ht() << " m, as the model's 10 m open wind (cheney_gould.wind_source = reference);"
+                          << " set wind_ref_ht = 10 without use_per_fuel_wind_ht for the published fit\n";
        }
        // the 1998 model's pasture, curing curve and wind are read by it alone;
        // grass_simple takes the moisture and curing only
@@ -1919,6 +1932,12 @@ struct FireParams
            if (fb.ffmc < 0.0 || fb.ffmc > 101.0 || fb.bui < 0.0 || fb.curing < 0.0 || fb.curing > 100.0
                || fb.pc < 0.0 || fb.pc > 100.0 || fb.pdf < 0.0 || fb.pdf > 100.0) {
                amrex::Abort("erf.fire.fbp: ffmc in [0,101], bui >= 0, curing/pc/pdf in [0,100]");
+           }
+           // the system reads the reference wind as its 10 m open wind
+           if (fb.wind_source == 0 && std::abs(sampled_wind_ht() - 10.0) > 1.0e-6) {
+               amrex::Print() << "[FIRE] WARNING: erf.fire.ros_model = fbp reads the reference wind, at "
+                              << sampled_wind_ht() << " m, as the system's 10 m open wind (fbp.wind_source = reference);"
+                              << " set wind_ref_ht = 10 without use_per_fuel_wind_ht for the published fits\n";
            }
        }
 
@@ -2079,6 +2098,15 @@ struct FireParams
     bool is_passive()     const { return coupling_type == "passive"; }
     bool is_lagged()      const { return coupling_type == "lagged"; }
     bool is_synchronous() const { return coupling_type == "synchronous"; }
+
+    // The height the reference wind (fire_wind_ref) is sampled at: the
+    // 6.096 m per-fuel height (build_fcwh_table, the same for every fuel)
+    // under use_per_fuel_wind_ht, with or without a fuel map, else
+    // wind_ref_ht. Every reader of that wind's datum takes it from here.
+    amrex::Real sampled_wind_ht() const
+    {
+        return use_per_fuel_wind_ht ? amrex::Real(6.096) : wind_ref_ht;
+    }
     /// The guard band is checked at all when it has a width and an action.
     bool guards_edge()  const { return boundary_guard_cells > 0 && boundary_guard_action != "none"; }
     bool guard_aborts() const { return boundary_guard_action == "abort"; }

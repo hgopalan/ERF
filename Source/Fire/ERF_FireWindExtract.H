@@ -11,7 +11,8 @@
  * @brief Wind extraction and adjustment for fire simulation
  *
  * Implements:
- * 1. Wind at wind_ref_ht above ground, interpolated (linearly in height,
+ * 1. Wind at z_ref (FireParams::sampled_wind_ht()) or the per-fuel height
+ *    above ground, interpolated (linearly in height,
  *    bilinearly or nearest between the surrounding columns) from the
  *    atmospheric wind, with an optional two-height log-law resampling
  *    (erf.fire.wind_sample_ht); no MOST reconstruction is involved

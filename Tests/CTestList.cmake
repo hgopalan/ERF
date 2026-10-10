@@ -2507,6 +2507,26 @@ add_test_fire_abort(FireMergingFronts_missing_file_abort FireMergingFronts input
 # a polyline file with one vertex has no segment and would mark nothing: stop naming it
 add_test_fire_abort(FireMergingFronts_one_vertex_abort FireMergingFronts inputs_one_vertex
     "'one_vertex.csv' has 1 vertices; a polyline needs at least 2" "")
+# erf.fire.wind_sample_z0 must stay below the height of the reference wind:
+# wind_ref_ht, or 6.096 m with use_per_fuel_wind_ht (until 2026-10 the per-fuel
+# case was checked against wind_ref_ht, so z0 = 8 with wind_ref_ht = 10 ran with
+# the ember drift's log profile reversed)
+add_test_fire_abort(FireWindSampleZ0_abort FireLineFire inputs_nowind
+    "erf.fire.wind_sample_z0 must be positive and below the height of the reference wind" "erf.fire.wind_sample_z0=7")
+add_test_fire_abort(FireWindSampleZ0PerFuel_abort FireLineFire inputs_nowind
+    "erf.fire.wind_sample_z0 must be positive and below the height of the reference wind.*with that height 6.096" "erf.fire.wind_ref_ht=10 erf.fire.wind_sample_z0=8 erf.fire.use_per_fuel_wind_ht=true")
+# use_per_fuel_wind_ht samples the wind at 6.096 m without a fuel map too (until
+# 2026-10 a uniform-fuel run sampled at wind_ref_ht while the checks and the
+# ember drift took 6.096 m; this deck aborted, 8 m not being above 10 m)
+add_test_fire_abort(FireWindPerFuelUniform_height FireLineFire inputs_wind2p5
+    "Wind sampled at 8 m above ground, log-law factor to 6.096" "erf.fire.wind_ref_ht=10 erf.fire.wind_sample_ht=8 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+# the same without resampling: the height the extraction records in every
+# fire cell (the old code sampled at 10 m), and the warning that wind_ref_ht is unused
+add_test_fire_abort(FireWindPerFuelUniform_extract FireLineFire inputs_wind2p5
+    "Wind extraction height range: min=6.096 m  max=6.096 m" "erf.fire.wind_ref_ht=10 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+add_test_fire_abort(FireWindRefHtPerFuel_warn FireLineFire inputs_wind2p5
+    "WARNING: erf.fire.wind_ref_ht = 10 m is not used" "erf.fire.wind_ref_ht=10 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+
 # A firebreak with a t = 0 polyline ignition stays in the non-burnable mask: all
 # 750 break cells. Until 2026-10 the mask read the break back from phi after the
 # polyline's whole-grid distance had been merged over it, and came out empty.
@@ -2690,7 +2710,11 @@ add_test_fire_abort(DustPhreeqcMissing_abort  FireRestart           inputs_dust_
 add_test_fire_abort(DustRoadBinZero_abort      FireRestart           inputs_dust_straight
     "road mass into bin 0, whose diameter" "erf.dust.bin_diameters=50.0e-6\ 2.5e-6\ 7.0e-6")
 add_test_fire_abort(FireDustWindZrefMatch_abort FireRestart          inputs_dust_straight
-    "must match erf.fire.wind_ref_ht" "erf.fire_dust_wind_zref=10.0")
+    "must match 6.1.* m, the height of the wind the fire hands over" "erf.fire_dust_wind_zref=10.0")
+# with use_per_fuel_wind_ht the fire hands over the 6.096 m wind (until 2026-10
+# the dust read it as the wind at wind_ref_ht, so zref = 6.1 ran here)
+add_test_fire_abort(FireDustWindZrefPerFuel_abort FireRestart        inputs_dust_straight
+    "must match 6.096.* m, the height of the wind the fire hands over" "erf.fire.use_per_fuel_wind_ht=true erf.fire_dust_wind_zref=6.1")
 endif()
 endif()
 

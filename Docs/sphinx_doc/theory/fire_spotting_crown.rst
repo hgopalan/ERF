@@ -43,7 +43,7 @@ same random draws on every rank whatever the decomposition:
 5. The brand falls at :cpp:`erf.fire.spotting.terminal_velocity` (default
    0.5 m/s) while drifting with the wind at its height: the reference wind
    at the height it was sampled (:cpp:`erf.fire.wind_ref_ht`, or 6.096 m for
-   every burnable cell with :cpp:`use_per_fuel_wind_ht`) scaled by the neutral log profile
+   every cell with :cpp:`use_per_fuel_wind_ht`) scaled by the neutral log profile
    :math:`\ln(z/z_0) / \ln(z_{ref}/z_0)` with :math:`z_0` =
    :cpp:`erf.fire.wind_sample_z0`, so a brand lofted to 200 m rides a wind
    about twice the 6.1 m wind (until October 2026 it drifted on the

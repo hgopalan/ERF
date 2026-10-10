@@ -586,7 +586,7 @@ void FireLayer::initialize(const ERF& erf,
                                << "%, curing=" << m_params.cheney_gould.curing
                                << ", phi_C=" << m_cgc.phi_C
                                << (cg_model == cheney_gould::model_cg98
-                                   ? (m_params.cheney_gould.wind_source == 1 ? ", midflame wind" : ", reference wind (set wind_ref_ht = 10)")
+                                   ? (m_params.cheney_gould.wind_source == 1 ? ", midflame wind" : ", reference wind (set wind_ref_ht = 10 without use_per_fuel_wind_ht)")
                                    : ", midflame wind")
                                << "; head rate at 0 and 18 km/h: " << cheney_gould_ros(0.0_rt, m_cgc)
                                << " " << cheney_gould_ros(5.0_rt, m_cgc) << " m/s\n";
@@ -627,7 +627,7 @@ void FireLayer::initialize(const ERF& erf,
                 amrex::Print() << "[FIRE DEBUG] FBP: fuel type " << fb.fuel_type << " FFMC=" << fb.ffmc
                                << " f(F)=" << m_fbp.fF << " BUI=" << fb.bui << " BE=" << m_fbp.be
                                << " CF=" << m_fbp.cf << " wind_source=" << (fb.wind_source == 1 ? "midflame" : "reference")
-                               << " (wind_ref_ht=" << m_params.wind_ref_ht << " m; the system wants the 10 m wind)"
+                               << " (reference wind at " << m_params.sampled_wind_ht() << " m; the system wants the 10 m wind)"
                                << " ROS at 0 and 20 km/h, flat: " << fbp_ros(m_fbp, 0.0, 0.0) << " " << fbp_ros(m_fbp, 20.0 / 3.6, 0.0) << " m/s\n";
             }
         }
@@ -803,6 +803,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug)
         amrex::Print() << "[FIRE DEBUG] Starting fire advance step with dt=" << dt << std::endl;
 
+    // the height the reference wind is sampled at, shared by the extraction and its debug line
+    const Real z_wind = m_params.sampled_wind_ht();
     if (m_params.prescribed_wind) {
         fire_wind_ref->setVal(m_params.prescribed_wind_x, 0, 1, 0);
         fire_wind_ref->setVal(m_params.prescribed_wind_y, 1, 1, 0);
@@ -810,7 +812,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         const bool wind_open = m_params.structures.wind_open_columns && m_open_frac_atm && m_roof_h_atm;
         fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
                                           *fire_surface_z, *fire_col_ground,
-                                          m_fg, m_params.wind_ref_ht, m_nz,
+                                          m_fg, z_wind, m_nz,
                                           m_use_per_fuel_wind_ht ? fire_fuel_model.get() : nullptr,
                                           m_use_per_fuel_wind_ht ? m_d_fcwh.data() : nullptr,
                                           m_use_per_fuel_wind_ht ? FUEL_SLOT_COUNT - 1 : 0,
@@ -823,8 +825,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug) {
         if (m_params.wind_sample_ht > 0.0) {
             amrex::Print() << "[FIRE DEBUG] Wind sampled at " << m_params.wind_sample_ht
-                           << " m above ground, log-law factor to " << m_params.wind_ref_ht << " m: "
-                           << std::log(m_params.wind_ref_ht / m_params.wind_sample_z0)
+                           << " m above ground, log-law factor to " << z_wind << " m: "
+                           << std::log(z_wind / m_params.wind_sample_z0)
                               / std::log(m_params.wind_sample_ht / m_params.wind_sample_z0) << std::endl;
         }
         amrex::Print() << "[FIRE DEBUG] Wind extraction completed. Max reference wind: "
@@ -1482,9 +1484,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
                 m_params.spotting.fuel_system,
                 m_params.fuel_model_id,
-                // the height the reference wind was sampled at: 6.096 m for every
-                // burnable cell under use_per_fuel_wind_ht, else wind_ref_ht
-                m_params.use_per_fuel_wind_ht ? amrex::Real(6.096) : m_params.wind_ref_ht,
+                m_params.sampled_wind_ht(),   // the height the reference wind was sampled at
                 m_params.wind_sample_z0,
                 m_params.fire_debug,
                 fire_surface_z.get(),
@@ -2007,7 +2007,7 @@ void FireLayer::apply_crown_fire_ros()
     for (MFIter mfi(*fire_ros); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto const phi_arr = fire_phi->const_array(mfi);
-        // Cruz's U_10 is an open wind: the reference wind at wind_ref_ht, not the
+        // Cruz's U_10 is an open wind: the reference wind (at sampled_wind_ht()), not the
         // WAF-reduced midflame wind (about 0.4x, which made R_crown 2.3x low).
         auto const wind_arr = fire_wind_ref->const_array(mfi);
         auto const surface_ros_arr = surface_ros.const_array(mfi);

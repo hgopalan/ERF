@@ -34,7 +34,11 @@ TEST(ArrivalStamp, CrossingTimeInterpolatesInTime)
     EXPECT_NEAR(levelset_crossing_time(100.0_rt, 10.0_rt, 1.0_rt, 1.0_rt),   100.0, TOL_T) << "no drop: the start, no division";
 }
 
-TEST(ArrivalStamp, NewlyBurnedCellsTakeTheCrossingTime)
+// nvcc refuses an extended __device__ lambda whose enclosing function is
+// private, as gtest's TestBody is: the bodies that launch kernels are
+// namespace-scope functions, and each TEST calls its own.
+namespace {
+void ArrivalStamp_NewlyBurnedCellsTakeTheCrossingTime ()
 {
     // a strip of 40 x 4 cells of 5 m in two boxes; a planar front at x0 =
     // 100 m moves R dt = 10 m during a substep of 20 s starting at t0 = 100 s
@@ -73,4 +77,10 @@ TEST(ArrivalStamp, NewlyBurnedCellsTakeTheCrossingTime)
             }
         }
     }
+}
+}  // namespace
+
+TEST(ArrivalStamp, NewlyBurnedCellsTakeTheCrossingTime)
+{
+    ArrivalStamp_NewlyBurnedCellsTakeTheCrossingTime();
 }

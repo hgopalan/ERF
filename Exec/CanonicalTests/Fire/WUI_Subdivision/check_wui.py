@@ -92,37 +92,49 @@ u_eff = min(u_mid * 196.85, u_lim)               # ft/min, bounded as the model 
 ref0 = rothermel_fm1(mf=0.06, U_ftmin=u_eff)["ROS_ms"]   # the rate at the sounding wind, the run's t = 0 value
 # The surface layer slows the 6.1 m wind as the run proceeds (the 300 ft/min
 # cap hid that until 2026-10: any wind above 1.52 m/s gave 0.2501 m/s), so the
-# head is held to the model's own rate at the wind the fire samples: the mean
-# of the run's reported largest rate over the arrival window, as FireLineFire
-# does with its effective wind.
-import re
-ros_log = []
-with open("run_wildland.log") as fh:
-    for line in fh:
-        m = re.search(r"^\[FIRE\] t=([0-9.]+)\s.*max_ROS=([0-9.eE+-]+)", line)
-        if m: ros_log.append((float(m.group(1)), float(m.group(2))))
-win = [r for t, r in ros_log if t1 <= t <= t2]
-ref = sum(win) / len(win) if win else float("nan")
+# head is held to Rothermel at the wind the fire samples on its path: the
+# effective (midflame) wind along y = 240 m from x = 400 to 470 m in the fire
+# plotfile nearest the middle of the arrival window, put through this file's
+# own rothermel_fm1 with the same 0.9 I_R bound. The model's computed rate is
+# never the reference, so a defect that scaled it would move the measured head
+# but not the bracket.
+t_mid = 0.5 * (t1 + t2)
+best, best_dt = None, float("inf")
+for p_w in sorted(glob.glob("plt_fire_wildland_?????")):
+    _, t_p = fields(p_w, ["fire_phi"])
+    if t_p > 0.0 and abs(t_p - t_mid) < best_dt:   # the t = 0 file holds no sampled wind yet
+        best, best_dt = p_w, abs(t_p - t_mid)
+if best is None:
+    fail("no wildland plotfile after t = 0 holds the sampled wind"); sys.exit(1)
+Fw, t_w = fields(best, ["fire_wind_eff_u", "fire_wind_eff_v", "fire_wind_ref_u", "fire_wind_ref_v"])
+xs_path = np.arange(400.0 + 0.5 * DX_FIRE, 470.0, DX_FIRE)
+u_path = [math.hypot(Fw["fire_wind_eff_u"][cell(x, 240.0)], Fw["fire_wind_eff_v"][cell(x, 240.0)]) for x in xs_path]
+u_ref_path = [math.hypot(Fw["fire_wind_ref_u"][cell(x, 240.0)], Fw["fire_wind_ref_v"][cell(x, 240.0)]) for x in xs_path]
+u_head = sum(u_path) / len(u_path)
+# The effective wind is the model's own: hold its ratio to the reference wind
+# to this file's WAF, so a defect that skipped, doubled or changed the WAF
+# cannot move the head and the bracket together.
+waf_seen = [u_e / u_r for u_e, u_r in zip(u_path, u_ref_path) if u_r > 0.0]
+if not waf_seen or max(abs(w / waf_andrews() - 1.0) for w in waf_seen) > 1.0e-4:
+    fail(f"effective/reference wind on the head's path {min(waf_seen, default=float('nan')):.5f} to "
+         f"{max(waf_seen, default=float('nan')):.5f}, not the Andrews WAF {waf_andrews():.5f}")
+ref = rothermel_fm1(mf=0.06, U_ftmin=min(u_head * 196.85, u_lim))["ROS_ms"]
 print(f"  arrival at x=400: {t1:.1f} s, x=470: {t2:.1f} s -> head ROS {ros_model:.3f} m/s")
-print(f"  Rothermel FM1, 6% moisture, midflame {u_mid:.2f} m/s (WAF {waf_andrews():.3f}), limit 0.9 I_R = {u_lim:.0f} ft/min: {ref0:.4f} m/s at t = 0")
-print(f"  the model's largest rate over the arrival window, run mean of {len(win)} steps: {ref:.4f} m/s (the surface layer has slowed the 6.1 m wind)")
+print(f"  Rothermel FM1, 6% moisture, midflame {u_mid:.2f} m/s (WAF {waf_andrews():.3f}), below the limit 0.9 I_R = {u_lim:.0f} ft/min: {ref0:.4f} m/s at t = 0")
+print(f"  effective/reference wind on the head's path: {min(waf_seen):.6f} to {max(waf_seen):.6f} (Andrews WAF {waf_andrews():.6f})")
+print(f"  Rothermel at the effective wind on the head's path at t = {t_w:.0f} s ({u_head:.3f} m/s midflame, x = 400 to 470 m): {ref:.4f} m/s (the surface layer has slowed the 6.1 m wind)")
 # The deck runs the directional level set with the projection formula, whose
-# head of a curved front falls from the model's rate toward the Wulff-shape
+# head of a curved front falls from the Rothermel rate toward the Wulff-shape
 # tip R0 B/(B-1) (phi_w (B-1))^(1/B) once phi_w (B-1) > 1 (FireAdvectiveWindCoupling,
 # FireDirectionalShape): the head is bracketed between that tip at the
-# window-mean wind and the model's rate, as Slope_No_Wind brackets its
-# directional decks. The wind the mean rate implies is found by bisection.
-lo, hi = 0.0, 3000.0
-for _ in range(60):
-    mid = 0.5 * (lo + hi)
-    if rothermel_fm1(mf=0.06, U_ftmin=mid)["ROS_ms"] < ref: lo = mid
-    else: hi = mid
-rw = rothermel_fm1(mf=0.06, U_ftmin=0.5 * (lo + hi))
+# head's-path wind and the Rothermel rate, as Slope_No_Wind brackets its
+# directional decks.
+rw = rothermel_fm1(mf=0.06, U_ftmin=min(u_head * 196.85, u_lim))
 R0_ms, phi_w, B = rw["R0_ftmin"] * 0.00508, rw["phi_w"], rw["B"]
 tip = R0_ms * B / (B - 1.0) * (phi_w * (B - 1.0)) ** (1.0 / B) if phi_w * (B - 1.0) > 1.0 else ref
-print(f"  bracket: Wulff tip of the projection at that wind {tip:.4f} m/s ({tip / ref:.0%} of the model's rate), head at {ros_model / ref:.0%}")
+print(f"  bracket: Wulff tip of the projection at that wind {tip:.4f} m/s ({tip / ref:.0%} of the Rothermel rate), head at {ros_model / ref:.0%}")
 if not (tip <= ros_model <= 1.15 * ref):
-    fail(f"wildland head ROS {ros_model:.3f} m/s outside [Wulff tip {tip:.3f}, 1.15 x model rate {ref:.3f}] m/s")
+    fail(f"wildland head ROS {ros_model:.3f} m/s outside [Wulff tip {tip:.3f}, 1.15 x Rothermel rate {ref:.3f}] m/s")
 t_wild_850 = arrival(at, 780.0, 240.0)
 print(f"  arrival at x=780 (beyond the last street): {t_wild_850:.1f} s")
 if t_wild_850 <= 0:

@@ -35,7 +35,8 @@
  * (erf.fire.cheney_gould.curing_curve = "cruz2015"), or the 1998 curve
  * phi_C = 1.12 / (1 + 59.2 exp(-0.124 (C - 50))) ("cheney1998"). The wind is
  * the reference-height wind (erf.fire.cheney_gould.wind_source = "reference",
- * so set erf.fire.wind_ref_ht = 10) or the midflame wind after the Wind
+ * so set erf.fire.wind_ref_ht = 10 without erf.fire.use_per_fuel_wind_ht)
+ * or the midflame wind after the Wind
  * Adjustment Factor ("midflame"). Not appropriate for forest or shrub fuels.
  *
  * ros_model = "grass_simple" is the fit that this code presented as

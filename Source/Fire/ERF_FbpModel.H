@@ -44,7 +44,7 @@
  * percentages are deck inputs (erf.fire.fbp.*), uniform over the domain, and
  * the wind is the 10 m open wind: erf.fire.fbp.wind_source = reference
  * (default) reads the reference-height wind, so erf.fire.wind_ref_ht should
- * be 10 m; midflame reads the wind after the Wind Adjustment Factor. C6 is
+ * be 10 m, without erf.fire.use_per_fuel_wind_ht (a warning says so); midflame reads the wind after the Wind Adjustment Factor. C6 is
  * given its surface rate only (no crown component). Rates are converted to
  * m/s for the propagation.
  */

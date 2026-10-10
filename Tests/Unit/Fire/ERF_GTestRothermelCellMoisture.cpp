@@ -212,9 +212,11 @@ TEST(RothermelCellMoisture, TheCoefficientOptionsReachEveryCell)
     for (MFIter mfi(rc_on); mfi.isValid(); ++mfi) {
         const RothermelComputed on  = unpack_rothermel(rc_on.const_array(mfi), 1, 0);
         const RothermelComputed off = unpack_rothermel(rc_off.const_array(mfi), 1, 0);
-        EXPECT_EQ(on.I_R, want.I_R);
-        EXPECT_EQ(on.R0, want.R0);
-        EXPECT_EQ(on.beta, want.beta);
+        // near, not equal: the kernel and this file may fold or contract the
+        // same arithmetic differently by an ulp
+        EXPECT_NEAR(on.I_R, want.I_R, REL * want.I_R);
+        EXPECT_NEAR(on.R0, want.R0, REL * want.R0);
+        EXPECT_NEAR(on.beta, want.beta, REL * want.beta);
         EXPECT_NE(on.I_R, off.I_R) << "the options change the per-cell coefficients";
         EXPECT_NE(on.beta, off.beta) << "wrf_bmst_compat deflates the load, so the packing ratio";
     }

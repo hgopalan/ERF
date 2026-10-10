@@ -1,0 +1,20 @@
+FILE = inputs_base
+
+# 2.5 m/s with the heat coupled back in a box the plume does not fill: 1600 m
+# in x, a 480 m lid and a 200 m line in 400 m of y, on 10 m cells, for 600 s.
+# In the 400 x 80 x 160 m box of wind2p5_2way the plume reaches the lid within
+# about 30 s and turns the x-periodic box into one overturning cell whose
+# surface jet drives the head; here the head runs at Coen's rate or below.
+# Reported, not checked: the paper's 5 km LES has a convective boundary layer
+# and a 1 km line, which this neutral deck does not.
+erf.input_sounding_file = "input_sounding_u2p5"
+erf.fire.fire_atm_feedback = 1.0
+geometry.prob_hi = 1600.0 400.0 480.0
+amr.n_cell = 160 40 48
+amr.max_grid_size_z = 48
+erf.fire.grid_ratio = 4               # 2.5 m fire cells, as in the other decks
+erf.fixed_dt = 0.5
+stop_time = 600.0
+erf.fire.ignition_y = 200.0
+erf.fire.ignition.polygon_file = "line_y100_300.csv"
+erf.fire.probes = 138.75 200.0  136.25 200.0  181.25 200.0  183.75 200.0  188.75 200.0  198.75 200.0  218.75 200.0  238.75 200.0

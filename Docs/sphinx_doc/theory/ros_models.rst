@@ -65,13 +65,17 @@ comparison option, not a correction. It does not make ERF reproduce WRF-Fire:
   some (Anderson 2, 4, 5, 7, 10 and the GR, GS, SH and TU fuels).
 - ERF keeps its own heat contents and its wind limit
   (:cpp:`erf.fire.use_wind_limit`, by default Rothermel's
-  :math:`U \le 0.9\,I_R`, which the reaction-velocity option also moves
-  through :math:`I_R`); WRF-Fire caps the rate itself at 6 m/s.
+  :math:`U \le 0.9\,I_R`, which both options move through :math:`I_R`);
+  WRF-Fire caps the rate itself at 6 m/s.
 - The fuel consumed and the heat released still use the full dry load.
 
 A lower load changes the no-wind rate either way: it is slower for short grass
 (FM1) and faster for FM8, 9, 12 and 13. It also raises the wind factor through
-:math:`(\beta/\beta_{op})^{-E}`, so for FM1 at 4 m/s the two nearly cancel.
+:math:`(\beta/\beta_{op})^{-E}`, so for FM1 at 4 m/s with the wind limit off
+the two nearly cancel (+0.006 % in the head rate). Under the default wind
+limit :math:`U \le 0.9\,I_R` the lower :math:`I_R` also lowers the limit,
+which binds at that wind: the head rate drops 12.8 % (1.509 to 1.316 m/s; 0.09 %
+under the fuel-class cap).
 
 Both options act wherever the Rothermel coefficients are built: the uniform
 fuel, the per-fuel table of a fuel map (deck-defined fuels included) and the
@@ -565,7 +569,7 @@ Per-Fuel Wind Height (Sub-phase A)
 
 Enabling :cpp:`erf.fire.use_per_fuel_wind_ht = true` causes wind extraction to use a per-fuel-category height following WRF-SFIRE :cpp:`fcwh` convention.
 
-WRF-SFIRE defaults are 6.096 m for all 13 Anderson fuel models, which is identical to the :cpp:`wind_ref_ht` default of 6.1 m. Enabling this flag has no practical effect unless the :cpp:`fcwh` table is modified.
+WRF-SFIRE defaults are 6.096 m for every fuel model, so the flag samples the wind at 6.096 m with or without a fuel map. Next to the :cpp:`wind_ref_ht` default of 6.1 m this changes little; with :cpp:`wind_ref_ht` = 10 or 20 m it lowers the wind the fire reads. Every reader of the wind's height follows it: the range checks of :cpp:`wind_sample_ht` and :cpp:`wind_sample_z0`, the ember drift, and the height of the wind handed to the dust coupling.
 
 **Surface roughness:** the fire model does not carry a per-fuel roughness length.
 The roughness of the wind profile is the surface-layer value :cpp:`erf.most.z0`,

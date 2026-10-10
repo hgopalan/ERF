@@ -5533,14 +5533,18 @@ Wind
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.prescribed_wind_y**                 | Constant reference wind, y, when prescribed_wind [m/s]     | Real                           | 0.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.use_per_fuel_wind_ht**              | Sample at the per-fuel fcwh height instead of wind_ref_ht  | Boolean                        | false                  |
+| **erf.fire.use_per_fuel_wind_ht**              | Sample the wind at the per-fuel fcwh height (6.096 m for   | Boolean                        | false                  |
+|                                                | every fuel) instead of wind_ref_ht, with or without a      |                                |                        |
+|                                                | fuel map; every reader of the wind's height follows it     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.wind_sample_ht**                    | Sample the wind at this height above ground and bring it   | Real > wind_ref_ht, or 0       | 0.0                    |
-|                                                | to wind_ref_ht with a log profile (CFBM); 0 = off          |                                |                        |
+| **erf.fire.wind_sample_ht**                    | Sample the wind at this height above ground and bring it   | Real > wind_ref_ht (6.096 with | 0.0                    |
+|                                                | to wind_ref_ht (6.096 m with use_per_fuel_wind_ht) with a  | use_per_fuel_wind_ht), or 0    |                        |
+|                                                | log profile (CFBM); 0 = off                                |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.wind_sample_z0**                    | Roughness length [m] of every log profile the fire reads:  | 0 < Real < wind_ref_ht         | 0.1                    |
-|                                                | the two-height resampling, the wind below the first cell   |                                |                        |
-|                                                | centre and the ember drift                                 |                                |                        |
+| **erf.fire.wind_sample_z0**                    | Roughness length [m] of every log profile the fire reads:  | 0 < Real < wind_ref_ht, or     | 0.1                    |
+|                                                | the two-height resampling, the wind below the first cell   | < 6.096 with                   |                        |
+|                                                | centre and the ember drift; below the height of the        | use_per_fuel_wind_ht           |                        |
+|                                                | reference wind, which is 6.096 m with use_per_fuel_wind_ht |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.wind_below_first_cell**             | Wind at a target below the first cell centre: "clamp"      | "clamp", "log"                 | "clamp"                |
 |                                                | takes the centre's wind unchanged; "log" scales it by the  |                                |                        |
@@ -5617,7 +5621,8 @@ Rate of spread
 |                                                | a physical correction (ERF's loads are oven-dry) and not   |                                |                        |
 |                                                | full WRF-Fire parity (bed SAV, net load, heat content and  |                                |                        |
 |                                                | wind/rate caps differ); fuel consumption and heat release  |                                |                        |
-|                                                | keep the full load. Same readers as the row above          |                                |                        |
+|                                                | keep the full load. Through I_R it lowers the default wind |                                |                        |
+|                                                | limit 0.9 I_R too. Same readers as the row above           |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
 |                                                | path; false spreads the head rate in every direction       |                                |                        |
@@ -6416,10 +6421,11 @@ models are enabled; see :ref:`sec:DustFire`.
 |                                              | feeding the dust a value other than erf.most.z0 is warned  |                          |                                    |
 |                                              | about, otherwise the key is not read (warned)              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]: follows              | = erf.fire.wind_ref_ht   | 6.1                                |
-|                                              | erf.fire.wind_ref_ht; with the fire wind feeding the dust  |                          |                                    |
-|                                              | a different value aborts, otherwise the key is not read    |                          |                                    |
-|                                              | (warned)                                                   |                          |                                    |
+| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]: follows the height   | = erf.fire.wind_ref_ht,  | 6.1                                |
+|                                              | of the fire's wind (erf.fire.wind_ref_ht, or 6.096 m with  | or 6.096 with            |                                    |
+|                                              | erf.fire.use_per_fuel_wind_ht); with the fire wind feeding | use_per_fuel_wind_ht     |                                    |
+|                                              | the dust a different value aborts, otherwise the key is    |                          |                                    |
+|                                              | not read (warned)                                          |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_lofting_enabled**            | Multiply the emission flux by the convective lofting       | Boolean                  | false                              |
 |                                              | factor of the fire heat flux                               |                          |                                    |

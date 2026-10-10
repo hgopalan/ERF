@@ -437,8 +437,7 @@ RothermelComputed rothermel_coefficients(const FuelModelParams& fp,
     rc.phi_s_const  = phi_s_const;
     rc.U_max_ftmin  = U_max_ftmin;
     rc.wind_conv    = 196.85;    // m/s → ft/min
-    rc.ros_conv     = 1.0;       // 1, not a unit factor: rc.R0 is already in m/s (ERF_AlbiniSpotting.H builds
-                                 // its own rc with 0.00508 when it needs ft/min)
+    rc.ros_conv     = 1.0;       // 1, not a unit factor: rc.R0 is already in m/s
     rc.I_R          = I_R;
 
     return rc;

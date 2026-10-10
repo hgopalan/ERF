@@ -217,8 +217,9 @@ erf.fire.prescribed_wind_x = 0.0
 erf.fire.prescribed_wind_y = 0.0
 
 # Sample the wind at this height above ground (above the plume) and bring it
-# down to wind_ref_ht with a log profile of roughness wind_sample_z0 (CFBM
-# second interpolation option); 0 samples at wind_ref_ht directly
+# down to wind_ref_ht (6.096 m with use_per_fuel_wind_ht) with a log profile
+# of roughness wind_sample_z0 (CFBM second interpolation option); 0 samples at
+# that height directly
 erf.fire.wind_sample_ht = 0.0
 erf.fire.wind_sample_z0 = 0.1
 
@@ -229,7 +230,9 @@ erf.fire.wind_sample_z0 = 0.1
 # first cell above wind_ref_ht (12 % lower under a 20 m first cell)
 erf.fire.wind_below_first_cell = "clamp"
 
-# Take the midflame wind height from the per-fuel fcwh table instead of wind_ref_ht
+# Sample the reference wind at the per-fuel fcwh height (6.096 m for every
+# fuel, with or without a fuel map) instead of wind_ref_ht; every reader of the
+# wind's height follows it, and a wind_ref_ht set to another value is unused
 erf.fire.use_per_fuel_wind_ht = false
 
 # Apply Wind Adjustment Factor (WAF) for canopy screening
@@ -679,7 +682,8 @@ erf.fire.cheney_gould.curing = 1.0     # Degree of curing [0-1], 1 = fully cured
 # The 1998 model's pasture coefficients ("natural" or "grazed"), its curing
 # coefficient ("cruz2015" Cruz et al. 2015, or the paper's "cheney1998") and
 # the wind it reads: "reference" is the wind at wind_ref_ht (the model's U10,
-# so set wind_ref_ht = 10), "midflame" the WAF-reduced wind. Read only with
+# so set wind_ref_ht = 10 without use_per_fuel_wind_ht), "midflame" the
+# WAF-reduced wind. Read only with
 # ros_model = "cheney_gould" (grass_simple takes moisture and curing alone).
 erf.fire.cheney_gould.pasture = "natural"
 erf.fire.cheney_gould.curing_curve = "cruz2015"

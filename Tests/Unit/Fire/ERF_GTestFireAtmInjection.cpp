@@ -48,7 +48,11 @@ struct Column
 
 } // namespace
 
-TEST(ExnerTendency, TheColumnEnthalpyIsTheSurfaceFlux)
+// nvcc refuses an extended __device__ lambda whose enclosing function is
+// private, as gtest's TestBody is: the bodies that launch kernels are
+// namespace-scope functions, and each TEST calls its own.
+namespace {
+void ExnerTendency_TheColumnEnthalpyIsTheSurfaceFlux ()
 {
     Column c;
     const Real q = 5.0e4_rt, alfg = 10.0_rt, p = 8.5e4_rt;
@@ -89,8 +93,15 @@ TEST(ExnerTendency, TheColumnEnthalpyIsTheSurfaceFlux)
     EXPECT_NEAR(sum_on,  q, 1.0e3 * REL * q) << "c_p Pi d(rho theta)/dt integrates to the flux";
     EXPECT_NEAR(sum_off, exner * q, 1.0e3 * REL * q) << "without the factor the column enthalpy is Pi q";
 }
+}  // namespace
 
-TEST(SmokeInjection, SourceDividesByTheCellThickness)
+TEST(ExnerTendency, TheColumnEnthalpyIsTheSurfaceFlux)
+{
+    ExnerTendency_TheColumnEnthalpyIsTheSurfaceFlux();
+}
+
+namespace {
+void SmokeInjection_SourceDividesByTheCellThickness ()
 {
     Column c;
     const Real heat = 1.0e5_rt, ef = 0.02_rt, hoc = 1.8e7_rt;
@@ -126,4 +137,10 @@ TEST(SmokeInjection, SourceDividesByTheCellThickness)
     inject_smoke_from_fire(src, Q, nullptr, c.geom, ef, hoc, 0, false, 0);
     EXPECT_NEAR(src.max(0), flux / DZ, REL * flux / DZ);
     EXPECT_NEAR(src.min(0), 0.0, 1.0e-30);
+}
+}  // namespace
+
+TEST(SmokeInjection, SourceDividesByTheCellThickness)
+{
+    SmokeInjection_SourceDividesByTheCellThickness();
 }

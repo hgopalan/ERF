@@ -35,7 +35,8 @@ under a 10 m first centre reads the 10 m wind, 12 % high at :math:`z_0` =
 centre and carry its numbers; ``log`` is the recommended setting whenever the
 first cell is above the reference height.
 With :cpp:`erf.fire.use_per_fuel_wind_ht` the height comes instead from a
-per-fuel table in the WRF-SFIRE ``fcwh`` convention (all 6.096 m by default).
+per-fuel table in the WRF-SFIRE ``fcwh`` convention (6.096 m for every fuel),
+with or without a fuel map.
 
 **Horizontal mapping.** :cpp:`erf.fire.wind_interp` selects how atmospheric
 columns map to the finer fire cells. ``"bilinear"`` (default) blends the four

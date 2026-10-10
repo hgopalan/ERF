@@ -74,7 +74,7 @@ void verify_fire_precip_source(const FireParams& fire_params,
  * 9. All boxes divisible by grid_ratio in x and y
  * 10. Distribution map size matches grid size
  * 11. Domain z, x and y indices start at 0
- * 12. Domain height > wind_ref_ht
+ * 12. Domain height > the wind's sampling height (FireParams::sampled_wind_ht)
  * 13-14. Level-set and FARSITE divisors and step sizes
  */
 void verify_fire_prerequisites(const ERF& erf,
