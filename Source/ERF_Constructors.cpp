@@ -334,7 +334,8 @@ ERF::ERF_shared ()
 
 #ifdef ERF_USE_MOVING_BODIES
     // nullptr unless erf.moving_bodies.bodies is given
-    moving_bodies = MovingBodies::create(solverChoice, max_level, fixed_dt, !restart_chkfile.empty());
+    moving_bodies = MovingBodies::create(solverChoice, max_level, fixed_dt, !restart_chkfile.empty(),
+                                         stop_time - start_time);
 #endif
 
 #ifdef ERF_USE_EAMXX_SHOC

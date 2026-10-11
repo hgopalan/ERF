@@ -409,8 +409,13 @@ ifeq ($(USE_WINDFARM), TRUE)
     INCLUDE_LOCATIONS += $(ERF_WINDFARM_GENERALAD_DIR)
 endif
 
-# Moving bodies (OpenFAST turbines): the framework, and the OpenFAST 4 coupling on top of it.
+# Moving bodies (OpenFAST turbines): the framework, and the OpenFAST 5 coupling on top of it.
 # OPENFAST_HOME is the OpenFAST install prefix (FAST_Library.h under include).
+ifeq ($(USE_OPENFAST), TRUE)
+    ifneq ($(USE_MOVING_BODIES), TRUE)
+        $(error USE_OPENFAST = TRUE needs USE_MOVING_BODIES = TRUE)
+    endif
+endif
 ifeq ($(USE_MOVING_BODIES), TRUE)
     DEFINES += -DERF_USE_MOVING_BODIES
     ERF_MOVING_BODIES_DIR = $(ERF_SOURCE_DIR)/MovingBodies

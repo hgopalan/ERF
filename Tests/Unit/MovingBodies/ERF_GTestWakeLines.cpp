@@ -1,12 +1,15 @@
 // Wake sampling lines behind a rotor: the points sit on the lateral and vertical lines at the
 // requested x/D behind the hub along the rotor axis, the running average is the mean of the
-// samples (an analytic Gaussian wake plus a zero-mean perturbation comes back exactly), and
-// the running-average state survives a checkpoint round trip.
+// samples (an analytic Gaussian wake plus a zero-mean perturbation comes back exactly), the
+// running-average state survives a checkpoint round trip, and a malformed checkpoint, an empty
+// list of distances or a non-finite sample aborts, naming the file or the rotor.
 
 #include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -14,9 +17,27 @@
 
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_WakeLines.H"
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_wakelines");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 using amrex::Real;
 using erf_actuator::WakeLines;
@@ -97,7 +118,7 @@ TEST(WakeLines, VerticalLineIsClippedAtTheGround)
     EXPECT_NEAR(pos[3*(2*npts-1) + 2], 150.0 + 1.5 * 240.0, tol() * 240.0);    // vertical end
     for (int i = 0; i < 2 * npts; ++i) { EXPECT_GE(pos[3*i + 2], -tol()) << "point " << i << " below ground"; }
     // the file records the clipped offset of the first vertical point
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_wake_clip";
+    const auto dir = gtest_scratch_root() / "erf_gtest_wake_clip";
     std::filesystem::create_directories(dir);
     WakeLines wf("T1", (dir / "T1").string(), hub, axis, 240.0, {2.0}, 1.5, npts, Real(0.0));
     wf.write_average();
@@ -148,7 +169,7 @@ TEST(WakeLines, RunningAverageRecoversTheAnalyticWake)
 
 TEST(WakeLines, StateRoundTripsThroughACheckpoint)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_wake";
+    const auto dir = gtest_scratch_root() / "erf_gtest_wake";
     std::filesystem::create_directories(dir);
     const std::array<Real,3> hub{{0.0, 0.0, 150.0}};
     const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
@@ -189,4 +210,52 @@ TEST(WakeLines, StateRoundTripsThroughACheckpoint)
     EXPECT_EQ(line, "samples,xD,line,s,x,y,z,u,v,w");
     ASSERT_TRUE(std::getline(csv, line));
     EXPECT_EQ(line.rfind("3,2,lateral,-1,", 0), 0u) << line;
+}
+
+TEST(WakeLines, AMalformedCheckpointOrInputIsRefusedNamingIt)
+{
+    const auto dir = gtest_scratch_root() / "erf_gtest_wake_bad";
+    std::filesystem::create_directories(dir);
+    const std::array<Real,3> hub{{0.0, 0.0, 150.0}};
+    const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
+    WakeLines a("T1", (dir / "T1").string(), hub, axis, 240.0, {2.0}, 1.0, 7, Real(-1.0e30));
+    a.accumulate(gaussian_wake(a, 10.0, 0.3, 50.0));
+    a.write_state(dir.string());
+    std::string good;
+    {
+        std::ifstream in(dir / "T1_wake_avg.dat");
+        std::stringstream ss;
+        ss << in.rdbuf();
+        good = ss.str();
+    }
+    // rewrite the checkpoint with one entry changed and read it back into a fresh object
+    auto refused = [&] (const std::string& from, const std::string& to) {
+        std::string text = good;
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        if (at != std::string::npos) { text.replace(at, from.size(), to); }
+        std::ofstream(dir / "T1_wake_avg.dat", std::ios::trunc) << text;
+        WakeLines b("T1", (dir / "T1").string(), hub, axis, 240.0, {2.0}, 1.0, 7, Real(-1.0e30));
+        const std::string msg = erf_gtest::abort_message([&] { b.read_state(dir.string()); });
+        EXPECT_EQ(b.num_samples(), 0) << "a refused checkpoint changes nothing";
+        return msg;
+    };
+    EXPECT_NE(refused("count = 1", "count = -1").find("malformed wake-average checkpoint"), std::string::npos);
+    EXPECT_NE(refused("diameter = 240", "diameter = -240").find("diameter positive"), std::string::npos);
+    EXPECT_NE(refused("axis = 1 0 0", "axis = 0.6 0 0.8").find("horizontal unit vector"), std::string::npos);
+    EXPECT_NE(refused("size = 42", "size = 41").find("41 values"), std::string::npos);
+    // a truncated file
+    {
+        std::ofstream(dir / "T1_wake_avg.dat", std::ios::trunc) << good.substr(0, good.size() / 2);
+        WakeLines b("T1", (dir / "T1").string(), hub, axis, 240.0, {2.0}, 1.0, 7, Real(-1.0e30));
+        EXPECT_NE(erf_gtest::abort_message([&] { b.read_state(dir.string()); }).find("truncated"), std::string::npos);
+    }
+    // the inputs: no distances, and a non-finite sample
+    EXPECT_NE(erf_gtest::abort_message([&] { WakeLines c("T3", "out/T3", hub, axis, 240.0, {}, 1.0, 7, Real(0.0)); }).find("WakeLines T3"),
+              std::string::npos);
+    std::vector<Real> vel(a.positions().size(), Real(1.0));
+    vel[5] = std::numeric_limits<Real>::quiet_NaN();
+    const std::string msg = erf_gtest::abort_message([&] { a.accumulate(vel); });
+    EXPECT_NE(msg.find("point 1 (0-based)"), std::string::npos) << msg;
+    EXPECT_EQ(a.num_samples(), 1) << "a refused sample is not counted";
 }

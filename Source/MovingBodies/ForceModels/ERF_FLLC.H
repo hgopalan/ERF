@@ -51,7 +51,7 @@ public:
      * @param chord chord at each force node (m)
      * @param eps_les the kernel width of the run (m)
      * @param eps_chord optimal kernel width in chords
-     * @param eps_dr fine-grid spacing as a fraction of the optimal kernel width (spacing = epsilon_opt / eps_dr)
+     * @param eps_dr the optimal kernel width over the fine-grid spacing (spacing = epsilon_opt / eps_dr)
      * @param relax relaxation factor f in (0, 1]
      */
     FLLC (std::string name, std::vector<amrex::Real> r, std::vector<amrex::Real> chord,

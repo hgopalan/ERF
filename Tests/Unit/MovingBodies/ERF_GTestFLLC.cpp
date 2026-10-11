@@ -59,14 +59,16 @@ TEST(FLLC, KernelHasTheRightLimits)
     const Real r = 0.05;
     EXPECT_NEAR(FLLC::kernel(r, eps), 0.5 / (eps * eps) - 0.75 * r * r / std::pow(eps, 4), 1.0e-5);
     // far away: -1/(2 r^2), the unfiltered vortex sheet
-    EXPECT_NEAR(FLLC::kernel(50.0, eps), -0.5 / 2500.0, 1.0e-12);
+    EXPECT_NEAR(FLLC::kernel(50.0, eps), -0.5 / 2500.0, tol() * 1.0e-3);
     // a rounding residue of a coincident point must give the r = 0 value, not garbage
     EXPECT_NEAR(FLLC::kernel(1.0e-14, eps), 0.5 / (eps * eps), 1.0e-9);
-    EXPECT_NEAR(FLLC::kernel(3.0e-13, 0.13), 0.5 / (0.13 * 0.13), 1.0e-6);
+    const Real rel = (sizeof(Real) == 8) ? Real(1.0e-12) : Real(1.0e-6);   // a few roundoffs of the arithmetic
+    EXPECT_NEAR(FLLC::kernel(3.0e-13, 0.13), 0.5 / (0.13 * 0.13), rel * 0.5 / (0.13 * 0.13));
     // the kernel is the derivative of (1 - exp(-r^2/eps^2)) / r over 2
     const Real h = 1.0e-4, r0 = 1.3;
     auto F = [&](Real x) { return (1.0 - std::exp(-x * x / (eps * eps))) / x; };
-    EXPECT_NEAR(FLLC::kernel(r0, eps), 0.5 * (F(r0 + h) - F(r0 - h)) / (2 * h), 1.0e-6);
+    // the difference quotient loses about roundoff / h, 1e-3 of the value in single precision
+    EXPECT_NEAR(FLLC::kernel(r0, eps), 0.5 * (F(r0 + h) - F(r0 - h)) / (2 * h), (sizeof(Real) == 8) ? 1.0e-6 : 5.0e-4);
 }
 
 TEST(FLLC, InterpolationAlongTheSpanIsLinearAndHoldsTheEnds)
@@ -160,7 +162,8 @@ TEST(FLLC, CorrectionVanishesAtTheOptimalKernelAndIsADownwashForAWiderOne)
     for (int n = 1; n <= 5; ++n) {
         relaxed.update(w.force, w.vel);
         const Real want = (1.0 - std::pow(0.9, n)) * relaxed.target()[3*25+2];
-        EXPECT_NEAR(relaxed.correction()[3*25+2], want, 1.0e-12 + 1.0e-9 * std::abs(want)) << "update " << n;
+        EXPECT_NEAR(relaxed.correction()[3*25+2], want, 1.0e-12 + ((sizeof(Real) == 8) ? 1.0e-9 : 1.0e-5) * std::abs(want))
+            << "update " << n;
     }
     // the state round trip restores the relaxed correction; a different blade is refused by name
     std::stringstream ss;

@@ -20,7 +20,8 @@ Building
 --------
 
 Build OpenFAST 5.0 (4.x also works) with its C++ API, which produces the
-shared library and ``FAST_Library.h``:
+shared library and ``FAST_Library.h``. ``Build/setup_openfast.sh`` does this
+in one command (``--force`` rebuilds an existing install); by hand:
 
 .. code-block:: bash
 
@@ -29,8 +30,9 @@ shared library and ``FAST_Library.h``:
    make -j4 install
 
 Then build ERF with the coupling. The moving-bodies framework is switched on
-by ``ERF_ENABLE_OPENFAST``; the decks use the anelastic solver with the FFT
-Poisson solve:
+by ``ERF_ENABLE_OPENFAST``; prescribed-Ct disks alone need only
+``ERF_ENABLE_MOVING_BODIES`` and no OpenFAST. The decks use the anelastic
+solver with the FFT Poisson solve:
 
 .. code-block:: bash
 
@@ -43,8 +45,9 @@ OpenFAST installation, ``-DERF_OPENFAST_USE_STUB=ON`` builds against a bundled
 stub library with the same C API; the regression tests run on it, and so does
 the ``Linux GCC OpenFAST stub`` CI job.
 
-Floating-point traps must stay off in a coupled run
-(``amrex.fpe_trap_invalid = 0``): OpenFAST's own arithmetic raises them.
+Floating-point traps must stay off in a run with an OpenFAST turbine
+(``amrex.fpe_trap_invalid``, ``amrex.fpe_trap_zero`` and
+``amrex.fpe_trap_overflow`` all 0): OpenFAST's own arithmetic raises them.
 
 Preparing the turbine model
 ---------------------------
@@ -55,10 +58,12 @@ ServoDyn or a fixed rotor speed). Four settings matter for the coupling:
 - ``CompInflow = 2`` in the ``.fst``: the inflow comes from ERF.
 - ``AirDens`` in the ``.fst`` equal to ERF's density at the hub; the start-up
   audit aborts when they differ by more than ``erf.moving_bodies.density_tolerance``.
-- ``Wake_Mod`` in the AeroDyn file: ``0`` for ``sampling = disk`` (the resolved
-  flow carries the induction), ``1`` for ``sampling = disk_corrected`` (the
+- ``Wake_Mod`` in the AeroDyn file: ``0`` for ``sampling = disk``, which is
+  also what the actuator line uses (the resolved flow carries the induction),
+  non-zero (``1``, BEMT) for ``sampling = disk_corrected`` (the disk's
   default) and ``sampling = upstream``, where OpenFAST applies its own
-  induction to the free stream ERF hands it. The audit checks this.
+  induction to the free stream ERF hands it. The start-up check aborts on the wrong pairing, so one
+  model file serves either the disk or the line, not both.
 - Tower shadow off (``TwrShadow = 0``) when tower force points are used: the
   tower's wake reaches the blades through the flow.
 
@@ -70,7 +75,8 @@ A minimal case
 
 A single IEA 15 MW rotor as an actuator disk in a uniform inflow on a
 20 m mesh, the configuration calibrated against the standalone OpenFAST
-solution:
+solution. Its AeroDyn file sets ``Wake_Mod = 1``, as the default
+``sampling = disk_corrected`` needs:
 
 .. code-block:: text
 
@@ -89,7 +95,6 @@ solution:
    erf.moving_bodies.T1.num_force_points_blade  = 50
    erf.moving_bodies.T1.num_points_t            = 24
    erf.moving_bodies.T1.epsilon                 = 2.0          # kernel width in cells
-   erf.moving_bodies.T1.air_density             = 1.225
    erf.moving_bodies.T1.output_root             = T1
    erf.moving_bodies.diagnostics_dir            = moving_bodies
 
@@ -102,8 +107,8 @@ turbulent inflow, two levels, terrain, restart).
 Choosing the model and its settings
 -----------------------------------
 
-The settings below reproduced the standalone OpenFAST (BEM) loads of the
-IEA 15 MW within the stated margins in a uniform 10.59 m/s inflow.
+The table below shows how close each set-up came to the standalone OpenFAST
+(BEM) loads of the IEA 15 MW in a uniform 10.59 m/s inflow.
 
 ======================================================  ==================  ==================
 Set-up                                                  thrust / BEM        power / BEM
@@ -116,18 +121,35 @@ line with FLLC, 10 m cells, kernel 2 cells               1.045               1.1
 ======================================================  ==================  ==================
 
 - **Disk or line.** The corrected disk is the default and matches BEM on
-  every grid tried; use it for farms and ABL studies. The actuator line needs
+  every grid tried; use it for farms and RANS or ABL studies. The actuator
+  line, with the FLLC, is the choice for LES that resolves the blades; it needs
   cells of a few metres at the rotor.
+- **The corrected disk's update.** The recovered free stream is updated each
+  step from the last one, through the induction the thrust implies. Above a
+  thrust coefficient of about 0.75 that update overshoots and grows step by
+  step; and the flow answers a change of thrust only after a delay, which can
+  make the update ring at a period of seconds. By default it is therefore
+  under-relaxed by a factor taken from its own loop gain, and limited so that
+  an error decays on the time scale of the rotor radius over the free stream
+  (``correction_relax = -1``, ``correction_time = -1``); the relaxation changes
+  how the free stream is reached, not where it settles, at the cost of a
+  start-up of tens of seconds instead of a few steps. ``correction_relax = 1`` gives the unrelaxed update
+  for comparison. The theory chapter has the derivation.
 - **Kernel width.** For the corrected disk keep the filter width
   :math:`\sqrt{6}\,\epsilon` within 1.25 rotor radii (a 1.5-cell kernel on
   40 m cells for a 120 m rotor); the start-up log warns otherwise. For the
   line the kernel is an absolute length set by the blade, about 2 m for the
-  IEA 15 MW, not a cell count: two 2.5 m cells over-predicted power by 44 %.
+  IEA 15 MW, not a cell count: a kernel of two 2.5 m cells (5 m)
+  over-predicted power by 44 %. With the FLLC the kernel may be narrower than a
+  cell: the spreading still puts exactly the force into the flow, but below
+  about 0.75 cells the kernel's shape depends on where the point sits in its
+  cell (see the theory chapter).
 - **FLLC** is on by default for the line (``fllc = false`` switches it off)
   and is the generalized variable-chord form.
 - **Grids.** The rotor should span at least 8 cells (the audit notes fewer).
-  On a run with refinement the bodies live on the anchor level, the finest
-  by default, whose grids must cover every node with the kernel's reach.
+  On a run with refinement the bodies live on the anchor level
+  (``amr.max_level`` by default), whose grids must cover every node with the
+  kernel's reach, and no finer level may cover them.
 - **Boundary conditions.** Inflow at ``xlo`` and outflow at ``xhi`` with a
   sounding or a precursor profile; a periodic box lets the wake feed the
   inflow. No sponge layer around a single turbine. CFL at or below 0.5.
@@ -137,34 +159,62 @@ line with FLLC, 10 m cells, kernel 2 cells               1.045               1.1
 Outputs
 -------
 
-Per turbine, under ``output_root``:
+Per turbine, under ``output_root``, every ``diagnostics_int`` steps:
 
-- ``<root>_erf.csv``: rotor speed, thrust along the shaft and along x,
-  torque, power, tower and nacelle forces, total load, every step.
+- ``<root>_erf.csv``: rotor speed (signed like the torque about the shaft),
+  thrust vector, torque, power, hub axis, tower and nacelle forces and total
+  load.
 - ``<root>_flow.csv``: the velocities handed to OpenFAST at the hub and the
-  blade mean.
+  blade mean, after the sampling correction and the FLLC.
 - ``<root>_correction.csv`` (``disk_corrected``): disk velocity, inferred
-  thrust coefficient, correction factor and recovered free stream.
+  thrust coefficients, induction, correction factor, recovered free stream,
+  the update's loop gain and the relaxation used.
 - ``<root>_fllc.csv`` (line with FLLC): the correction's magnitude.
-- ``<root>_wake_avg.csv`` (``erf.moving_bodies.wake.*``): running-averaged
-  velocity along lateral and vertical lines downstream.
-- ``<root>_stats.csv``: running statistics from ``avg_start`` on.
+- ``<root>_wake.csv`` and ``<root>_wake_avg.csv`` (``erf.moving_bodies.wake.*``):
+  instantaneous and running-averaged velocity along lateral and vertical lines
+  downstream.
+- ``<root>_stats.csv``: running statistics from ``avg_start`` on, rewritten
+  whole at each write.
 - ``<diagnostics_dir>/total_load.csv``, ``momentum_source.csv``,
   ``ground.csv``: farm totals, the integrated source (equal to minus the
-  thrust), the terrain height under each body.
+  loads), the terrain height under each body.
 
-OpenFAST writes its own ``.out`` and summary files next to the ``.fst``.
+The rows of ``_erf.csv``, ``_flow.csv`` and ``total_load.csv`` carry the time
+at the end of their step; the others carry the time at the start of the step
+whose forcing they describe. The full list, with the prescribed-Ct disk's
+file, is under the input table in :doc:`Inputs <Inputs>`. OpenFAST writes its
+own ``.out`` and summary files next to the ``.fst``.
+
+Restarting
+----------
+
 Checkpoints hold the OpenFAST state and every running quantity, so a restart
-continues bit for bit.
+continues bit for bit. It must continue the same bodies with the same inputs,
+the same ``erf.fixed_dt`` and a stop time no later than the one the turbines
+were started with (OpenFAST keeps that stop time in its own checkpoint); the
+run aborts otherwise, naming the input. The diagnostics files drop any rows
+written after the checkpoint (by a run that went on past it) and continue from
+there. To run on past the first run's stop time, start the turbines again:
+remove the ``moving_bodies`` directory from a copy of the checkpoint and restart
+from that copy, which starts OpenFAST afresh at the checkpoint's time (and also
+starts the wake averages, the statistics and the FLLC afresh). A run with
+prescribed-Ct disks only may simply restart with a later stop time. A run started from a precursor checkpoint written
+without bodies starts the turbines at the checkpoint's time; a run that stops
+at ``stop_datetime`` hands OpenFAST the seconds to the stop date.
 
 Tests
 -----
 
 .. code-block:: bash
 
-   ctest -L moving-bodies            # the canonical cases (stub or real OpenFAST)
-   ctest -L restart-parity -R OpenFAST
+   ctest -L moving-bodies            # the canonical cases and the start-up aborts
+   ctest -L restart-parity -R "OpenFAST|MovingBodies"
+   ctest -L box-parity -R "OpenFAST|Actuator"
    Tests/Unit/erf_unit_tests --gtest_filter='OpenFAST*:Actuator*:FLLC*:WakeLines*:RunningStats*:PrescribedCtDisk.*:MovingBodiesInputs.*'
+
+The CTests run on the stub library only (``-DERF_OPENFAST_USE_STUB=ON``);
+their golds hold the stub's loads. With a real OpenFAST the same decks run, but
+the loads, and so the golds, differ.
 
 Known limits
 ------------

@@ -1,9 +1,20 @@
-// Contract of erf_actuator::sample_velocity: each velocity component is interpolated from its
-// own staggered grid, linearly in the physical height, so a field linear in x, y and physical
-// z is reproduced exactly on a uniform-dz mesh, on a stretched mesh (z_phys_nd with equal
-// columns) and on a terrain-following mesh (z_phys_nd varying with x and y), at points inside
-// the cells, on faces, near the ground and near the top; and every point is found by exactly
-// one box, however the domain is split.
+// Contract of the actuator sampler (Core/ERF_ActuatorSampling).
+//
+// - sample_velocity: each velocity component is interpolated from its own staggered grid,
+//   linearly in the physical height, so a field linear in x, y and physical z is reproduced
+//   exactly on a uniform-dz mesh, on a stretched mesh (z_phys_nd with equal columns) and on a
+//   terrain-following mesh (z_phys_nd varying with x and y), at points inside the cells, on faces,
+//   near the ground and near the top; every point is found by exactly one box, however the
+//   domain is split, in z too; a point outside the domain aborts, naming it.
+//   A point on the domain's upper x or y face belongs to the last cell; in a periodic direction a
+//   point beyond the domain is sampled where its image lies inside (sample_velocity, sample_cell_scalar
+//   and terrain_heights alike).
+// - points_covered_by: the reach counts, and wraps across a periodic seam; on a terrain or stretched mesh
+//   (CoverZ::Footprint) the boxes' footprints must hold the reach across, at any height, and for the
+//   spreading (CoverZ::Column) the grids must hold it in every cell the heights within reach may lie in
+//   (from mesh_z_bounds, exact on a flat uniform mesh), or over the whole height without the bounds.
+// - wrap_periodic: a point a few ulps below a non-zero prob_lo lands on prob_lo, not on prob_hi.
+// - terrain_heights: the bilinear k = 0 node surface.
 
 #include <algorithm>
 #include <array>
@@ -23,6 +34,7 @@
 #include <gtest/gtest.h>
 
 #include "ERF_ActuatorSampling.H"
+#include "ERF_GTestThrowOnAbort.H"
 
 namespace {
 
@@ -36,7 +48,7 @@ struct LinearField {
     static Real eval (const std::array<Real,4>& c, Real x, Real y, Real z) { return c[0] + c[1]*x + c[2]*y + c[3]*z; }
 };
 
-// BTF-style terrain-following heights: z(x,y,eta) = h(x,y) + (H - h(x,y)) * eta, with eta the
+// basic terrain-following (BTF) heights: z(x,y,eta) = h(x,y) + (H - h(x,y)) * eta, with eta the
 // stretched nominal level fraction; h = 0 gives a flat stretched mesh
 struct MeshSpec {
     int nx = 12, ny = 10, nz = 8;
@@ -197,7 +209,7 @@ TEST(ActuatorSampling, IndependentOfBoxDecomposition)
 {
     MeshSpec m;
     m.hill = 60.0;
-    m.max_grid = {{4, 5, 1024}};     // 3 x 2 uneven boxes, never split in z
+    m.max_grid = {{4, 5, 1024}};     // 3 x 2 boxes of 4 x 5 cells, never split in z
     Fields f(m, false);
     std::vector<Real> pos = test_points(m);
     // points exactly on the box faces x = 4 dx and y = 5 dy
@@ -206,9 +218,22 @@ TEST(ActuatorSampling, IndependentOfBoxDecomposition)
     add(4 * m.dx(), Real(0.31) * m.Ly, Real(0.3) * m.H);
     add(Real(0.73) * m.Lx, 5 * m.dy(), Real(0.7) * m.H);
     f.check(pos, tol);
+    // split in z as well (boxes of 3, 3 and 2 cells: a fine level stopping below the top is the lowest of
+    // them): each box searches only its own column and first ghost layer, and the points on and near the
+    // boxes' z faces sample as in one whole column
+    MeshSpec mz = m;
+    mz.max_grid = {{4, 5, 3}};
+    Fields fz(mz, false);
+    for (int k : {3, 6}) {
+        const Real zf = mz.z_node(5, 5, k);
+        add(5.5 * mz.dx(), 5.5 * mz.dy(), zf);
+        add(5.5 * mz.dx(), 5.5 * mz.dy(), zf - Real(0.01) * mz.H);
+        add(5.5 * mz.dx(), 5.5 * mz.dy(), zf + Real(0.01) * mz.H);
+    }
+    fz.check(pos, tol);
 }
 
-TEST(ActuatorSampling, EmptyPointListIsAllowed)
+TEST(ActuatorSampling, AnEmptyPointListGivesNoVelocities)
 {
     MeshSpec m;
     Fields f(m, true);
@@ -252,6 +277,211 @@ TEST(ActuatorSampling, CoverageByALevelIncludesTheReach)
     EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {}, 100.0, outside));
 }
 
+// Whether the grids cover a point does not depend on how the level is cut into boxes: the same region as one
+// box and as unequal, non-mirror boxes (at most 7 x 5 x 3 cells) gives the same answer for every point of a sweep
+// across its edges and seams, every reach and every z rule
+TEST(ActuatorSampling, CoverageIsIndependentOfTheBoxDecomposition)
+{
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    const amrex::Box region(amrex::IntVect(10, 6, 0), amrex::IntVect(29, 17, 8));
+    const amrex::BoxArray one(region);
+    amrex::BoxArray cut(region);
+    cut.maxSize(amrex::IntVect(7, 5, 3));
+    ASSERT_GT(cut.size(), 20);
+    int points = 0, covered = 0;
+    for (const auto z : {erf_actuator::CoverZ::Reach, erf_actuator::CoverZ::Footprint, erf_actuator::CoverZ::Column}) {
+        for (const amrex::Real reach : {amrex::Real(0.0), amrex::Real(60.0), amrex::Real(130.0)}) {
+            for (amrex::Real x = 380.0; x < 1650.0; x += 37.0) {
+                for (amrex::Real y = 190.0; y < 1010.0; y += 41.0) {
+                    for (amrex::Real h = 5.0; h < 560.0; h += 53.0) {
+                        std::string a, b;
+                        const bool ca = erf_actuator::points_covered_by(one, geom, {x, y, h}, reach, a, z);
+                        const bool cb = erf_actuator::points_covered_by(cut, geom, {x, y, h}, reach, b, z);
+                        ASSERT_EQ(ca, cb) << "(" << x << ", " << y << ", " << h << ") reach " << reach << " rule " << static_cast<int>(z);
+                        EXPECT_EQ(a, b);
+                        ++points;
+                        if (ca) { ++covered; }
+                    }
+                }
+            }
+        }
+    }
+    // the sweep holds points on both sides of the answer
+    EXPECT_GT(covered, points / 10);
+    EXPECT_LT(covered, points - points / 10);
+}
+
+// In a periodic direction the cells a point needs wrap across the seam: a level that covers part
+// of the periodic extent must also hold the cells on the far side of the seam
+TEST(ActuatorSampling, CoverageWrapsAcrossAPeriodicSeam)
+{
+    // 3000 m in x on 50 m cells (60 cells), periodic in x and y
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    std::string outside;
+    // the level holds the first half in x: a point 25 m from the seam with a 100 m reach needs the
+    // cells 58 and 59 across it, which the level does not hold
+    const amrex::BoxArray half(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(29, 23, 11)));
+    EXPECT_FALSE(erf_actuator::points_covered_by(half, geom, {25.0, 600.0, 150.0}, 100.0, outside));
+    EXPECT_NE(outside.find("25"), std::string::npos) << outside;
+    // the same point well inside the half: covered
+    EXPECT_TRUE(erf_actuator::points_covered_by(half, geom, {750.0, 600.0, 150.0}, 100.0, outside));
+    // a level holding both sides of the seam covers the point, from either side
+    amrex::BoxList bl;
+    bl.push_back(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(9, 23, 11)));
+    bl.push_back(amrex::Box(amrex::IntVect(50, 0, 0), amrex::IntVect(59, 23, 11)));
+    const amrex::BoxArray seam(bl);
+    EXPECT_TRUE(erf_actuator::points_covered_by(seam, geom, {25.0, 600.0, 150.0}, 100.0, outside));
+    EXPECT_TRUE(erf_actuator::points_covered_by(seam, geom, {2975.0, 600.0, 150.0}, 100.0, outside));
+    // a reach wider than the period needs the whole periodic extent
+    EXPECT_FALSE(erf_actuator::points_covered_by(seam, geom, {25.0, 600.0, 150.0}, 4000.0, outside));
+    // the wrap is in y too, and a non-periodic z is clamped to the domain
+    const amrex::BoxArray low_y(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 11, 11)));
+    EXPECT_FALSE(erf_actuator::points_covered_by(low_y, geom, {750.0, 25.0, 10.0}, 100.0, outside));
+    EXPECT_TRUE(erf_actuator::points_covered_by(amrex::BoxArray(domain), geom, {750.0, 600.0, 10.0}, 100.0, outside));
+}
+
+// On a terrain-following or stretched mesh a point's k is not its height over dz: for the sampler a level
+// whose grids stand over the point's column, at any height, covers it, and one beside it does not; for the
+// spreading the grids must cover the whole height
+TEST(ActuatorSampling, CoverageWithoutTheZCheckNeedsTheFootprints)
+{
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    // two stacked boxes over x in [500, 1500), the upper one not reaching the ground, and one beside them
+    amrex::BoxList bl;
+    bl.push_back(amrex::Box(amrex::IntVect(10, 6, 0), amrex::IntVect(29, 17, 3)));
+    bl.push_back(amrex::Box(amrex::IntVect(10, 6, 4), amrex::IntVect(29, 17, 8)));
+    const amrex::BoxArray ba(bl);
+    std::string outside;
+    // 500 m up, above the level's top (450 m) by its nominal cells: refused with the z check, not without it
+    using erf_actuator::CoverZ;
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 500.0}, 100.0, outside));
+    EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 500.0}, 100.0, outside, CoverZ::Footprint));
+    // across, the reach still counts
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 500.0}, 300.0, outside, CoverZ::Footprint));
+    // a box raised off the ground over the column covers it too
+    const amrex::BoxArray raised(amrex::Box(amrex::IntVect(10, 6, 5), amrex::IntVect(29, 17, 8)));
+    EXPECT_TRUE(erf_actuator::points_covered_by(raised, geom, {750.0, 600.0, 50.0}, 100.0, outside, CoverZ::Footprint));
+    EXPECT_FALSE(erf_actuator::points_covered_by(raised, geom, {1750.0, 600.0, 50.0}, 100.0, outside, CoverZ::Footprint));
+    // for the spreading neither covers it: the stacked boxes stop at 450 m, the raised one starts at 250 m
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 100.0}, 100.0, outside, CoverZ::Column));
+    EXPECT_FALSE(erf_actuator::points_covered_by(raised, geom, {750.0, 600.0, 300.0}, 100.0, outside, CoverZ::Column));
+    // two boxes stacked over the whole height do
+    amrex::BoxList full;
+    full.push_back(amrex::Box(amrex::IntVect(10, 6, 0), amrex::IntVect(29, 17, 5)));
+    full.push_back(amrex::Box(amrex::IntVect(10, 6, 6), amrex::IntVect(29, 17, 11)));
+    EXPECT_TRUE(erf_actuator::points_covered_by(amrex::BoxArray(full), geom, {750.0, 600.0, 100.0}, 100.0, outside, CoverZ::Column));
+    // with the mesh's bounds: on this flat 50 m mesh the cells within reach of 300 m (k 4..8) are on the stacked
+    // boxes (to k 8), as with the reach in z, and those of 400 m (k 6..10) are not; with ground from 0 to 200 m and
+    // levels 30 to 50 m apart the heights within reach of 300 m may lie in any of k 0..11, above the boxes' top
+    erf_actuator::ZBounds flat;
+    flat.ground_lo = 0.0; flat.ground_hi = 0.0; flat.dz_lo = 50.0; flat.dz_hi = 50.0;
+    EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 300.0}, 100.0, outside, CoverZ::Column, &flat));
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 400.0}, 100.0, outside, CoverZ::Column, &flat));
+    erf_actuator::ZBounds hilly;
+    hilly.ground_lo = 0.0; hilly.ground_hi = 200.0; hilly.dz_lo = 30.0; hilly.dz_hi = 50.0;
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 300.0}, 100.0, outside, CoverZ::Column, &hilly));
+}
+
+// mesh_z_bounds: the lowest and highest ground and the smallest and largest level spacing of a
+// terrain-following mesh z = h + (H - h) k / nz over a ramp h = 4 i (m), found across boxes
+TEST(ActuatorSampling, TheMeshsZBoundsAreItsGroundAndSpacingExtremes)
+{
+    const int nx = 8, nz = 10;
+    const Real H = 500.0;
+    const amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(nx - 1, 3, nz - 1));
+    const amrex::RealBox rb({0.0, 0.0, 0.0}, {800.0, 400.0, 500.0});
+    const amrex::Geometry geom(domain, rb, 0, {0, 0, 0});
+    amrex::BoxArray ba(domain);
+    ba.maxSize(4);
+    const amrex::DistributionMapping dm(ba);
+    amrex::MultiFab znd(amrex::convert(ba, amrex::IntVect(1, 1, 1)), dm, 1, 0);
+    for (amrex::MFIter mfi(znd, false); mfi.isValid(); ++mfi) {
+        auto z = znd.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const Real h = Real(4.0) * Real(i);
+            z(i,j,k) = h + (H - h) * Real(k) / Real(nz);
+            (void) j;
+        });
+    }
+    const erf_actuator::ZBounds b = erf_actuator::mesh_z_bounds(znd, geom);
+    EXPECT_NEAR(b.ground_lo, 0.0, 1.0e-4);
+    EXPECT_NEAR(b.ground_hi, 4.0 * nx, 1.0e-4);
+    EXPECT_NEAR(b.dz_lo, (H - Real(4.0 * nx)) / nz, 1.0e-3);
+    EXPECT_NEAR(b.dz_hi, H / nz, 1.0e-3);
+}
+
+// A point a few ulps below a non-zero prob_lo wraps to lo + (len - tiny), which rounds onto prob_hi, owned by
+// no box: it lands on prob_lo instead
+TEST(ActuatorSampling, AWrappedPointNeverLandsOnTheUpperFace)
+{
+    const Real lo = Real(-177.507), hi = Real(8056.149);
+    const amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(63, 7, 7));
+    const amrex::RealBox rb({lo, 0.0, 0.0}, {hi, 800.0, 800.0});
+    const amrex::Geometry geom(domain, rb, 0, {1, 0, 0});
+    const Real below = std::nextafter(static_cast<Real>(lo), static_cast<Real>(-1.0e30));
+    const std::vector<Real> p = erf_actuator::wrap_periodic({below, 400.0, 400.0}, geom);
+    EXPECT_LT(p[0], static_cast<Real>(geom.ProbHi(0))) << "wrapped onto the upper face";
+    EXPECT_GE(p[0], static_cast<Real>(geom.ProbLo(0)));
+    // every point a few ulps either side of the seam stays inside [lo, hi)
+    Real x = static_cast<Real>(lo);
+    for (int n = 0; n < 8; ++n) { x = std::nextafter(x, static_cast<Real>(-1.0e30)); }
+    for (int n = 0; n < 16; ++n, x = std::nextafter(x, static_cast<Real>(1.0e30))) {
+        const Real w = erf_actuator::wrap_periodic({x, 400.0, 400.0}, geom)[0];
+        EXPECT_TRUE(w >= static_cast<Real>(geom.ProbLo(0)) && w < static_cast<Real>(geom.ProbHi(0))) << n << " " << w;
+    }
+}
+
+// A point outside the domain is found by no box: the sampler aborts and names it
+TEST(ActuatorSampling, TheUpperFaceIsTheLastCellAndPeriodicPointsTheirImage)
+{
+    MeshSpec m;
+    m.stretch = 1.0;
+    m.max_grid = {{5, 4, 1024}};
+    Fields f(m, true);
+    // on the domain's upper x and y faces (an end of a line placed on the boundary)
+    f.check({m.Lx, Real(0.37) * m.Ly, Real(0.5) * m.H, Real(0.41) * m.Lx, m.Ly, Real(0.5) * m.H, m.Lx, m.Ly, Real(0.25) * m.H}, tol);
+    {
+        // 1000 m on 88 cells: prob_hi / dx rounds one ulp above 88 in double, as 5000 m on 96 cells does in float
+        MeshSpec m88 = m;
+        m88.Lx = (sizeof(Real) == 8) ? 1000.0 : 5000.0;
+        m88.nx = (sizeof(Real) == 8) ? 88 : 96;
+        Fields f88(m88, true);
+        f88.check({m88.Lx, Real(0.37) * m88.Ly, Real(0.5) * m88.H}, tol);
+    }
+    // periodic in x: a point a third of a cell past either seam takes its image's value
+    const std::array<int,3> periodic{{1, 0, 0}};
+    const amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)}, {AMREX_D_DECL(m.Lx, m.Ly, m.H)});
+    f.geom = amrex::Geometry(f.geom.Domain(), &rb, 0, periodic.data());
+    const Real past = m.dx() / 3.0;
+    const std::vector<Real> outside{m.Lx + past, Real(0.37) * m.Ly, Real(0.5) * m.H, -past, Real(0.61) * m.Ly, Real(0.25) * m.H};
+    const std::vector<Real> image{past, Real(0.37) * m.Ly, Real(0.5) * m.H, m.Lx - past, Real(0.61) * m.Ly, Real(0.25) * m.H};
+    std::vector<Real> vel, ref;
+    erf_actuator::sample_velocity(f.u, f.v, f.w, nullptr, f.geom, outside, vel);
+    erf_actuator::sample_velocity(f.u, f.v, f.w, nullptr, f.geom, image, ref);
+    ASSERT_EQ(vel.size(), ref.size());
+    for (std::size_t i = 0; i < vel.size(); ++i) { EXPECT_NEAR(vel[i], ref[i], tol * std::max(Real(1.0), std::abs(ref[i]))) << i; }
+    const auto wrapped = erf_actuator::wrap_periodic(outside, f.geom);
+    for (std::size_t i = 0; i < image.size(); ++i) { EXPECT_NEAR(wrapped[i], image[i], 1.0e-4 * m.Lx) << i; }
+}
+
+TEST(ActuatorSampling, APointOutsideTheDomainIsRefusedNamingIt)
+{
+    MeshSpec m;
+    Fields f(m, true);
+    std::vector<Real> vel;
+    const std::string msg = erf_gtest::abort_message([&] {
+        erf_actuator::sample_velocity(f.u, f.v, f.w, nullptr, f.geom, {Real(5000.0), Real(500.0), Real(100.0)}, vel);
+    });
+    EXPECT_NE(msg.find("5000"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("sampled by 0 boxes"), std::string::npos) << msg;
+}
+
 // The terrain surface under a point: the k = 0 node plane of z_phys_nd, bilinear between the four
 // nodes around (x, y); prob_lo z on a uniform-dz mesh
 TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
@@ -275,7 +505,9 @@ TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
     std::vector<Real> h;
     erf_actuator::terrain_heights(f.znd.get(), f.geom, pos, h);
     ASSERT_EQ(h.size(), expect.size());
-    for (std::size_t p = 0; p < h.size(); ++p) { EXPECT_NEAR(h[p], expect[p], 1.0e-9) << "point " << p; }
+    // heights up to 80 m: 1e-9 m in double, a few float spacings (8e-6 m at 80 m) in single precision
+    const Real htol = (sizeof(Real) == 8) ? Real(1.0e-9) : Real(5.0e-5);
+    for (std::size_t p = 0; p < h.size(); ++p) { EXPECT_NEAR(h[p], expect[p], htol) << "point " << p; }
     EXPECT_GT(*std::max_element(h.begin(), h.end()), 40.0);   // the hill is really there
     // a uniform-dz mesh: the domain floor everywhere
     Fields flat(m, true);
@@ -284,4 +516,28 @@ TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
     // no points: nothing to do
     erf_actuator::terrain_heights(f.znd.get(), f.geom, {}, h);
     EXPECT_TRUE(h.empty());
+}
+
+// On a slope the ground under a point (bilinear between the four nodes of its cell) lies below the
+// cell's bottom face (their mean) on one side: a point just above the ground there is sampled from
+// the bottom cell, by the column's extrapolation, still exactly for a linear field, on any split
+TEST(ActuatorSampling, APointJustAboveSlopingGroundIsSampled)
+{
+    MeshSpec m; m.stretch = 1.1; m.hill = 120.0; m.max_grid = {{4, 5, 1024}};
+    Fields f(m, false);
+    std::vector<Real> xy;
+    for (int i = 0; i < 40; ++i) { for (int j = 0; j < 30; ++j) { xy.insert(xy.end(), {Real((i + 0.37) * m.Lx / 40), Real((j + 0.61) * m.Ly / 30), Real(0.0)}); } }
+    std::vector<Real> h;
+    erf_actuator::terrain_heights(f.znd.get(), f.geom, xy, h);
+    std::vector<Real> pos;
+    int below_face = 0;
+    for (std::size_t p = 0; p < h.size(); ++p) {
+        const Real x = xy[3*p], y = xy[3*p+1];
+        pos.insert(pos.end(), {x, y, h[p] + Real(0.5)});
+        const int i = static_cast<int>(std::floor(x / m.dx())), j = static_cast<int>(std::floor(y / m.dy()));
+        const Real face = 0.25 * (m.z_node(i, j, 0) + m.z_node(i+1, j, 0) + m.z_node(i, j+1, 0) + m.z_node(i+1, j+1, 0));
+        if (h[p] + 0.5 < face) { ++below_face; }
+    }
+    EXPECT_GT(below_face, 50) << "the slope must put points below their cell's bottom face";
+    f.check(pos, tol);
 }

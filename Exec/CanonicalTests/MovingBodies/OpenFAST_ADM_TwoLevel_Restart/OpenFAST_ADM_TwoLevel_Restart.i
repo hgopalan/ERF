@@ -45,6 +45,8 @@ erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
 # an IEA-15-MW-sized stub rotor on level 1 (the default anchor), its loads on the flow as a disk
+# The default sampling (disk_corrected) recovers the free stream; with epsilon = 2 cells of 25 m its
+# filter width is about 1 rotor radius, inside the range the factor was fitted for.
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm

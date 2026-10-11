@@ -1,10 +1,10 @@
-# The OpenFAST_ADM_Uniform case on two levels: the 50 m level 0 and a level 1 of 25 m cells over a
-# box around the rotor and its near wake (x 500..1500, y 300..900, z 0..450 m). The turbine lives
-# on the finest level (the default anchor): its nodes are sampled there, its momentum sources are
-# spread there with epsilon = 2 fine cells, and OpenFAST is stepped with the fine level's step
-# (0.25 s, 25 OpenFAST steps); level 0 sees the rotor through the average-down of the state.
-# The integrated momentum source must equal minus the thrust in every row; the two-level plotfile
-# and the sampled flow log are the golds.
+# The OpenFAST_ADM_Uniform case, with the default sampling (disk_corrected), on two levels: the 50 m
+# level 0 and a level 1 of 25 m cells over a box around the rotor and its near wake (x 500..1500, y
+# 300..900, z 0..450 m). The turbine lives on the finest level (the default anchor): its nodes are
+# sampled there, its momentum sources are spread there with epsilon = 2 fine cells, and OpenFAST is
+# stepped with the fine level's step (0.25 s, 25 OpenFAST steps); level 0 sees the rotor through the
+# average-down of the state. The integrated momentum source must equal minus the thrust in every
+# row; the two-level plotfile and the sampled flow log are the golds.
 
 max_step = 10
 stop_time = 5.0
@@ -47,6 +47,8 @@ erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
 # an IEA-15-MW-sized stub rotor on level 1 (the default anchor), its loads on the flow as a disk
+# The default sampling (disk_corrected) recovers the free stream; with epsilon = 2 cells of 25 m its
+# filter width is about 1 rotor radius, inside the range the factor was fitted for.
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm

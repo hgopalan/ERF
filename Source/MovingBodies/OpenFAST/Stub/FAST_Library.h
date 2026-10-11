@@ -14,6 +14,9 @@
 #else
 #define EXTERNAL_ROUTINE extern
 #endif
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
 
 EXTERNAL_ROUTINE void FAST_AllocateTurbines(int * iTurb, int *ErrStat, char *ErrMsg);
 EXTERNAL_ROUTINE void FAST_DeallocateTurbines(int *ErrStat, char *ErrMsg);
@@ -34,6 +37,7 @@ EXTERNAL_ROUTINE void FAST_CFD_Step(int * iTurb, int *ErrStat, char *ErrMsg);
 EXTERNAL_ROUTINE void FAST_HubPosition(int * iTurb, float * absolute_position, float * rotation_veocity, double * orientation_dcm, int *ErrStat, char *ErrMsg);
 
 EXTERNAL_ROUTINE void FAST_CreateCheckpoint(int * iTurb, const char *CheckpointRootName, int *ErrStat, char *ErrMsg);
+EXTERNAL_ROUTINE void FAST_End(int * iTurb, bool * stopThisProgram);
 
 // keep these synced with FAST_Library.f90
 #define INTERFACE_STRING_LENGTH 1025

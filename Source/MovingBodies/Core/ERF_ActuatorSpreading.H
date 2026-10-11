@@ -1,6 +1,8 @@
 #ifndef ERF_ACTUATOR_SPREADING_H
 #define ERF_ACTUATOR_SPREADING_H
 
+/** Spreading of point forces onto the face-centred momentum sources with a normalised Gaussian kernel, and the integral check. */
+
 #include <vector>
 
 #include <AMReX_Geometry.H>
@@ -22,15 +24,19 @@ namespace erf_actuator {
  *
  * Every rank accumulates the faces its boxes own (each physical face once, however the boxes
  * share their boundary faces) and the normalisations are summed across ranks, so the result
- * does not depend on the domain decomposition; distances take the minimum image in periodic
- * directions, so a kernel wraps across a periodic boundary. The sources are set (not added
- * to) on every valid face, both copies of a shared face alike; the faces on a non-periodic
- * domain boundary get no source.
+ * does not depend on the domain decomposition. Every periodic image of a point within
+ * 3 epsilon of the domain (in x and y; z is not imaged) adds its kernel, so a kernel wraps across
+ * a periodic boundary, and overlaps itself when the period is under 6 epsilon. The sources are
+ * set (not added to) on every valid face, both copies of a shared face alike; the faces on a
+ * non-periodic domain boundary get no source.
  *
- * @param[in] pos 3*n point coordinates (m)
- * @param[in] force 3*n forces on the fluid (N)
- * @param[in] epsilon kernel width (m)
- * @param[in] z_phys_nd nodal heights, or nullptr on a uniform-dz mesh
+ * Aborts when a position or force is not finite. z_phys_nd and detJ_cc must share the boxes and
+ * distribution of src_x; src_x, src_y and src_z are face-centred in x, y and z.
+ *
+ * @param[in] pos 3*n point coordinates (m, ERF domain coordinates)
+ * @param[in] force 3*n forces ON the fluid BY the body (N, ERF frame): minus the fluid's force on the body
+ * @param[in] epsilon kernel width (m, > 0)
+ * @param[in] z_phys_nd nodal heights (m), or nullptr on a uniform-dz mesh
  * @param[in] detJ_cc cell Jacobians (1 ghost cell), or nullptr on a uniform-dz mesh
  * @param[in] geom the level's geometry
  * @param[out] src_x,src_y,src_z face-centred momentum sources (N/m^3), one component each
@@ -45,7 +51,11 @@ void spread_forces (const std::vector<amrex::Real>& pos,
                     amrex::MultiFab& src_y,
                     amrex::MultiFab& src_z);
 
-/** Integral of a face-centred source over the mesh, sum of src dV (the total force, N). */
+/**
+ * Return the integral of a face-centred source over the mesh, sum of src dV (the total force, N).
+ *
+ * @param dir 0, 1 or 2: src holds the x-, y- or z-face component
+ */
 amrex::Real integrate_source (int dir,
                               const amrex::MultiFab& src,
                               const amrex::MultiFab* detJ_cc,

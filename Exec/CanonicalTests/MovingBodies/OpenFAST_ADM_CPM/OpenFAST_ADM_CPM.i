@@ -48,8 +48,13 @@ erf.sum_interval = -1
 erf.check_int    = -1
 erf.plot_file_1  = plt
 erf.plot_int_1   = 10
-erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
+# theta is left out: the perturbations draw from the C library's rand(), whose sequence differs between
+# Linux and macOS even with erf.fix_random_seed, so theta cannot match one gold on both
+erf.plot_vars_1  = density x_velocity y_velocity z_velocity
 
+# The default sampling (disk_corrected) recovers the free stream; with epsilon = 2 cells of 50 m its
+# filter width is about 2 rotor radii, past the 1.25 the factor was fitted for (the start-up log
+# warns). That is fine for a regression of this feature; the calibrated set-up is OpenFAST_ADM_DiskCorrected.
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm

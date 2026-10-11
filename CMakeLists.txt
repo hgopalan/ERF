@@ -637,6 +637,8 @@ if(ERF_ENABLE_OPENFAST)
     message(STATUS "Found OpenFAST: ${OpenFAST_INCLUDE_DIRS}")
     # ERF uses the OpenFAST 5 external-inflow API only (FAST_ExtInfw_*, unchanged since 4.0); version 3 named it
     # FAST_OpFM_* and is not supported
+    # Look again on every configure, so a changed OpenFAST_DIR never keeps the old header
+    unset(ERF_OPENFAST_C_HEADER CACHE)
     find_file(ERF_OPENFAST_C_HEADER FAST_Library.h
       PATHS ${OpenFAST_INCLUDE_DIRS} ${OpenFAST_INCLUDE_DIRS}/openfast
       NO_DEFAULT_PATH)

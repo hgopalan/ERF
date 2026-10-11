@@ -91,9 +91,14 @@ std::vector<Real>
 upstream_sampling_positions (const erf_openfast::TurbineState& t, Real diameters)
 {
     const Real shift = diameters * Real(2.0) * tip_radius(t);
+    Real ah[2] = {t.hub_axis[0], t.hub_axis[1]};
+    const Real la = std::sqrt(ah[0] * ah[0] + ah[1] * ah[1]);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(la > Real(1.0e-6), "upstream_sampling_positions: the shaft axis must not be vertical");
+    ah[0] /= la; ah[1] /= la;
     std::vector<Real> pos(t.vel_pos);
     for (std::size_t n = 0; n + 2 < pos.size(); n += 3) {
-        for (int d = 0; d < 3; ++d) { pos[n+d] -= shift * t.hub_axis[d]; }
+        pos[n]   -= shift * ah[0];
+        pos[n+1] -= shift * ah[1];
     }
     return pos;
 }
@@ -121,26 +126,67 @@ filtered_disk_correction (Real u_disk, Real thrust, Real u_inf_prev, Real rho, R
     c.a = Real(0.5) * (Real(1.0) - std::sqrt(Real(1.0) - c.ct));
     c.ct_prime = Real(4.0) * c.a / (Real(1.0) - c.a);
     c.M = filtered_disk_factor(c.ct_prime, filter_width_from_eps(eps) / tip_radius);
+    c.clamped = (thrust / (Real(0.5) * rho * area * u_inf_prev * u_inf_prev) >= Real(0.96));
     c.u_inf = c.M * u_disk / (Real(1.0) - c.a);
     c.factor = c.u_inf / u_disk;
+    c.gain = disk_correction_gain(c.a, filter_width_from_eps(eps) / tip_radius);
     return c;
+}
+
+Real
+disk_correction_gain (Real a, Real delta_over_R)
+{
+    const Real delta = delta_over_R / std::sqrt(Real(3.0) * pi);
+    // a <= 0.4 under the Ct clamp, so 1 - 2a >= 0.2 and the denominator stays positive
+    return -Real(2.0) * a * (Real(1.0) - a) * (Real(1.0) - delta) /
+           ((Real(1.0) - Real(2.0) * a) * (Real(1.0) - a + delta * a));
+}
+
+Real
+disk_correction_relax (Real gain)
+{
+    return std::min(Real(1.0), std::max(Real(0.2), Real(1.0) / (Real(1.0) - std::min(gain, Real(0.0)))));
+}
+
+Real
+disk_correction_relax (Real gain, Real dt, Real tau)
+{
+    // with omega <= dt / (tau (1 - G)) an error decays as exp(-t / tau) however large the gain
+    const Real w = disk_correction_relax(gain);
+    return (tau > Real(0.0)) ? std::min(w, dt / (tau * (Real(1.0) - std::min(gain, Real(0.0))))) : w;
 }
 
 Real
 disk_axial_velocity (const erf_openfast::TurbineState& t, const std::vector<Real>& uvw)
 {
     const auto& n = t.hub_axis;
-    const int nb = t.num_blades * t.num_blade_elem;   // velocity nodes 1 .. nb are the blades
-    Real wsum = 0.0, usum = 0.0;
-    for (int nd = 1; nd <= nb && 3*nd+2 < static_cast<int>(uvw.size()) && 3*nd+2 < static_cast<int>(t.vel_pos.size()); ++nd) {
+    const int ne = t.num_blade_elem;                  // velocity nodes per blade, root to tip
+    const int nb = t.num_blades * ne;                 // velocity nodes 1 .. nb are the blades
+    const int nmax = static_cast<int>(std::min(uvw.size(), t.vel_pos.size()) / 3);
+    if (nb + 1 > nmax || ne < 1) { return Real(0.0); }
+    // the distance of each blade node from the hub axis
+    std::vector<Real> r(nb + 1, Real(0.0));
+    for (int nd = 1; nd <= nb; ++nd) {
         Real rv[3], rn = 0.0;
         for (int d = 0; d < 3; ++d) { rv[d] = t.vel_pos[3*nd+d] - t.hub_pos[d]; rn += rv[d] * n[d]; }
         Real r2 = 0.0;
         for (int d = 0; d < 3; ++d) { const Real p = rv[d] - rn * n[d]; r2 += p * p; }
-        const Real w = std::sqrt(r2);
-        Real ua = 0.0;
-        for (int d = 0; d < 3; ++d) { ua += uvw[3*nd+d] * n[d]; }
-        wsum += w; usum += w * ua;
+        r[nd] = std::sqrt(r2);
+    }
+    Real wsum = 0.0, usum = 0.0;
+    for (int bl = 0; bl < t.num_blades; ++bl) {
+        for (int k = 0; k < ne; ++k) {
+            const int nd = 1 + bl * ne + k;
+            Real dr = 0.0;
+            if (ne == 1) { dr = Real(1.0); }
+            else if (k == 0) { dr = std::abs(r[nd+1] - r[nd]); }
+            else if (k == ne - 1) { dr = std::abs(r[nd] - r[nd-1]); }
+            else { dr = Real(0.5) * std::abs(r[nd+1] - r[nd-1]); }
+            const Real w = r[nd] * dr;
+            Real ua = 0.0;
+            for (int d = 0; d < 3; ++d) { ua += uvw[3*nd+d] * n[d]; }
+            wsum += w; usum += w * ua;
+        }
     }
     return (wsum > Real(0.0)) ? usum / wsum : Real(0.0);
 }

@@ -1,7 +1,8 @@
-# OpenFAST_ADM_Uniform on a terrain-fitted mesh: a 100 m Witch-of-Agnesi ridge across the flow with the
-# stub turbine on its top. base_pos z = 0 is the terrain surface at the base, so the base is raised by
-# the ridge height (moving_bodies/ground.csv records it), the nodes and the rings follow the fitted
-# mesh, and the start-up audit measures the ground clearance from the terrain under the hub.
+# OpenFAST_ADM_Uniform, with the default sampling (disk_corrected), on a terrain-fitted mesh: a
+# 100 m Witch-of-Agnesi ridge across the flow with the stub turbine on its top. base_pos z = 0 is the
+# terrain surface at the base, so the base is raised by the ridge height (moving_bodies/ground.csv
+# records it), the nodes and the rings follow the fitted mesh, and the start-up audit measures the
+# ground clearance from the terrain under the hub.
 
 max_step = 10
 stop_time = 5.0
@@ -46,6 +47,9 @@ erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta z_phys
 
 # an IEA-15-MW-sized stub rotor, sampling the flow, its loads on the flow as a disk
+# The default sampling (disk_corrected) recovers the free stream; with epsilon = 2 cells of 50 m its
+# filter width is about 2 rotor radii, past the 1.25 the factor was fitted for (the start-up log
+# warns). That is fine for a regression of this feature; the calibrated set-up is OpenFAST_ADM_DiskCorrected.
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm

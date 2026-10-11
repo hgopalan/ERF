@@ -1,11 +1,15 @@
 // Contract of erf_actuator::spread_forces: the source spread from a point integrates back to
 // the point's force exactly on every component, on a uniform mesh, on a terrain-following mesh
-// with its cell volumes, when the kernel is cut off by the ground, for several points at once,
-// and however the domain is split; and the source is zero beyond the kernel's reach.
+// with its cell volumes, when the kernel is cut off by the ground, across a periodic boundary,
+// for several points at once, and however the domain is split; the source is zero beyond the
+// kernel's reach; over a hill taller than the kernel's reach the source is centred on the point
+// (the faces are found by their physical heights, not their index times dz); and a non-finite
+// position or force aborts, naming the point.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -15,11 +19,13 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_ParallelReduce.H>
 #include <AMReX_RealBox.H>
 
 #include <gtest/gtest.h>
 
 #include "ERF_ActuatorSpreading.H"
+#include "ERF_GTestThrowOnAbort.H"
 
 namespace {
 
@@ -28,7 +34,7 @@ using amrex::Real;
 struct Mesh {
     int nx = 24, ny = 12, nz = 10;
     Real Lx = 2400.0, Ly = 1200.0, H = 500.0;
-    Real hill = 0.0;                       // BTF terrain amplitude (m); 0: flat
+    Real hill = 0.0;                       // basic terrain-following (BTF) terrain amplitude (m); 0: flat
     std::array<int,3> max_grid{{1024, 1024, 1024}};
     std::array<int,3> periodic{{1, 1, 0}};
 
@@ -39,7 +45,7 @@ struct Mesh {
         constexpr Real pi = 3.14159265358979323846;
         return hill * (0.5 + 0.5 * std::cos(2.0 * pi * x / Lx)) * (0.5 + 0.5 * std::sin(2.0 * pi * y / Ly));
     }
-    // BTF with uniform nominal levels: the Jacobian of a column is (H - h) / H
+    // basic terrain-following (BTF) with uniform nominal levels: the Jacobian of a column is (H - h) / H
     Real z_node (int i, int j, int k) const { const Real hs = h(i * dx(), j * dy()); return hs + (H - hs) * k / nz; }
     Real detj (int i, int j) const { return (H - h((i + 0.5) * dx(), (j + 0.5) * dy())) / H; }
 };
@@ -176,6 +182,41 @@ TEST(ActuatorSpreading, PointForceIntegratesBackOverTerrain)
     expect_total(s.spread(pos, force, eps), {{force[0], force[1], force[2]}}, abs_sum(force));
 }
 
+// Over a 400 m hill on 40 levels (15 m apart at its crest, 25 m nominal) a point 120 m above the crest
+// sits at nominal index 20 but between the crest's levels 7 and 8: the kernel's faces are those within
+// 3 eps of it in physical height, so the source's centroid is the point's height
+TEST(ActuatorSpreading, OverATallHillTheSourceIsCentredOnThePoint)
+{
+    Mesh m;
+    m.nz = 40;
+    m.H = 1000.0;
+    m.hill = 400.0;
+    Sources s(m, true);
+    const Real eps = 0.5 * m.dx();
+    // the crest: x = 0, y = Ly / 4
+    const Real zp = m.hill + 120.0;
+    const std::vector<Real> pos = xyz(0.0, 0.25 * m.Ly, zp);
+    const std::vector<Real> force = xyz(-1.0e5, 0.0, 0.0);
+    expect_total(s.spread(pos, force, eps), {{force[0], force[1], force[2]}}, abs_sum(force));
+    // the x source's centroid in physical height, each face at the mean of its four nodes, weighted by its volume
+    double num = 0.0, den = 0.0;
+    for (amrex::MFIter mfi(s.sx, false); mfi.isValid(); ++mfi) {
+        const auto a = s.sx.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            if (i == m.nx) { return; }   // the periodic image of face 0
+            const double zc = 0.25 * (m.z_node(i, j, k) + m.z_node(i, j + 1, k) + m.z_node(i, j, k + 1) + m.z_node(i, j + 1, k + 1));
+            const double wv = static_cast<double>(a(i,j,k)) * static_cast<double>(m.detj(i, j));
+            num += wv * zc;
+            den += wv;
+        });
+    }
+    // the boxes are spread over the ranks: sum their shares
+    amrex::ParallelAllReduce::Sum(num, amrex::ParallelDescriptor::Communicator());
+    amrex::ParallelAllReduce::Sum(den, amrex::ParallelDescriptor::Communicator());
+    ASSERT_NE(den, 0.0);
+    EXPECT_NEAR(num / den, static_cast<double>(zp), 0.1 * static_cast<double>(eps));
+}
+
 TEST(ActuatorSpreading, GroundCutKernelStillIntegratesToTheForce)
 {
     Mesh m;
@@ -235,14 +276,14 @@ TEST(ActuatorSpreading, SeveralPointsSuperpose)
     expect_total(s.spread(pos, force, eps), total, abs_sum(force));
 }
 
-// One box and 3 x 2 uneven boxes (never split in z) give the same integrated force and the
-// same source at a face on the box boundary.
+// One box and 3 x 3 boxes of 8 x 4 cells (never split in z) give the same integrated force and
+// the same source at an x face that two boxes share.
 TEST(ActuatorSpreading, IndependentOfBoxDecomposition)
 {
     Mesh m;
     m.hill = 60.0;
     const Real eps = 2.0 * m.dx();
-    const std::vector<Real> pos = xyz(8.0 * m.dx(), 5.0 * m.dy(), 0.5 * m.H);   // on the box faces of the split
+    const std::vector<Real> pos = xyz(8.0 * m.dx(), 5.0 * m.dy(), 0.5 * m.H);   // on the x box face i = 8 of the split
     const std::vector<Real> force = xyz(-1.2e6, 1.0e5, -5.0e4);
     Sources one(m, true);
     const auto t1 = one.spread(pos, force, eps);
@@ -252,7 +293,7 @@ TEST(ActuatorSpreading, IndependentOfBoxDecomposition)
     const auto t2 = split.spread(pos, force, eps);
     expect_total(t1, {{force[0], force[1], force[2]}}, abs_sum(force));
     expect_total(t2, {{force[0], force[1], force[2]}}, abs_sum(force));
-    // the value at the x face (8, 5, k) on the split boundary, which two boxes hold in the split
+    // the value at the x face (8, 5, k) on the x box face i = 8, which two boxes hold in the split
     // layout: both copies must equal the single-box value
     const amrex::IntVect fc(8, 5, m.nz / 2);
     Real v_one = 0.0;
@@ -270,6 +311,22 @@ TEST(ActuatorSpreading, IndependentOfBoxDecomposition)
     }
     amrex::ParallelDescriptor::ReduceIntSum(copies);
     EXPECT_EQ(copies, 2);
+}
+
+TEST(ActuatorSpreading, ANonFinitePositionOrForceIsRefusedNamingThePoint)
+{
+    Mesh m;
+    Sources s(m, false);
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    std::vector<Real> pos = xyz(0.4 * m.Lx, 0.55 * m.Ly, 0.5 * m.H), force = xyz(-2.0e6, 0.0, 0.0);
+    pos.insert(pos.end(), {Real(0.5 * m.Lx), Real(0.5 * m.Ly), Real(0.5 * m.H)});
+    force.insert(force.end(), {Real(1.0e5), nan, Real(0.0)});
+    std::string msg = erf_gtest::abort_message([&] { s.spread(pos, force, 2.0 * m.dx()); });
+    EXPECT_NE(msg.find("point 1 (0-based)"), std::string::npos) << msg;
+    force[4] = 0.0;
+    pos[0] = std::numeric_limits<Real>::infinity();
+    msg = erf_gtest::abort_message([&] { s.spread(pos, force, 2.0 * m.dx()); });
+    EXPECT_NE(msg.find("point 0 (0-based)"), std::string::npos) << msg;
 }
 
 TEST(ActuatorSpreading, EmptyPointListGivesZeroSources)

@@ -34,7 +34,8 @@ substep_count (double dt_cfd, double dt_fast, std::string& err)
     const int n = static_cast<int>(std::lround(ratio));
     // the ERF step is a whole multiple of the OpenFAST step up to roundoff in the ratio
     if (n < 1 || std::abs(ratio - n) > 1.0e-8 * ratio) {
-        err = "erf.fixed_dt = " + std::to_string(dt_cfd) + " is not a positive whole multiple of the OpenFAST dt = " +
+        err = "the ERF step on the bodies' level (erf.fixed_dt over the sub-cycling ratios) = " + std::to_string(dt_cfd) +
+              " s is not a positive whole multiple of the OpenFAST dt = " +
               std::to_string(dt_fast) + " (ratio " + std::to_string(ratio) + ")";
         return 0;
     }
@@ -118,6 +119,14 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 OpenFASTDriver::~OpenFASTDriver ()
 {
     if (m_initialized && m_num_local > 0) {
+        // FAST_End closes each turbine as OpenFAST's own driver does: it writes the binary output
+        // (OutFileFmt 2 or 3), closes the text output and ends the modules (a ServoDyn controller library)
+        for (const auto& t : m_turb) {
+            if (t.owner_rank != ParallelDescriptor::MyProc()) { continue; }
+            int tid = t.tid_local;
+            bool stop = false;
+            FAST_End(&tid, &stop);
+        }
         int err_stat = ErrID_None;
         char err_msg[INTERFACE_STRING_LENGTH];
         FAST_DeallocateTurbines(&err_stat, err_msg);
@@ -137,7 +146,8 @@ OpenFASTDriver::fast_check (int err_stat, const char* err_msg, const std::string
     if (err_stat >= ErrID_Fatal) {
         Abort("OpenFAST failed in " + where + ": " + std::string(err_msg));
     } else if (err_stat >= ErrID_Warn) {
-        Print() << "OpenFAST warning in " << where << ": " << err_msg << "\n";
+        // printed by the rank that made the call (it owns the turbine), not only the I/O rank
+        AllPrint() << "OpenFAST warning in " << where << ": " << err_msg << "\n";
     }
 }
 
@@ -168,7 +178,12 @@ OpenFASTDriver::finish_setup (TurbineState& t, double dt_cfd)
         t.num_force_nodes == 1 + t.num_blades * t.num_force_pts_blade + t.num_force_pts_tower,
         "OpenFAST force-node count does not match hub + blades + tower for " + t.name);
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-        t.from_cfd.u_Len == t.num_vel_nodes && t.to_cfd.pxForce_Len == t.num_force_nodes,
+        t.from_cfd.u_Len == t.num_vel_nodes && t.from_cfd.v_Len == t.num_vel_nodes && t.from_cfd.w_Len == t.num_vel_nodes &&
+        t.to_cfd.pyVel_Len == t.num_vel_nodes && t.to_cfd.pzVel_Len == t.num_vel_nodes &&
+        t.to_cfd.pxForce_Len == t.num_force_nodes && t.to_cfd.pyForce_Len == t.num_force_nodes &&
+        t.to_cfd.pzForce_Len == t.num_force_nodes && t.to_cfd.fy_Len == t.num_force_nodes && t.to_cfd.fz_Len == t.num_force_nodes &&
+        t.to_cfd.xdotForce_Len == t.num_force_nodes && t.to_cfd.ydotForce_Len == t.num_force_nodes &&
+        t.to_cfd.zdotForce_Len == t.num_force_nodes && t.to_cfd.forceNodesChord_Len == t.num_force_nodes,
         "OpenFAST ExtInfw array lengths are inconsistent for " + t.name);
 
     std::string err;
@@ -226,7 +241,7 @@ OpenFASTDriver::init (double dt_cfd, double t_max)
 }
 
 void
-OpenFASTDriver::restart (const std::string& prefix, double dt_cfd)
+OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::restart after init or restart");
     int err_stat = ErrID_None;
@@ -262,7 +277,8 @@ OpenFASTDriver::restart (const std::string& prefix, double dt_cfd)
     }
     check_lockstep();
     m_initialized = true;
-    m_solved0 = true;
+    // a checkpoint written before OpenFAST's first solution (the step-0 checkpoint) still needs it
+    m_solved0 = solved0;
 }
 
 void
@@ -343,7 +359,16 @@ OpenFASTDriver::step ()
         for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
             TurbineState& t = m_turb[i];
             if (!is_owner(i)) { continue; }
+            // FAST_CFD_Step leaves the status unset for all but the last turbine past OpenFAST's stop
+            // time, and reports that case for the last one as information only: reset it before each
+            // call and treat "Simulation completed" as the end it is (the loads would stay frozen)
+            err_stat = ErrID_None;
+            err_msg[0] = '\0';
             FAST_CFD_Step(&t.tid_local, &err_stat, err_msg);
+            if (err_stat == ErrID_Info && std::string(err_msg).find("completed") != std::string::npos) {
+                Abort("OpenFAST reports \"" + std::string(err_msg) + "\" for " + t.name + " at its time index " +
+                      std::to_string(t.time_index) + ": it has reached the stop time it was started with and no longer steps");
+            }
             fast_check(err_stat, err_msg, "FAST_CFD_Step for " + t.name);
             ++t.time_index;
         }
@@ -386,8 +411,8 @@ OpenFASTDriver::check_lockstep () const
 // Position + TranslationDisp and never applies the TurbinePosition given at init), so the base
 // position is added here to put them in ERF's frame; the hub position from FAST_HubPosition is
 // in the same frame and is shifted alike. OpenFAST reports the forces the fluid exerts on the
-// structure; the reaction on the fluid is their negative, applied later by the force spreading,
-// once it exists. The stored force values are OpenFAST's, unchanged.
+// structure; the reaction on the fluid is their negative, which the force spreading applies. The
+// stored force values are OpenFAST's, unchanged.
 void
 OpenFASTDriver::pull_from_fast (TurbineState& t)
 {
@@ -415,6 +440,14 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
         t.force_vel[3*n+2] = t.to_cfd.zdotForce[n];
         t.chord[n] = t.to_cfd.forceNodesChord[n];
     }
+    // OpenFAST runs with the floating-point traps off: a diverged turbine would otherwise put
+    // NaN into the momentum source silently
+    for (int n = 0; n < 3 * nf; ++n) {
+        if (!std::isfinite(t.force[n]) || !std::isfinite(t.force_pos[n])) {
+            Abort("OpenFAST returned a non-finite force or position for " + t.name + " at force node " + std::to_string(n / 3) +
+                  " (time index " + std::to_string(t.time_index) + "): the turbine model has diverged");
+        }
+    }
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
     float hub[3] = {0.0f, 0.0f, 0.0f};
@@ -423,7 +456,6 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
     FAST_HubPosition(&t.tid_local, hub, rot, dcm, &err_stat, err_msg);
     fast_check(err_stat, err_msg, "FAST_HubPosition for " + t.name);
     for (int d = 0; d < 3; ++d) { t.hub_pos[d] = t.base_pos[d] + hub[d]; }
-    t.rotor_speed = std::sqrt(rot[0]*rot[0] + rot[1]*rot[1] + rot[2]*rot[2]);
     // OpenFAST orientation matrices map global to local: their rows are the local axes in
     // global coordinates. The 9 doubles are the Fortran column-major flattening, so the hub
     // frame's x axis (the shaft) is elements 0, 3, 6.
@@ -432,6 +464,9 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
         const Real len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
         if (len > Real(0.0)) { for (int d = 0; d < 3; ++d) { t.hub_axis[d] = n[d] / len; } }
     }
+    // the rotation rate about the shaft axis, signed like the torque about it, so that their
+    // product is the power whichever way the model turns
+    t.rotor_speed = rot[0] * t.hub_axis[0] + rot[1] * t.hub_axis[1] + rot[2] * t.hub_axis[2];
     // the first velocity node is the hub: the two positions must agree, else the frame
     // conventions above no longer hold for this OpenFAST build
     if (nv > 0) {

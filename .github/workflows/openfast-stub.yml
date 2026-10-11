@@ -2,8 +2,9 @@ name: Linux GCC OpenFAST stub
 
 # The moving-bodies actuator framework and its OpenFAST turbine coupling, built
 # against the bundled OpenFAST stub library (no OpenFAST installation needed):
-# the moving-bodies regression cases, their restart-parity twins and the
-# actuator unit tests. The anelastic FFT Poisson solve the decks use needs
+# the moving-bodies regression and abort cases, their restart-parity, restart-abort
+# and box-parity twins, and the actuator unit tests (serial, and the sampling and spreading ones
+# also on two ranks). The anelastic FFT Poisson solve the decks use needs
 # ERF_ENABLE_FFT, which the AMReX dependency script provides through libfftw3.
 
 on:
@@ -93,9 +94,19 @@ jobs:
         ctest -L moving-bodies --output-on-failure --no-tests=error
       working-directory: ${{runner.workspace}}/ERF/build
 
-    - name: OpenFAST Restart-Parity Tests
+    - name: Moving-Bodies Restart-Parity and Restart-Abort Tests
       run: |
-        ctest -L restart-parity -R OpenFAST --output-on-failure --no-tests=error
+        ctest -L restart-parity -R "OpenFAST|MovingBodies" --output-on-failure --no-tests=error
+      working-directory: ${{runner.workspace}}/ERF/build
+
+    - name: Moving-Bodies Box-Parity Tests
+      run: |
+        ctest -L box-parity -R "OpenFAST|Actuator" --output-on-failure --no-tests=error
+      working-directory: ${{runner.workspace}}/ERF/build
+
+    - name: Actuator Parallel Unit Tests
+      run: |
+        ctest -R "erf_parallel_tests[.](ActuatorSampling|ActuatorSpreading)" --output-on-failure --no-tests=error
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Upload backtraces from failed tests

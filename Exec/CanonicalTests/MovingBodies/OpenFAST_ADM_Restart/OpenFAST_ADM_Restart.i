@@ -1,8 +1,9 @@
-# The OpenFAST_ADM_Uniform case run for restart parity: straight to step 10, and again to a
-# checkpoint at step 5 restarted to step 10. The turbine is restored from its OpenFAST
-# checkpoint, the momentum source is rebuilt from the restored loads and the wake running
-# average continues from its checkpointed sums, so the plotfile and the wake average of the
-# restarted run must equal the straight run's.
+# The OpenFAST_ADM_Uniform case with the default sampling (disk_corrected) and wake lines, run for
+# restart parity: straight to step 10, and again to a checkpoint at step 5 restarted to step 10 (the
+# test's first leg runs on past the checkpoint, so the restart must also drop those rows). The
+# turbine is restored from its OpenFAST checkpoint, the momentum source is rebuilt from the restored
+# loads and the wake running average continues from its checkpointed sums, so the plotfile and the
+# wake average of the restarted run must equal the straight run's.
 
 max_step = 10
 stop_time = 5.0
@@ -40,6 +41,9 @@ erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
 # an IEA-15-MW-sized stub rotor, sampling the flow, its loads on the flow as a disk
+# The default sampling (disk_corrected) recovers the free stream; with epsilon = 2 cells of 50 m its
+# filter width is about 2 rotor radii, past the 1.25 the factor was fitted for (the start-up log
+# warns). That is fine for a regression of this feature; the calibrated set-up is OpenFAST_ADM_DiskCorrected.
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm

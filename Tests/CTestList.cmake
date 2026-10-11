@@ -642,7 +642,7 @@ endif()
 # would otherwise leave it silently comparing an ordinary restart and passing.
 function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
     set(oneValueArgs "COMMON_OPTIONS" "RESTART_OPTIONS" "CHK_NRANKS" "RESTART_NRANKS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "RUN_TIMEOUT" "DATALOG" "DATALOG_SIGDIGITS" "DATALOG_ZERO_EXPONENT" "PLT2DFILE")
-    cmake_parse_arguments(ADD_TEST_RP "ALLOW_DIFF_GRIDS;REQUIRE_LEVEL0_REMAKE" "${oneValueArgs}" "" ${ARGN})
+    cmake_parse_arguments(ADD_TEST_RP "ALLOW_DIFF_GRIDS;REQUIRE_LEVEL0_REMAKE;OVERRUN" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
 
@@ -686,6 +686,7 @@ function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
         "-DDATALOG_SIGDIGITS=${ADD_TEST_RP_DATALOG_SIGDIGITS}"
         "-DDATALOG_ZERO_EXPONENT=${ADD_TEST_RP_DATALOG_ZERO_EXPONENT}"
         "-DPLT2DFILE=${ADD_TEST_RP_PLT2DFILE}"
+        "-DOVERRUN=${ADD_TEST_RP_OVERRUN}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunRestartParity.cmake)
     # The reservation has to cover the widest leg, which need not be NP.
     set(_procs "${NP}")
@@ -1206,9 +1207,12 @@ add_test_cloud_chamber_fixed_dt_guard(CloudChamber_Bulk_FixedDtGuard)
 set(TEST_SOURCE_ROOT ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies)
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT)
   # The OpenFAST driver steps a stub turbine through a uniform anelastic flow (FFT solver)
-  # without adding any forcing yet; the gold plotfile is the same deck run without moving
-  # bodies, so the flow must come out unchanged.
-  add_test_r(OpenFAST_DriverOnly "" "erf_exec" "plt00005")
+  # without adding any forcing (mode = none); the gold plotfile is the same deck run without
+  # moving bodies, so the flow must come out unchanged. With MPI the turbine's own log is
+  # checked as well, below, since the plotfile alone passes even if the driver never ran.
+  if(NOT (ERF_ENABLE_MPI AND NOT WIN32))
+    add_test_r(OpenFAST_DriverOnly "" "erf_exec" "plt00005")
+  endif()
 endif()
 
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
@@ -1276,6 +1280,16 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       if(ARGC GREATER 5)
           set(_turbine_csv "${ARGV5}")
       endif()
+      # optional 7th: the columns of the log compared with its gold (default all of them)
+      set(_log_columns "")
+      if(ARGC GREATER 6)
+          set(_log_columns "${ARGV6}")
+      endif()
+      # optional 8th: the significant digits that log comparison needs (default 10)
+      set(_sigdigits 10)
+      if(ARGC GREATER 7)
+          set(_sigdigits "${ARGV7}")
+      endif()
       setup_test()
       resolve_test_exe("" "erf_exec" TEST_EXE)
       add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
@@ -1294,9 +1308,10 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
           "-DATOL=${ERF_TEST_FCOMPARE_ATOL}"
           "-DFLOW_CSV=${_log}"
           "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/${_log}.gold"
-          "-DSIGDIGITS=10"
+          "-DSIGDIGITS=${_sigdigits}"
           "-DTURBINE_CSV=${_turbine_csv}"
           "-DFORCE_COLUMN=${_force}"
+          "-DLOG_COLUMNS=${_log_columns}"
           "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunOpenFASTADM.cmake)
       set_tests_properties(${TEST_NAME}
@@ -1308,6 +1323,14 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
           ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation.log")
   endfunction()
   add_test_openfast_adm(OpenFAST_ADM_Uniform OpenFAST_ADM_Uniform "plt00010")
+
+  # The driver-only case above, with its turbine log checked too: the rotor speed, thrust, torque
+  # and power the stub returns for the prescribed 10 m/s must match the gold log in every row
+  # (so the driver stepped the turbine and pulled its loads back), and with mode = none no
+  # momentum source may be written. OpenFAST hands its loads back in single precision, so six
+  # digits are compared, and the transverse thrust columns, which hold only that noise, are left out.
+  add_test_openfast_adm(OpenFAST_DriverOnly OpenFAST_DriverOnly "plt00005"
+      "T1_erf.csv" "none" "T1_erf.csv" "time;rotor_speed;thrust_x;torque;power;axis_x;axis_y;axis_z" 6)
 
   # The same turbine with the domain in one box and split unevenly in x and y: plotfile and
   # sampled flow log must agree, so the rings and their spreading are independent of the
@@ -1340,10 +1363,24 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
       DATALOG "T1_correction.csv"
       DATALOG_SIGDIGITS 8)
+  # The old, unrelaxed update stays selectable (correction_relax = 1): it must reproduce the gold of the
+  # code before the relaxation (kept as this test's gold) to 1e-8, the last digits moving only with the
+  # order of the sums in the sampler and spreader.
+  function(add_test_disk_corrected_old_update)
+      set(TEST_NAME OpenFAST_ADM_DiskCorrected_OldUpdate)
+      set(TEST_FILES_DIR OpenFAST_ADM_DiskCorrected)
+      setup_test()
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      add_test(NAME ${TEST_NAME} COMMAND sh -c "${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/OpenFAST_ADM_DiskCorrected.i erf.moving_bodies.T1.correction_relax=1 > ${TEST_NAME}.log && ${MPI_FCOMP_COMMANDS} ${FCOMPARE_EXE} --abort_if_not_all_found -a -r 1.0e-8 --abs_tol 1.0e-8 ${PLOT_GOLD} ${CURRENT_TEST_BINARY_DIR}/plt00010")
+      set_tests_properties(${TEST_NAME} PROPERTIES TIMEOUT 600 PROCESSORS ${NP}
+          WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/" LABELS "regression;moving-bodies"
+          ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+  endfunction()
+  add_test_disk_corrected_old_update()
   add_test_restart_parity(OpenFAST_ADM_DiskCorrected_Restart OpenFAST_ADM_DiskCorrected 5 10
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
-      DATALOG "T1_correction.csv"
-      DATALOG_SIGDIGITS 10)
+      DATALOG "T1_correction.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
 
   # The uniform-inflow disk on a terrain-fitted mesh: a 100 m Witch-of-Agnesi ridge with the stub
   # turbine on its top and base_pos z = 0, so the base is raised by the ridge height. The log
@@ -1393,8 +1430,8 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # run's exactly.
   add_test_restart_parity(OpenFAST_ALM_FLLC_Restart OpenFAST_ALM_FLLC_Restart 5 10
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
-      DATALOG "T1_fllc.csv"
-      DATALOG_SIGDIGITS 10)
+      DATALOG "T1_fllc.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
 
   # The disk on two levels: level 1 (25 m) over a box around the rotor is the anchor, sampled and
   # forced with the fine level's step, level 0 sees it through the average-down. Plotfile and
@@ -1412,14 +1449,23 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # turbine on it come back exactly.
   add_test_restart_parity(OpenFAST_ADM_TwoLevel_Restart OpenFAST_ADM_TwoLevel_Restart 5 10
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
-      DATALOG "T1_flow.csv"
-      DATALOG_SIGDIGITS 10)
+      DATALOG "T1_flow.csv T1_correction.csv T1_erf.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
 
   # Two stub turbines as actuator disks, the second two diameters downstream of the first: each
   # runs in its own OpenFAST instance on its owner rank (both on rank 0 here) and writes its own
   # logs; the integrated source must equal minus the farm's total load, and the downstream
   # turbine's sampled flow log is the gold.
   add_test_openfast_adm(OpenFAST_ADM_TwoTurbines OpenFAST_ADM_TwoTurbines "plt00010" "T2_flow.csv" "load_x" "moving_bodies/total_load.csv")
+
+  # The farm checkpointed at step 5 and restarted to step 10 on two ranks, so turbine T2 is owned (and
+  # its logs written) by rank 1, not the I/O rank that trims the logs: after a first run that went on
+  # past the checkpoint, every turbine's logs must still drop the rows written after it.
+  add_test_restart_parity(OpenFAST_ADM_TwoTurbines_Restart OpenFAST_ADM_TwoTurbines 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
+      DATALOG "T1_erf.csv T2_erf.csv T2_flow.csv T2_correction.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
 
   # The farm on one rank (both turbines owned by rank 0, one box) against two ranks with the
   # domain split (one turbine per rank): the ownership must not change the answer.
@@ -1494,8 +1540,23 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # wake average must equal the straight run's exactly.
   add_test_restart_parity(OpenFAST_ADM_Restart OpenFAST_ADM_Restart 5 10
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
-      DATALOG "T1_wake_avg.csv"
-      DATALOG_SIGDIGITS 10)
+      DATALOG "T1_wake_avg.csv T1_wake.csv T1_correction.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+
+  # A restart continues the same bodies with the same inputs, step and OpenFAST stop time: each
+  # change below must stop the restart with a message naming it, before OpenFAST is restarted.
+  add_test_restart_abort(MovingBodies_Restart_ChangedBodyKey OpenFAST_ADM_Restart 5
+      "T1[.]num_points_t changed on restart"
+      RESTART_OPTIONS "erf.moving_bodies.T1.num_points_t=24")
+  add_test_restart_abort(MovingBodies_Restart_ChangedStep OpenFAST_ADM_Restart 5
+      "the checkpoint's bodies stepped 0[.]5"
+      RESTART_OPTIONS "erf.fixed_dt=0.25 max_step=20")
+  add_test_restart_abort(MovingBodies_Restart_LaterStopTime OpenFAST_ADM_Restart 5
+      "were started for OpenFAST to stop at t = 5[.]0"
+      RESTART_OPTIONS "stop_time=10.0 max_step=20")
+  add_test_restart_abort(MovingBodies_Restart_AddedBody OpenFAST_ADM_Restart 5
+      "D1 is not in the checkpoint"
+      RESTART_OPTIONS "\"erf.moving_bodies.bodies=T1 D1\" erf.moving_bodies.D1.type=ct_disk \"erf.moving_bodies.D1.base_pos=1500. 600. 0.\" erf.moving_bodies.D1.rotor_radius=120. erf.moving_bodies.D1.hub_height=150. erf.moving_bodies.D1.ct=0.75 erf.moving_bodies.D1.epsilon=2.0 erf.moving_bodies.D1.air_density=1.0 erf.moving_bodies.D1.output_root=D1")
 endif()
 
 if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
@@ -1543,6 +1604,20 @@ if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
       DATALOG "D1_disk.csv"
       DATALOG_SIGDIGITS 8)
+
+  # The disk checkpointed at step 5 and restarted to step 10, after a first run that went on past the
+  # checkpoint: the disk and source logs must drop the rows written after it. The restart also asks
+  # for a later stop time, which a run without turbines may do (only OpenFAST keeps its stop time).
+  add_test_restart_parity(MovingBodies_CtDisk_Restart Actuator_UniformCtDisk 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      RESTART_OPTIONS "stop_time=10.0"
+      DATALOG "D1_disk.csv D1_stats.csv moving_bodies/momentum_source.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+  # a disk input that changes the thrust (here by 2 %, inside the density check's tolerance) must
+  # stop the restart
+  add_test_restart_abort(MovingBodies_Restart_ChangedDiskDensity Actuator_UniformCtDisk 5
+      "D1[.]air_density changed on restart"
+      RESTART_OPTIONS "erf.moving_bodies.D1.air_density=1.02")
 endif()
 unset(TEST_SOURCE_ROOT)
 
@@ -2148,6 +2223,59 @@ function(add_test_abort TEST_NAME SOURCE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME
         ATTACHED_FILES_ON_FAIL "${test_log}"
     )
 endfunction(add_test_abort)
+
+if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
+  # The moving-bodies start-up checks, one deck each: every abort must name the input to change.
+  set(_mb_cases ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies)
+  add_test_abort(MovingBodies_AnchorLevelAboveFinest ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "anchor_level = 1 is not a level of this run" "erf.moving_bodies.anchor_level=1")
+  add_test_abort(MovingBodies_StopTimeNotWholeSteps ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "steps of erf[.]fixed_dt = 0[.]5.*not a whole" "stop_time=4.75 max_step=-1")
+  # on two levels the stop time must be a whole number of level-0 steps, which ERF cuts, not of the
+  # bodies' finer steps: 4.75 s is 19 steps of level 1 but 9.5 of level 0
+  add_test_abort(MovingBodies_StopTimeNotWholeCoarseSteps ${_mb_cases}/OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel.i
+      "is 9[.]5[0-9]* steps of erf[.]fixed_dt = 0[.]5.*not a whole" "stop_time=4.75 max_step=-1")
+  # a stop time that is no whole number of steps is fine when max_step ends the run first, as no step
+  # is cut: the run must start (the deck's own MovingBodies tests run to max_step = 1)
+  add_test_abort(MovingBodies_MaxStepEndsTheRunFirst ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "STEP 1 ends" "stop_time=1000000.3")
+  # the bodies' level must exist when they are placed: the deck keeps amr.max_level = 1 (so the bodies
+  # live on level 1 by default) but erf.rotor.max_level = 0 stops the refinement that would make level 1,
+  # so the run starts with level 0 only (amr.max_level = 0 would instead put the bodies on level 0)
+  add_test_abort(MovingBodies_AnchorLevelMissingAtStart ${_mb_cases}/OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel.i
+      "the bodies live on level 1" "erf.rotor.max_level=0")
+  add_test_abort(MovingBodies_CtDiskDensityMismatch ${_mb_cases}/Actuator_UniformCtDisk Actuator_UniformCtDisk.i
+      "D1[.]air_density = 1[.]2.*more than erf[.]moving_bodies[.]density_tolerance" "erf.moving_bodies.D1.air_density=1.2")
+  add_test_abort(MovingBodies_FinerLevelOverTheBodies ${_mb_cases}/OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel.i
+      "level 1, finer than the bodies' level 0" "erf.moving_bodies.anchor_level=0")
+  add_test_abort(MovingBodies_FPETrapsRefused ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "OpenFAST is not floating-point-exception clean" "amrex.fpe_trap_invalid=1")
+  add_test_abort(MovingBodies_CorrectionRelaxOutOfRange ${_mb_cases}/OpenFAST_ADM_DiskCorrected OpenFAST_ADM_DiskCorrected.i
+      "T1[.]correction_relax must be -1" "erf.moving_bodies.T1.correction_relax=1.5")
+  # the actuator-line cases pass the tip-travel limit; this one must not, and must name the step that would
+  add_test_abort(MovingBodies_ALMTipTravelLimit ${_mb_cases}/OpenFAST_ALM_Uniform OpenFAST_ALM_Uniform.i
+      "the blade tip sweeps 0[.]9[0-9]* cells per step.*use erf[.]fixed_dt <= 0[.]0054" "erf.moving_bodies.alm_max_tip_cells=0.01")
+  foreach(_t MovingBodies_AnchorLevelAboveFinest MovingBodies_StopTimeNotWholeSteps MovingBodies_CtDiskDensityMismatch
+             MovingBodies_FinerLevelOverTheBodies MovingBodies_FPETrapsRefused MovingBodies_CorrectionRelaxOutOfRange
+             MovingBodies_ALMTipTravelLimit MovingBodies_StopTimeNotWholeCoarseSteps MovingBodies_AnchorLevelMissingAtStart
+             MovingBodies_MaxStepEndsTheRunFirst)
+    set_property(TEST ${_t} APPEND PROPERTY LABELS "moving-bodies")
+  endforeach()
+
+  # A run that stops at stop_datetime: ERF then ignores stop_time (5 s in the deck), so the
+  # turbines must be started for the 7 s to the stop date and the run must reach it (max_step is
+  # far beyond, so the date alone ends the run). Before,
+  # OpenFAST was started for the deck's stop_time and the run stopped at t = 5.5 s.
+  set(_t MovingBodies_StopDatetime)
+  set(_dir ${CMAKE_CURRENT_BINARY_DIR}/test_files/${_t})
+  file(MAKE_DIRECTORY ${_dir})
+  file(GLOB _files "${_mb_cases}/OpenFAST_ADM_Restart/*")
+  file(COPY ${_files} DESTINATION "${_dir}/")
+  resolve_test_exe("" "erf_exec" TEST_EXE)
+  add_test(NAME ${_t} COMMAND sh -c "rm -rf T1_erf.csv moving_bodies && ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS} ${TEST_EXE} OpenFAST_ADM_Restart.i max_step=100 erf.plot_int_1=-1 erf.check_int=-1 amrex.call_addr2line=0 'start_datetime=\"2020-01-01 00:00:00\"' 'stop_datetime=\"2020-01-01 00:00:07\"' > ${_t}.log 2>&1 && tail -n 1 T1_erf.csv | grep -q '^7,'")
+  set_tests_properties(${_t} PROPERTIES TIMEOUT 600 PROCESSORS 1 WORKING_DIRECTORY "${_dir}/"
+      LABELS "regression;moving-bodies" ATTACHED_FILES_ON_FAIL "${_dir}/${_t}.log")
+endif()
 
 if(ERF_ENABLE_MPI AND NOT WIN32)
   # A shallow nest -- a fine level that stops below the domain top -- has no complete

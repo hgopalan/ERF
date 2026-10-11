@@ -1,7 +1,10 @@
+// Gaussian force spreading with discrete normalisation, and the source integral.
+
 #include "ERF_ActuatorSpreading.H"
 
 #include <array>
 #include <cmath>
+#include <string>
 
 #include <AMReX.H>
 #include <AMReX_Array4.H>
@@ -10,6 +13,7 @@
 #include <AMReX_ParallelDescriptor.H>
 
 #include "ERF_ActuatorGeometry.H"
+#include "ERF_ActuatorSampling.H"
 
 using namespace amrex;
 
@@ -17,8 +21,8 @@ namespace erf_actuator {
 
 namespace {
 
-// Squared distance from face (i,j,k) of grid dir to the point (or one of its periodic images)
-// and the kernel's cut-off
+// The kernel weight exp(-r^2/eps^2) of face (i,j,k) of grid dir for the point (px,py,pz) (one
+// periodic image), 0 beyond the cut-off radius sqrt(reach2) = 3 eps
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 Real kernel_weight (int dir, int i, int j, int k, Real px, Real py, Real pz,
                     const GpuArray<Real,AMREX_SPACEDIM>& plo,
@@ -63,6 +67,24 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() == force.size() && pos.size() % 3 == 0,
                                      "spread_forces: one x,y,z force per x,y,z point");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(epsilon > 0.0, "spread_forces: epsilon must be positive");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(src_x.ixType() == IndexType(IntVect(1,0,0)) && src_y.ixType() == IndexType(IntVect(0,1,0)) &&
+                                     src_z.ixType() == IndexType(IntVect(0,0,1)),
+                                     "spread_forces: src_x, src_y and src_z must be face-centred in x, y and z");
+    for (const MultiFab* mf : {static_cast<const MultiFab*>(&src_y), static_cast<const MultiFab*>(&src_z), z_phys_nd, detJ_cc}) {
+        if (mf == nullptr) { continue; }
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(mf->DistributionMap() == src_x.DistributionMap() && mf->boxArray().CellEqual(src_x.boxArray()),
+                                         "spread_forces: the sources, z_phys_nd and detJ_cc must share boxes and distribution");
+    }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(detJ_cc == nullptr || detJ_cc->nGrow() >= 1,
+                                     "spread_forces: detJ_cc needs one ghost cell (the face volumes read the cell below each low face)");
+    for (std::size_t q = 0; q < pos.size(); ++q) {
+        if (!std::isfinite(pos[q]) || !std::isfinite(force[q])) {
+            const std::size_t p = q / 3;
+            Abort("spread_forces: point " + std::to_string(p) + " (0-based) has a non-finite position or force: (" +
+                  std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) + ", " + std::to_string(pos[3*p+2]) + ") m, (" +
+                  std::to_string(force[3*p]) + ", " + std::to_string(force[3*p+1]) + ", " + std::to_string(force[3*p+2]) + ") N");
+        }
+    }
     const int npts = static_cast<int>(pos.size() / 3);
     src_x.setVal(0.0);
     src_y.setVal(0.0);
@@ -87,12 +109,18 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
     const bool has_detj = (detJ_cc != nullptr);
 
     // Work per point over the faces within its reach, so the cost is npts x (6 eps / dx)^3
-    // rather than nfaces x npts. A point near a periodic boundary is visited again as its
+    // (npts x (6 eps / dx)^2 x nz with z_phys_nd) rather than nfaces x npts. A point near a periodic boundary is visited again as its
     // periodic image(s), which is how the kernel wraps.
     const int reach_cells[3] = {static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[0])) + 1,
                                 static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[1])) + 1,
                                 static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[2])) + 1};
-    // the index box of the faces of grid dir within reach of a point at (px,py,pz)
+    // the index box of the faces of grid dir within reach of a point at (px,py,pz); with z_phys_nd
+    // (terrain-following or stretched) a face's height is not its index times dz, so the box takes
+    // every k a height within reach may lie in, from the mesh's bounds (all of them for a level
+    // aloft), and kernel_weight's cut-off at 3 eps, measured in physical heights, picks the faces
+    // (bounds from the boxes that reach the ground do not hold for a box aloft over higher ground)
+    ZBounds zb = has_znd ? mesh_z_bounds(*z_phys_nd, geom) : ZBounds{};
+    if (!zb.all_ground) { zb = ZBounds{}; }
     auto reach_box = [&](int dir, Real px, Real py, Real pz) {
         const Real pc[3] = {px, py, pz};
         IntVect lo, hi;
@@ -100,6 +128,13 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
             const Real fi = (pc[d] - plo[d]) / dx[d] - ((d == dir) ? Real(0.0) : Real(0.5));
             lo[d] = static_cast<int>(std::floor(fi)) - reach_cells[d];
             hi[d] = static_cast<int>(std::floor(fi)) + reach_cells[d] + 1;
+        }
+        if (has_znd) {
+            int kb = dlo[2], kt = dhi[2];
+            zb.k_range(pz - Real(3.0) * epsilon, pz + Real(3.0) * epsilon, dlo[2], dhi[2], kb, kt);
+            // the faces bounding those cells, one more each way for the faces of a cell's neighbours
+            lo[2] = std::max(kb - 1, dlo[2]);
+            hi[2] = std::min(kt + 2, dhi[2] + 1);
         }
         return Box(lo, hi, IntVect::TheDimensionVector(dir));
     };
@@ -196,6 +231,9 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
 Real
 integrate_source (int dir, const MultiFab& src, const MultiFab* detJ_cc, const Geometry& geom)
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dir >= 0 && dir <= 2 && src.ixType() == IndexType(IntVect::TheDimensionVector(dir)),
+                                     "integrate_source: src must be face-centred in direction dir (0, 1 or 2)");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(detJ_cc == nullptr || detJ_cc->nGrow() >= 1, "integrate_source: detJ_cc needs one ghost cell");
     const auto dx = geom.CellSizeArray();
     const Real dxdydz = dx[0] * dx[1] * dx[2];
     const bool has_detj = (detJ_cc != nullptr);

@@ -169,6 +169,11 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // Advance the moving bodies (OpenFAST turbines) by one step on their anchor level
     // **************************************************************************************
     if (moving_bodies) {
+        // the bodies' level must exist, and no finer level may cover them: checked at every step of that level
+        // (or of the finest, should a regrid have removed it), so a regrid is caught before the next step
+        if (lev == std::min(moving_bodies->anchor_level(), finest_level)) {
+            moving_bodies->check_levels(finest_level, grids, geom);
+        }
         moving_bodies->advance(lev, time, dt_lev, S_old, U_old, V_old, W_old,
                                z_phys_nd[lev].get(), detJ_cc[lev].get(), Geom(lev));
     }
