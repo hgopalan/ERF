@@ -119,7 +119,9 @@ its step number and adds a row ``step time`` to the ascii file :cpp:`time.dat`; 
 that of the run's clock, so it includes :cpp:`start_datetime` when one is given.
 A run restarted from a checkpoint continues the series it finds there. It keeps the rows of
 :cpp:`time.dat` up to the restart step and drops the later ones, which a run that went on past
-the checkpoint wrote and the restarted run writes again; AMReX keeps each plane folder it
+the checkpoint wrote and the restarted run writes again. :cpp:`time.dat` is rewritten only
+when the run writes its first plane, so a run that stops before then leaves it as it was.
+The plane folders of dropped rows are not removed, and AMReX keeps each plane folder it
 writes again as :cpp:`bndry_outputNNNNN.old.<n>`. The restarted run writes a plane at the
 restart step itself only if the series lacks it and the step is an output step, so that with
 the same inputs and time steps the series comes out as a run without the restart writes it.

@@ -684,7 +684,7 @@ endif()
 # would otherwise leave it silently comparing an ordinary restart and passing.
 function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
     set(oneValueArgs "COMMON_OPTIONS" "RESTART_OPTIONS" "CHK_OPTIONS" "CHK_LEG_END" "CHK_NRANKS" "RESTART_NRANKS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "RUN_TIMEOUT" "DATALOG" "DATALOG_SIGDIGITS" "PLT2DFILE" "BNDRY_PLANES_DIR" "BNDRY_PLANES_FIRST_STEP" "BNDRY_PLANES_STEPS" "BNDRY_PLANES_READ_INPUT")
-    cmake_parse_arguments(ADD_TEST_RP "ALLOW_DIFF_GRIDS;REQUIRE_LEVEL0_REMAKE;BNDRY_PLANES_STALE;BNDRY_PLANES_CUT_NEWLINE" "${oneValueArgs}" "" ${ARGN})
+    cmake_parse_arguments(ADD_TEST_RP "ALLOW_DIFF_GRIDS;REQUIRE_LEVEL0_REMAKE;BNDRY_PLANES_STALE;BNDRY_PLANES_CUT_NEWLINE;BNDRY_PLANES_EARLY_STOP" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
 
@@ -734,6 +734,7 @@ function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
         "-DBNDRY_PLANES_STALE=${ADD_TEST_RP_BNDRY_PLANES_STALE}"
         "-DBNDRY_PLANES_STEPS=${ADD_TEST_RP_BNDRY_PLANES_STEPS}"
         "-DBNDRY_PLANES_CUT_NEWLINE=${ADD_TEST_RP_BNDRY_PLANES_CUT_NEWLINE}"
+        "-DBNDRY_PLANES_EARLY_STOP=${ADD_TEST_RP_BNDRY_PLANES_EARLY_STOP}"
         "-DBNDRY_PLANES_READ_INPUT=${ADD_TEST_RP_BNDRY_PLANES_READ_INPUT}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunRestartParity.cmake)
     # The reservation has to cover the widest leg, which need not be NP.
@@ -1769,7 +1770,8 @@ endif()
 #                 state and appended a "0 t" row. The last row before the restart is left
 #                 without its newline, as a time.dat edited or copied by hand may be.
 #   _Replay:      the run went on to step 8 after its step-3 checkpoint, the restart replays 4-8,
-#                 and step 3 is not an output step.
+#                 and step 3 is not an output step. A restart that stops before its first plane
+#                 (here: no step at all) must leave time.dat as it was.
 #   _Enable:      the output is switched on at the restart, at an output step (4) ...
 #   _EnableOff:   ... and between two (3): the series begins at step 4 either way.
 #   _StartTime:   output starts 0.05 s into a run whose clock starts at a calendar date
@@ -1783,7 +1785,7 @@ add_test_restart_parity(ABL_BndryPlanes_Restart ABL_BndryPlanes_Restart 4 8
     BNDRY_PLANES_READ_INPUT "ABL_BndryPlanes_Read.i"
     FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0")
 add_test_restart_parity(ABL_BndryPlanes_Replay ABL_BndryPlanes_Restart 3 8
-    CHK_LEG_END 8
+    CHK_LEG_END 8 BNDRY_PLANES_EARLY_STOP
     BNDRY_PLANES_DIR "BndryFiles" BNDRY_PLANES_STEPS "0 2 4 6 8" FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0")
 add_test_restart_parity(ABL_BndryPlanes_Enable ABL_BndryPlanes_Restart 4 8
     CHK_OPTIONS "erf.output_bndry_planes=0"
@@ -1895,13 +1897,25 @@ function(add_test_abort TEST_NAME SOURCE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME
 endfunction(add_test_abort)
 
 # Reading and writing boundary planes in one folder would replace the planes being read; the
-# folder names differ only in spelling. Not on Windows, whose path spelling this does not cover.
+# folder names differ only in spelling (_SameFolder) or reach it through a symbolic link
+# (_SameFolderLink, link made here at configure time). Not on Windows, whose path spelling and
+# links this does not cover.
 if(NOT WIN32)
   add_test_abort(ABL_BndryPlanes_SameFolder
                  ${CMAKE_CURRENT_SOURCE_DIR}/test_files/ABL_BndryPlanes_Restart
                  ABL_BndryPlanes_Restart.i
                  "name the same folder"
                  "erf.input_bndry_planes=1 erf.bndry_file=./BndryFiles/ erf.bndry_input_var_names=velocity")
+  add_test_abort(ABL_BndryPlanes_SameFolderLink
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/ABL_BndryPlanes_Restart
+                 ABL_BndryPlanes_Restart.i
+                 "name the same folder"
+                 "erf.input_bndry_planes=1 erf.bndry_file=BndryIn erf.bndry_input_var_names=velocity")
+  set(_bp_link_dir "${CMAKE_CURRENT_BINARY_DIR}/test_files/ABL_BndryPlanes_SameFolderLink")
+  file(MAKE_DIRECTORY "${_bp_link_dir}/BndryFiles")
+  if(NOT EXISTS "${_bp_link_dir}/BndryIn")
+    file(CREATE_LINK "BndryFiles" "${_bp_link_dir}/BndryIn" SYMBOLIC)
+  endif()
 endif()
 
 if(ERF_ENABLE_MPI AND NOT WIN32)

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -153,9 +154,10 @@ int WriteBndryPlanes::rows_to_keep (const Vector<int>& steps, const Vector<doubl
                                     const bool restarting)
 {
     if (!restarting) { return 0; }
-    // The times of the run being continued are the restart's own to the last bit; this only
-    // allows for a time.dat written by hand
-    const double tol = 1.e-12 * std::max(1.0, std::abs(start_time));
+    // The times of the run being continued are the restart's own to the last bit (time.dat and
+    // the checkpoint both hold 17 digits); a few units in the last place only allow for a
+    // time.dat written by hand, and stay far below any plane spacing also at a calendar clock
+    const double tol = 16.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(start_time));
     int nkeep = 0;
     for (int i = 0; i < steps.size(); ++i) {
         if (steps[i] > start_step || times[i] > start_time + tol) { break; }
@@ -167,10 +169,10 @@ int WriteBndryPlanes::rows_to_keep (const Vector<int>& steps, const Vector<doubl
 }
 
 /**
- * Bring time.dat to the state a run starting at step start_step continues from, and say whether
- * the series already holds the plane at that step. Only the I/O rank touches the file, which is
- * rewritten through a temporary file so that a crash leaves either the old or the new one; every
- * rank gets the answer.
+ * Decide which rows of time.dat a run starting at step start_step continues from, and say whether
+ * the series already holds the plane at that step. Only the I/O rank reads the file; every rank
+ * gets the answer. The file itself is rewritten by write_planes, just before the run's first row,
+ * so a run that stops before its first plane leaves the series as it found it.
  *
  * @param start_step Step the run starts at (the restart step, or 0)
  * @param start_time Time the run starts at, as written in time.dat
@@ -224,29 +226,21 @@ bool WriteBndryPlanes::start_series (const int start_step, const double start_ti
                 if (restarting) {
                     Print() << "WriteBndryPlanes: keeping " << nkeep << " of the " << nlines
                             << " rows of " << m_time_file << " up to the restart step "
-                            << start_step << std::endl;
+                            << start_step << ", from this run's first plane on" << std::endl;
                 } else {
-                    Print() << "WriteBndryPlanes: a fresh start begins a new series; dropping the "
-                            << nlines << " rows of " << m_time_file << std::endl;
+                    Print() << "WriteBndryPlanes: a fresh start begins a new series; the "
+                            << nlines << " rows of " << m_time_file
+                            << " are dropped with this run's first plane" << std::endl;
                 }
             }
 
             // Rewrite even when every row is kept: a last row without its newline would
             // otherwise run into the next row written
-            const std::string tmp_file = m_time_file + ".tmp";
-            std::ofstream out(tmp_file, std::ios::out | std::ios::trunc);
+            m_kept_rows.clear();
             for (int i = 0; i < nkeep; ++i) {
-                out << rows[i] << '\n';
+                m_kept_rows.push_back(rows[i]);
             }
-            out.close();
-            std::error_code ec;
-            if (out.fail()) {
-                Abort("WriteBndryPlanes: cannot write " + tmp_file);
-            }
-            std::filesystem::rename(tmp_file, m_time_file, ec);
-            if (ec) {
-                Abort("WriteBndryPlanes: cannot replace " + m_time_file + " with " + tmp_file + ": " + ec.message());
-            }
+            m_rewrite_time_file = true;
         }
     }
     ParallelDescriptor::Bcast(&has_start_plane, 1, ParallelDescriptor::IOProcessorNumber(),
@@ -395,6 +389,26 @@ void WriteBndryPlanes::write_planes (const int t_step, const double time_d,
 
     // Writing time.dat
     if (ParallelDescriptor::IOProcessor()) {
+        // The rows this run continues from replace the file before its first row, through a
+        // temporary file so that a crash leaves either the old file or the new one
+        if (m_rewrite_time_file) {
+            const std::string tmp_file = m_time_file + ".tmp";
+            std::ofstream out(tmp_file, std::ios::out | std::ios::trunc);
+            for (const auto& row : m_kept_rows) {
+                out << row << '\n';
+            }
+            out.close();
+            if (out.fail()) {
+                Abort("WriteBndryPlanes: cannot write " + tmp_file);
+            }
+            std::error_code ec;
+            std::filesystem::rename(tmp_file, m_time_file, ec);
+            if (ec) {
+                Abort("WriteBndryPlanes: cannot replace " + m_time_file + " with " + tmp_file + ": " + ec.message());
+            }
+            m_rewrite_time_file = false;
+            m_kept_rows.clear();
+        }
         std::ofstream oftime(m_time_file, std::ios::out | std::ios::app);
         oftime << std::setprecision(17) << t_step << ' ' << time_d << '\n';
         oftime.close();

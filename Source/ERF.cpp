@@ -916,11 +916,19 @@ ERF::InitData_pre ()
         std::string in_dir, out_dir;
         pp.query("bndry_file", in_dir);
         pp.query("bndry_output_planes_file", out_dir);
+        // Resolve symbolic links where the path exists; a folder not made yet is compared as
+        // spelled. equivalent() also catches two names of one existing folder.
         auto folder = [] (const std::string& name) {
-            auto p = std::filesystem::absolute(std::filesystem::path(name)).lexically_normal();
+            std::error_code ec;
+            const auto abs = std::filesystem::absolute(std::filesystem::path(name), ec);
+            auto p = std::filesystem::weakly_canonical(abs, ec);
+            if (ec) { p = abs.lexically_normal(); }
             return p.has_filename() ? p : p.parent_path();
         };
-        if (!in_dir.empty() && !out_dir.empty() && folder(in_dir) == folder(out_dir)) {
+        std::error_code ec_same;
+        const bool same_folder = !in_dir.empty() && !out_dir.empty() &&
+            (folder(in_dir) == folder(out_dir) || std::filesystem::equivalent(in_dir, out_dir, ec_same));
+        if (same_folder) {
             Abort("erf.bndry_file and erf.bndry_output_planes_file name the same folder (" + in_dir +
                   "); the run would overwrite the boundary planes it reads");
         }

@@ -83,6 +83,9 @@ TEST(WriteBndryPlanes, RestartStopsAtATimeThatDoesNotIncreaseOrIsLate)
     // absolute times from a start_datetime keep their rows
     const double t0 = 1.5778368e9;
     EXPECT_EQ(WriteBndryPlanes::rows_to_keep(Steps{0, 2, 4}, Times{t0, t0 + 0.04, t0 + 0.08}, 4, t0 + 0.08, true), 3);
+    // ... but a row at the restart step 0.1 ms off is another run's, also on a calendar clock
+    // (a tolerance relative to the clock, 1e-12 of 1.6e9 s, would have taken it as this run's)
+    EXPECT_EQ(WriteBndryPlanes::rows_to_keep(Steps{0, 2, 4}, Times{t0, t0 + 0.04, t0 + 0.0801}, 4, t0 + 0.08, true), 2);
 }
 
 } // namespace

@@ -24,10 +24,11 @@ public:
                        amrex::Vector<amrex::Vector<amrex::MultiFab>>& vars_new,
                        bool is_moist);
 
-    /** Bring time.dat to the state a run starting at step start_step (at time start_time,
+    /** Decide which rows of time.dat a run starting at step start_step (at time start_time,
      *  with start_time the absolute time written in time.dat) continues from: a restart keeps
-     *  the rows the run before it wrote up to that step, a fresh start keeps none. Returns
-     *  whether the kept rows end with a plane at start_step itself.
+     *  the rows the run before it wrote up to that step, a fresh start keeps none. The file is
+     *  rewritten only when the run writes its first plane, so a run that stops before then
+     *  leaves it as it was. Returns whether the kept rows end with a plane at start_step itself.
      */
     bool start_series (int start_step, double start_time, bool restarting);
 
@@ -54,6 +55,12 @@ private:
 
     //! Variables for IO
     amrex::Vector<std::string> m_var_names;
+
+    //! Rows of time.dat the run continues from, written back before its first plane (I/O rank)
+    amrex::Vector<std::string> m_kept_rows;
+
+    //! Whether time.dat still has to be rewritten to m_kept_rows (I/O rank)
+    bool m_rewrite_time_file = false;
 
     //! Timestep and times to be stored in time.dat
     amrex::Vector<double> m_in_times;

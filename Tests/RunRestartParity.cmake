@@ -9,7 +9,9 @@
 # runs from step BNDRY_PLANES_FIRST_STEP on; BNDRY_PLANES_STEPS lists the steps the straight run
 # must have written from there; BNDRY_PLANES_STALE seeds both run directories with the time.dat
 # of an earlier run first; BNDRY_PLANES_CUT_NEWLINE removes the newline that ends the checkpoint
-# leg's time.dat, as a file edited or copied by hand may lack it; BNDRY_PLANES_READ_INPUT
+# leg's time.dat, as a file edited or copied by hand may lack it; BNDRY_PLANES_EARLY_STOP first
+# runs the restart for no step at all and requires it to leave time.dat as it was, as a restart
+# that stops before its first plane must; BNDRY_PLANES_READ_INPUT
 # names a deck, beside INPUT, that reads the restarted run's series back with erf.input_bndry_planes.
 # CHK_NRANKS/RESTART_NRANKS let the checkpoint and restart legs run at different widths;
 # REQUIRE_LEVEL0_REMAKE asserts the restart really did re-make the level-0 grids.
@@ -188,6 +190,22 @@ if(BNDRY_PLANES_CUT_NEWLINE)
     file(READ "${_bp_cut}" _bp_cut_text)
     string(REGEX REPLACE "\n$" "" _bp_cut_text "${_bp_cut_text}")
     file(WRITE "${_bp_cut}" "${_bp_cut_text}")
+endif()
+if(BNDRY_PLANES_EARLY_STOP)
+    set(_bp_series "${RESTART_DIR}/${BNDRY_PLANES_DIR}/time.dat")
+    if(NOT EXISTS "${_bp_series}")
+        message(FATAL_ERROR "RunRestartParity.cmake: BNDRY_PLANES_EARLY_STOP: the checkpoint leg wrote no ${_bp_series}")
+    endif()
+    file(READ "${_bp_series}" _bp_before)
+    run_erf_with("${launch}" "${RESTART_DIR}" "early_stop.log" ${RUN_TIMEOUT}
+            "erf.restart=${CHKFILE}" "max_step=${STEP_CHK}" "erf.check_int=-1" "erf.plot_int_1=-1"
+            ${plot2d_off} ${restart_options})
+    file(READ "${_bp_series}" _bp_after)
+    if(NOT "${_bp_before}" STREQUAL "${_bp_after}")
+        message(FATAL_ERROR "RunRestartParity.cmake: a restart that wrote no plane changed "
+                            "${BNDRY_PLANES_DIR}/time.dat\nbefore:\n${_bp_before}\nafter:\n${_bp_after}")
+    endif()
+    message(STATUS "RunRestartParity: a restart that wrote no plane left ${BNDRY_PLANES_DIR}/time.dat as it was")
 endif()
 # from the checkpoint to the end
 run_erf_with("${launch}" "${RESTART_DIR}" "restart.log" ${RUN_TIMEOUT}
