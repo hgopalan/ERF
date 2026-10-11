@@ -107,7 +107,9 @@ MovingBodies::create (const SolverChoice& sc, int max_level, const Vector<double
         ParmParse pp_root;
         int max_step = -1;
         pp_root.query("max_step", max_step);
-        if (pp_root.contains("stop_datetime")) {
+        std::string stop_datetime;
+        const bool has_stop_datetime = pp_root.query("stop_datetime", stop_datetime);
+        if (has_stop_datetime && !stop_datetime.empty()) {
             // ERF then stops at that date and ignores stop_time: take the seconds it runs for
             stop_time = stop_elapsed;
             // without start_datetime (or a start date from the initial-condition file) the start is the
