@@ -29,7 +29,7 @@ box for ten steps or so, and is checked by the runner named below.
 | `OpenFAST_ADM_Restart` | stub turbine, disk | `RunRestartParity.cmake` | restart parity of the plotfile and every log, with rows written past the checkpoint dropped; the restart aborts (changed body key, step, later stop time, added body) |
 | `OpenFAST_ADM_LES` | stub turbine, disk, precursor planes | `RunPrecursorInflow.cmake` | turbulent inflow from a precursor; body statistics |
 | `OpenFAST_ADM_CPM` | stub turbine, disk, cell perturbations | `RunOpenFASTADM.cmake` | turbulent inflow from the perturbation method; statistics |
-| `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity |
+| `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity; restart parity on two ranks, with T2's logs written by rank 1 |
 | `OpenFAST_ADM_TwoLevel` | stub turbine, disk, on level 1 of two | `RunOpenFASTADM.cmake` | the anchor level: sampled and forced on the fine patch, stepped with its step |
 | `OpenFAST_ADM_TwoLevel_Restart` | as above | `RunRestartParity.cmake` | restart parity with the fine level, every log |
 | `OpenFAST_ALM_Uniform` | stub turbine, line | `RunOpenFASTADM.cmake` | the rotating line; tip-travel limit |

@@ -826,7 +826,9 @@ the restart to stop with a message naming it. ``MovingBodies_CtDisk_Restart`` do
 same restart-parity check (with ``OVERRUN``) for the prescribed-Ct disk, asking
 for a later stop time on restart, which a run without turbines may do, and
 ``MovingBodies_Restart_ChangedDiskDensity`` requires a changed ``air_density`` to
-stop the restart.
+stop the restart. ``OpenFAST_ADM_TwoTurbines_Restart`` restarts the two-turbine
+farm on two ranks, so the second turbine's logs are written by rank 1 while the
+I/O rank trims them, and requires every turbine's logs to match.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart`_
 

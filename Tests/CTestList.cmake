@@ -1458,6 +1458,15 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # turbine's sampled flow log is the gold.
   add_test_openfast_adm(OpenFAST_ADM_TwoTurbines OpenFAST_ADM_TwoTurbines "plt00010" "T2_flow.csv" "load_x" "moving_bodies/total_load.csv")
 
+  # The farm checkpointed at step 5 and restarted to step 10 on two ranks, so turbine T2 is owned (and
+  # its logs written) by rank 1, not the I/O rank that trims the logs: after a first run that went on
+  # past the checkpoint, every turbine's logs must still drop the rows written after it.
+  add_test_restart_parity(OpenFAST_ADM_TwoTurbines_Restart OpenFAST_ADM_TwoTurbines 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
+      DATALOG "T1_erf.csv T2_erf.csv T2_flow.csv T2_correction.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+
   # The farm on one rank (both turbines owned by rank 0, one box) against two ranks with the
   # domain split (one turbine per rank): the ownership must not change the answer.
   add_test_box_parity(OpenFASTADM_TwoTurbines_BoxParity OpenFAST_ADM_TwoTurbines "plt00010"
@@ -2230,7 +2239,9 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # is cut: the run must start (the deck's own MovingBodies tests run to max_step = 1)
   add_test_abort(MovingBodies_MaxStepEndsTheRunFirst ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
       "STEP 1 ends" "stop_time=1000000.3")
-  # the bodies' level (amr.max_level = 1 by default) must exist when they are placed
+  # the bodies' level must exist when they are placed: the deck keeps amr.max_level = 1 (so the bodies
+  # live on level 1 by default) but erf.rotor.max_level = 0 stops the refinement that would make level 1,
+  # so the run starts with level 0 only (amr.max_level = 0 would instead put the bodies on level 0)
   add_test_abort(MovingBodies_AnchorLevelMissingAtStart ${_mb_cases}/OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel.i
       "the bodies live on level 1" "erf.rotor.max_level=0")
   add_test_abort(MovingBodies_CtDiskDensityMismatch ${_mb_cases}/Actuator_UniformCtDisk Actuator_UniformCtDisk.i

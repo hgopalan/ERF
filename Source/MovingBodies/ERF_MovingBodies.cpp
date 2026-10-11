@@ -539,8 +539,11 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
             }
             start_stamped.push_back(b.output_root + "_wake.csv");
         }
+        // the I/O rank trims every body's files (the output directory is shared); a turbine's owner rank
+        // appends to its own files only after this barrier
         for (const auto& f : end_stamped) { erf_actuator::trim_log_after(f, time, keep_end_rows, tol); }
         for (const auto& f : start_stamped) { erf_actuator::trim_log_after(f, time, false, tol); }
+        ParallelDescriptor::Barrier();
     }
     m_resumed = true;
 #ifdef ERF_USE_OPENFAST
