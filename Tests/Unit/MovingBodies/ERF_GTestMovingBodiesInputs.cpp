@@ -1,11 +1,19 @@
 // Contracts of the moving-bodies input reader: the actuator-disk sampling mode defaults to
 // the corrected disk for mode = adm and to plain disk sampling otherwise, an explicit choice
 // is kept, the turbine's upstream sampling distance defaults to two diameters, and the filtered
-// lifting-line correction is on by default for an actuator line only.
+// lifting-line correction is on by default for an actuator line only. The tower's and the nacelle's
+// kernel widths default to epsilon, may differ from it, need their component on and a turbine, and
+// enter the restart record, where a checkpoint without them stands for epsilon.
 
+#include <functional>
+#include <iostream>
+#include <map>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_REAL.H>
 
@@ -129,4 +137,188 @@ TEST(MovingBodiesInputs, TwoBodiesWithOneOutputRootAbort)
         pb.add("output_root", std::string("same_root"));
     }
     EXPECT_NE(erf_gtest::abort_message([] { MovingBodiesInputs::read(); }).find("output_root"), std::string::npos);
+}
+
+namespace {
+
+// a fresh turbine name per call, so repeated or shuffled tests never find keys an earlier run left
+std::string fresh_turbine (const std::string& tag, const std::string& mode = "alm")
+{
+    static int run = 0;
+    const std::string name = "Tw" + tag + std::to_string(++run);
+    set_turbine(name, mode, "");
+    return name;
+}
+
+// what f prints to the standard output (amrex::Print on the I/O rank), and its abort message if it aborts;
+// the standard output gets its buffer back however f ends
+std::string printed (const std::function<void()>& f, std::string& abort_msg)
+{
+    struct Restore {
+        std::streambuf* old;
+        ~Restore () { std::cout.rdbuf(old); }
+    };
+    std::ostringstream out;
+    Restore restore{std::cout.rdbuf(out.rdbuf())};
+    abort_msg = erf_gtest::abort_message(f);
+    return out.str();
+}
+
+std::string record_value (const std::vector<std::pair<std::string,std::string>>& r, const std::string& key)
+{
+    for (const auto& kv : r) { if (kv.first == key) { return kv.second; } }
+    return {};
+}
+
+} // namespace
+
+TEST(MovingBodiesInputs, TowerAndNacelleWidthsDefaultToEpsilonAndMayDiffer)
+{
+    std::string name = fresh_turbine("def");
+    {
+        amrex::ParmParse pb("erf.moving_bodies." + name);
+        pb.add("epsilon", 1.5);
+        pb.add("num_force_points_tower", 10);
+        pb.add("nacelle_cd", 1.0);
+        pb.add("nacelle_area", 60.0);
+    }
+    KernelWidths w = only_body(MovingBodiesInputs::read()).kernel_widths(4.0);
+    EXPECT_DOUBLE_EQ(w.rotor, 6.0);
+    EXPECT_DOUBLE_EQ(w.tower, 6.0);
+    EXPECT_DOUBLE_EQ(w.nacelle, 6.0);
+    {
+        amrex::ParmParse pb("erf.moving_bodies." + name);
+        pb.add("epsilon_tower", 3.0);
+        pb.add("epsilon_nacelle", 0.75);
+    }
+    w = only_body(MovingBodiesInputs::read()).kernel_widths(4.0);
+    EXPECT_DOUBLE_EQ(w.rotor, 6.0);
+    EXPECT_DOUBLE_EQ(w.tower, 12.0);
+    EXPECT_DOUBLE_EQ(w.nacelle, 3.0);
+}
+
+// A width for a component that is off: an abort naming both keys when the component's switch was
+// never set, a warning naming the width (the run goes on) when it was set off or mode = none forces
+// nothing; on a ct_disk, which has no tower or nacelle, a warning; a width that is not positive and
+// finite, an abort naming the key.
+TEST(MovingBodiesInputs, AComponentWidthNeedsItsComponent)
+{
+    auto read_msg = [] { return erf_gtest::abort_message([] { MovingBodiesInputs::read(); }); };
+    std::string msg;
+    std::string name = fresh_turbine("tw");
+    { amrex::ParmParse pb("erf.moving_bodies." + name); pb.add("epsilon_tower", 1.0); }
+    msg = read_msg();
+    EXPECT_NE(msg.find(name + ".epsilon_tower is given but erf.moving_bodies." + name + ".num_force_points_tower is not"),
+              std::string::npos) << msg;
+    { amrex::ParmParse pb("erf.moving_bodies." + name); pb.add("num_force_points_tower", 0); }
+    std::string out = printed([] { MovingBodiesInputs::read(); }, msg);
+    EXPECT_EQ(msg, "");
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        EXPECT_NE(out.find("Warning: erf.moving_bodies." + name + ".epsilon_tower is given but not used: erf.moving_bodies." + name +
+                           ".num_force_points_tower = 0"), std::string::npos) << out;
+    }
+
+    name = fresh_turbine("nc");
+    { amrex::ParmParse pb("erf.moving_bodies." + name); pb.add("epsilon_nacelle", 1.0); }
+    msg = read_msg();
+    EXPECT_NE(msg.find(name + ".epsilon_nacelle is given but erf.moving_bodies." + name + ".nacelle_cd is not"),
+              std::string::npos) << msg;
+    { amrex::ParmParse pb("erf.moving_bodies." + name); pb.add("nacelle_cd", 0.0); }
+    out = printed([] { MovingBodiesInputs::read(); }, msg);
+    EXPECT_EQ(msg, "");
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        EXPECT_NE(out.find(name + ".epsilon_nacelle is given but not used"), std::string::npos) << out;
+    }
+
+    // mode = none forces nothing: a warning only
+    name = fresh_turbine("none", "none");
+    { amrex::ParmParse pb("erf.moving_bodies." + name); pb.add("epsilon_tower", 1.0); pb.add("epsilon_nacelle", 1.0); }
+    out = printed([] { MovingBodiesInputs::read(); }, msg);
+    EXPECT_EQ(msg, "");
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        EXPECT_NE(out.find(name + ".epsilon_tower is given but not used: mode = none"), std::string::npos) << out;
+        EXPECT_NE(out.find(name + ".epsilon_nacelle is given but not used: mode = none"), std::string::npos) << out;
+    }
+
+    for (const std::string bad : {"0", "-1", "nan", "inf"}) {
+        name = fresh_turbine("bad");
+        { amrex::ParmParse pb("erf.moving_bodies." + name); pb.add("num_force_points_tower", 4); pb.add("epsilon_tower", bad); }
+        msg = read_msg();
+        EXPECT_NE(msg.find(name + ".epsilon_tower must be positive and finite"), std::string::npos) << bad << ": " << msg;
+    }
+
+    {
+        static int run = 0;
+        const std::string disk = "Dw" + std::to_string(++run);
+        amrex::ParmParse pp("erf.moving_bodies");
+        pp.add("bodies", disk);
+        amrex::ParmParse pb("erf.moving_bodies." + disk);
+        pb.add("type", std::string("ct_disk"));
+        pb.addarr("base_pos", std::vector<amrex::Real>{750.0, 600.0, 0.0});
+        pb.add("rotor_radius", 120.0);
+        pb.add("hub_height", 150.0);
+        pb.add("ct", 0.75);
+        pb.add("epsilon_nacelle", 1.0);
+        pb.add("nacelle_cd", 1.0);
+        out = printed([] { MovingBodiesInputs::read(); }, msg);
+        EXPECT_EQ(msg, "");
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            for (const std::string k : {"epsilon_nacelle", "nacelle_cd"}) {
+                EXPECT_NE(out.find(disk + "." + k + " is given but not used: it is for an openfast_turbine"), std::string::npos) << out;
+            }
+        }
+    }
+}
+
+// The record holds the width of every kind of point the body forces, as resolved, and no other. A
+// checkpoint record without epsilon_tower or epsilon_nacelle spread those points with its epsilon:
+// the same width now is no change, another is.
+TEST(MovingBodiesInputs, TheRestartRecordHoldsTheWidthsInUse)
+{
+    MovingBodyInputs b;
+    b.type = "openfast_turbine";
+    b.mode = "alm";
+    b.epsilon = 2.0;
+    auto r = MovingBodiesInputs::restart_record(b);
+    EXPECT_EQ(record_value(r, "epsilon_tower"), "");
+    EXPECT_EQ(record_value(r, "epsilon_nacelle"), "");
+    b.num_force_points_tower = 10;
+    b.nacelle_cd = 1.0;
+    b.nacelle_area = 60.0;
+    r = MovingBodiesInputs::restart_record(b);
+    EXPECT_EQ(record_value(r, "epsilon_tower"), "2");
+    EXPECT_EQ(record_value(r, "epsilon_nacelle"), "2");
+    b.epsilon_tower = 3.0;
+    r = MovingBodiesInputs::restart_record(b);
+    EXPECT_EQ(record_value(r, "epsilon_tower"), "3");
+
+    // mode = none forces nothing: no width but epsilon is recorded
+    {
+        MovingBodyInputs none = b;
+        none.mode = "none";
+        const auto rn = MovingBodiesInputs::restart_record(none);
+        EXPECT_EQ(record_value(rn, "epsilon_tower"), "");
+        EXPECT_EQ(record_value(rn, "epsilon_nacelle"), "");
+        EXPECT_EQ(record_value(rn, "epsilon"), "2");
+    }
+
+    // a checkpoint record without the component widths, its epsilon 2
+    std::map<std::string,std::string> chk;
+    for (const auto& kv : MovingBodiesInputs::restart_record(b)) {
+        if (kv.first != "epsilon_tower" && kv.first != "epsilon_nacelle") { chk[kv.first] = kv.second; }
+    }
+    std::string key, was, now;
+    EXPECT_TRUE(MovingBodiesInputs::changed_record_entry(chk, r, key, was, now));
+    EXPECT_EQ(key, "epsilon_tower"); EXPECT_EQ(was, "2"); EXPECT_EQ(now, "3");
+    b.epsilon_tower = 2.0;
+    EXPECT_FALSE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
+    b.epsilon_nacelle = 0.5;
+    EXPECT_TRUE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
+    EXPECT_EQ(key, "epsilon_nacelle");
+    // with the widths recorded, the record's own value counts, not epsilon
+    chk["epsilon_nacelle"] = "0.5";
+    EXPECT_FALSE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
+    // any other entry the checkpoint lacks is taken as unchanged
+    chk.erase("fllc");
+    EXPECT_FALSE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
 }

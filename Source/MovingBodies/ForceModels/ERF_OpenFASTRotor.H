@@ -2,6 +2,7 @@
 #define ERF_OPENFAST_ROTOR_H
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include <AMReX_REAL.H>
@@ -45,9 +46,9 @@ std::array<amrex::Real,3> nacelle_drag_force (const std::array<amrex::Real,3>& u
 
 /**
  * The velocity the nacelle sees, corrected for the drag point's own kernel: a Gaussian body
- * force of width epsilon induces -F / (4 pi rho epsilon^2 ... ) at its own centre, so the
+ * force F of width epsilon in a stream U induces -F / (2 pi rho U epsilon^2) at its own centre, so the
  * sampled hub velocity understates the free velocity by the factor 1 - cd area / (4 pi eps^2)
- * (Kynema's correction, here with the run's kernel width). Returns u_sampled divided by that
+ * (Kynema's correction, with the drag point's own kernel width, epsilon_nacelle). Returns u_sampled divided by that
  * factor; aborts when the factor is not positive, which means the kernel is far too narrow
  * for the nacelle's drag area.
  */
@@ -121,7 +122,7 @@ amrex::Real disk_correction_relax (amrex::Real gain, amrex::Real dt, amrex::Real
 /**
  * The corrected free stream from the disk velocity u_disk, the rotor thrust of the previous step
  * (force on the structure along the shaft, N), the previous free stream (the Ct is evaluated on it),
- * the air density, the tip radius and ERF's kernel width eps (m). With no previous loads (thrust
+ * the air density, the tip radius and the rotor's kernel width eps (m). With no previous loads (thrust
  * <= 0 or u_inf_prev <= 0) the free stream is the disk velocity itself. Ct is clamped to [0, 0.96].
  */
 DiskCorrection filtered_disk_correction (amrex::Real u_disk, amrex::Real thrust, amrex::Real u_inf_prev,
@@ -166,6 +167,20 @@ amrex::Real tip_cells_per_step (const erf_openfast::TurbineState& t, amrex::Real
  */
 void adm_rings (const erf_openfast::TurbineState& t, int num_points_t,
                 std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force);
+
+/**
+ * Every point a forcing turbine puts into the flow, appended with the kernel width each is spread
+ * with: the rotor's points with w.rotor (mode adm: the rings of adm_rings; mode alm: the hub and
+ * blade nodes of alm_points), the tower force nodes of tower_points with w.tower, and with nacelle
+ * drag one point at the hub carrying minus t.nacelle_force with w.nacelle.
+ *
+ * @param[in] mode adm or alm
+ * @param[out] pos,force 3*n positions (m) and forces on the fluid (N), appended
+ * @param[out] eps n kernel widths (m), appended
+ */
+void turbine_points (const erf_openfast::TurbineState& t, const std::string& mode, int num_points_t, bool nacelle,
+                     const KernelWidths& w, std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force,
+                     std::vector<amrex::Real>& eps);
 
 /**
  * Check that the blade force nodes lie close to the rotor plane of the hub axis: the largest

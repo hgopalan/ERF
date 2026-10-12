@@ -5,10 +5,12 @@
 // points are the force nodes themselves with the forces on the fluid, and the tip travel per
 // step that limits the time step follows from the rotor speed and the tip radius. The tower
 // points are the tower force nodes after the blades, and the nacelle drag point follows the
-// drag law with the kernel's self-induction correction.
+// drag law with the kernel's self-induction correction. A turbine's points come with the width of
+// their kind: the rotor's, the tower's and the nacelle's.
 
 #include <array>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include <AMReX_REAL.H>
@@ -309,6 +311,48 @@ TEST(OpenFASTRotor, TowerPointsAreTheTowerNodesAfterTheBlades)
     pos.clear(); f.clear();
     erf_actuator::tower_points(t, pos, f);
     EXPECT_EQ(pos.size(), 3u * (ntow - 1));
+}
+
+// Every point a turbine spreads carries the width of its kind, in the order the points are listed:
+// the actuator line's hub and blade nodes (or the disk's rings) the rotor's, the tower nodes the
+// tower's, the nacelle point at the hub the nacelle's, after whatever was listed before.
+TEST(OpenFASTRotor, TurbinePointsCarryTheWidthOfTheirKind)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
+    const int nodes = 4, ntow = 3, nt = 8;
+    TurbineState t = make_rotor(hub, axis, nodes, 120.0, 2.0e4, 3.0e3);
+    t.num_force_pts_tower = ntow;
+    t.num_force_nodes += ntow;
+    for (int k = 0; k < ntow; ++k) {
+        t.force_pos.insert(t.force_pos.end(), {hub[0], hub[1], Real(25.0 + 50.0 * k)});
+        t.force.insert(t.force.end(), {Real(1.0e3), Real(0.0), Real(0.0)});
+    }
+    t.nacelle_force = {{Real(4.0e3), Real(0.0), Real(0.0)}};
+    const KernelWidths w{Real(10.0), Real(30.0), Real(20.0)};
+    for (const std::string mode : {"alm", "adm"}) {
+        SCOPED_TRACE(mode);
+        // one point listed before, with its own width
+        std::vector<Real> pos{Real(1.0), Real(2.0), Real(3.0)}, f{Real(0.0), Real(0.0), Real(0.0)}, eps{Real(99.0)};
+        erf_actuator::turbine_points(t, mode, nt, true, w, pos, f, eps);
+        const std::size_t n_rotor = (mode == "alm") ? std::size_t(1 + 3 * nodes) : std::size_t(1 + 3 * nodes * nt);
+        ASSERT_EQ(eps.size(), 1 + n_rotor + ntow + 1);
+        ASSERT_EQ(pos.size(), 3 * eps.size());
+        EXPECT_EQ(eps[0], Real(99.0));
+        for (std::size_t p = 1; p <= n_rotor; ++p) { EXPECT_EQ(eps[p], w.rotor) << "rotor point " << p; }
+        for (std::size_t p = 1 + n_rotor; p < 1 + n_rotor + ntow; ++p) {
+            EXPECT_EQ(eps[p], w.tower) << "tower point " << p;
+            EXPECT_EQ(pos[3*p], hub[0]);   // on the tower axis
+        }
+        const std::size_t q = eps.size() - 1;
+        EXPECT_EQ(eps[q], w.nacelle);
+        for (int d = 0; d < 3; ++d) { EXPECT_EQ(pos[3*q+d], hub[d]); EXPECT_EQ(f[3*q+d], -t.nacelle_force[d]); }
+    }
+    // without nacelle drag no point at the hub is added
+    std::vector<Real> pos, f, eps;
+    erf_actuator::turbine_points(t, "alm", nt, false, w, pos, f, eps);
+    EXPECT_EQ(eps.size(), std::size_t(1 + 3 * nodes + ntow));
+    EXPECT_EQ(eps.back(), w.tower);
 }
 
 TEST(OpenFASTRotor, NacelleDragFollowsTheDragLawWithTheKernelCorrection)

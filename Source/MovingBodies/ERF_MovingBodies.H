@@ -155,7 +155,7 @@ private:
     std::vector<std::string> m_turbine_mode;                           //!< per OpenFAST turbine: adm | alm | none
     std::vector<MovingBodyInputs> m_turbine_in;                        //!< per OpenFAST turbine: its inputs (nacelle, density)
     std::vector<int> m_turbine_points_t;                               //!< ring points per turbine (adm)
-    amrex::Real m_epsilon_dx{2.0};                                     //!< spreading width, dx units
+    std::vector<amrex::Real> m_disk_epsilon;                           //!< per prescribed-Ct disk: its spreading width (dx units)
     bool m_src_defined{false};
     amrex::MultiFab m_src_x, m_src_y, m_src_z;                         //!< anchor-level momentum sources
 
@@ -215,6 +215,14 @@ private:
     bool m_axis_checked{false};
     /** Build the lifting-line correction of every turbine that asks for it, once the node layout and chords are known. */
     void build_fllc (const amrex::Geometry& geom);
+    /** The points of turbine i grouped by the kernel they are spread with, and that kernel's width (m). */
+    struct PointGroup { std::vector<amrex::Real> pos; amrex::Real eps{0.0}; };
+    /**
+     * Turbine i's force nodes by kernel on a level of x spacing dx: the hub and blade nodes with the rotor's
+     * width (epsilon), the tower nodes with epsilon_tower and, with nacelle drag, the hub with epsilon_nacelle;
+     * with mode = none, which forces nothing, every node with epsilon. The checks of what the kernels reach use them.
+     */
+    std::vector<PointGroup> turbine_point_groups (int i, amrex::Real dx) const;
     /** Correct the blade velocity nodes of turbine i in uvw (3 per velocity node) with its lifting-line correction. */
     void apply_fllc (int i, double time, std::vector<amrex::Real>& uvw);
     /** Append a row to <output_root>_fllc.csv for every corrected turbine. */

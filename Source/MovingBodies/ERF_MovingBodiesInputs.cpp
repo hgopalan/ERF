@@ -1,7 +1,11 @@
 #include "ERF_MovingBodiesInputs.H"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iomanip>
 #include <set>
+#include <sstream>
 
 #include <AMReX.H>
 #include <AMReX_ParmParse.H>
@@ -23,6 +27,41 @@ void warn_inactive (const ParmParse& pp, const std::string& prefix, const std::s
     if (pp.contains(key)) {
         Print() << "Warning: " << prefix << "." << key << " is given but not used: " << why << "\n";
     }
+}
+
+// a kernel width (cells) given for one kind of point: positive and finite
+void read_width (const ParmParse& pp, const std::string& prefix, const std::string& key, Real& v)
+{
+    if (pp.query(key.c_str(), v) && (!(v > 0.0) || !std::isfinite(v))) {
+        Abort(prefix + "." + key + " must be positive and finite (in cells of the anchor level, its x spacing)");
+    }
+}
+
+// a component's width given while the component is off: a warning when its switch was set off
+// explicitly, an abort when the switch was never set (the width then most likely meant the switch)
+void check_inactive_width (const ParmParse& pp, const std::string& prefix, const std::string& key,
+                           const std::string& switch_key, const std::string& need)
+{
+    if (!pp.contains(key)) { return; }
+    if (pp.contains(switch_key)) {
+        warn_inactive(pp, prefix, key, prefix + "." + switch_key + " = 0 puts no " + need + " in the flow");
+    } else {
+        Abort(prefix + "." + key + " is given but " + prefix + "." + switch_key + " is not; set " + prefix + "." + switch_key +
+              " > 0 for the " + need + " it spreads, or leave " + prefix + "." + key + " out");
+    }
+}
+
+// two record values agree: equal strings, or numbers equal to single precision (a checkpoint
+// written by a double build may be continued by a single one)
+bool same_record_value (const std::string& a, const std::string& b)
+{
+    if (a == b) { return true; }
+    char* ea = nullptr;
+    char* eb = nullptr;
+    const double x = std::strtod(a.c_str(), &ea);
+    const double y = std::strtod(b.c_str(), &eb);
+    if (ea == a.c_str() || eb == b.c_str() || *ea != '\0' || *eb != '\0') { return false; }
+    return std::abs(x - y) <= 1.0e-6 * std::max(1.0, std::max(std::abs(x), std::abs(y)));
 }
 
 } // namespace
@@ -190,9 +229,18 @@ MovingBodiesInputs::read ()
             if (b.nacelle_cd > 0.0 && !(b.nacelle_area > 0.0)) {
                 Abort(pre + ".nacelle_cd > 0 needs nacelle_area > 0 (m^2)");
             }
+            read_width(ppb, pre, "epsilon_tower", b.epsilon_tower);
+            read_width(ppb, pre, "epsilon_nacelle", b.epsilon_nacelle);
             if (b.mode == "none") {
-                for (const char* k : {"nacelle_cd", "nacelle_area", "num_force_points_tower"}) {
+                for (const char* k : {"nacelle_cd", "nacelle_area", "num_force_points_tower", "epsilon_tower", "epsilon_nacelle"}) {
                     warn_inactive(ppb, pre, k, "mode = none puts no force in the flow");
+                }
+            } else {
+                if (b.num_force_points_tower == 0) {
+                    check_inactive_width(ppb, pre, "epsilon_tower", "num_force_points_tower", "tower force");
+                }
+                if (!(b.nacelle_cd > 0.0)) {
+                    check_inactive_width(ppb, pre, "epsilon_nacelle", "nacelle_cd", "nacelle drag");
                 }
             }
             ppb.query("air_density", b.air_density);
@@ -228,6 +276,12 @@ MovingBodiesInputs::read ()
                 Abort(pre + ".fllc_eps_dr must be positive");
             }
         } else {
+            // the keys of an openfast_turbine: a ct_disk has no model, rotor nodes, tower or nacelle
+            for (const char* k : {"fst_file", "mode", "sampling", "num_force_points_blade", "num_force_points_tower", "nacelle_cd",
+                                  "nacelle_area", "epsilon_tower", "epsilon_nacelle", "fllc", "fllc_relax", "fllc_start_time",
+                                  "fllc_eps_chord", "fllc_eps_dr", "correction_relax", "correction_time"}) {
+                warn_inactive(ppb, pre, k, "it is for an openfast_turbine; " + pre + " is a ct_disk, spread with " + pre + ".epsilon only");
+            }
             ppb.get("rotor_radius", b.rotor_radius);
             if (!(b.rotor_radius > 0.0) || !std::isfinite(b.rotor_radius)) {
                 Abort(pre + ".rotor_radius must be positive");
@@ -285,4 +339,57 @@ MovingBodiesInputs::validate_solver (bool all_levels_anelastic, bool fixed_dt, i
                "amrex.fpe_trap_invalid, amrex.fpe_trap_zero and amrex.fpe_trap_overflow";
     }
     return std::string();
+}
+
+std::vector<std::pair<std::string,std::string>>
+MovingBodiesInputs::restart_record (const MovingBodyInputs& b)
+{
+    auto num = [] (double v) { std::ostringstream o; o << std::setprecision(17) << v; return o.str(); };
+    std::vector<std::pair<std::string,std::string>> r{
+        {"type", b.type}, {"base_x", num(b.base_pos[0])}, {"base_y", num(b.base_pos[1])}, {"base_z", num(b.base_pos[2])},
+        {"epsilon", num(b.epsilon)}, {"air_density", num(b.air_density)}};
+    // the keys the body's options use: one it ignores may change freely
+    if (b.type != "openfast_turbine" || b.mode == "adm") { r.push_back({"num_points_t", std::to_string(b.num_points_t)}); }
+    if (b.type == "openfast_turbine") {
+        r.insert(r.end(), {{"fst_file", b.fst_file}, {"mode", b.mode}, {"sampling", b.sampling},
+                           {"num_force_points_blade", std::to_string(b.num_force_points_blade)},
+                           {"num_force_points_tower", std::to_string(b.num_force_points_tower)},
+                           {"fllc", b.fllc ? "1" : "0"}});
+        if (b.mode != "none") { r.insert(r.end(), {{"nacelle_cd", num(b.nacelle_cd)}, {"nacelle_area", num(b.nacelle_area)}}); }
+        // the widths in cells, as given or taken from epsilon, after the switches that turn their points on
+        const KernelWidths w = b.kernel_widths(1.0);
+        if (b.mode != "none" && b.num_force_points_tower > 0) { r.push_back({"epsilon_tower", num(w.tower)}); }
+        if (b.mode != "none" && b.nacelle_cd > 0.0) { r.push_back({"epsilon_nacelle", num(w.nacelle)}); }
+        if (b.sampling == "upstream") { r.push_back({"sample_diameters_upstream", num(b.sample_diameters_upstream)}); }
+        if (b.sampling == "disk_corrected") {
+            r.insert(r.end(), {{"correction_relax", num(b.correction_relax)}, {"correction_time", num(b.correction_time)}});
+        }
+        if (b.fllc) {
+            r.insert(r.end(), {{"fllc_relax", num(b.fllc_relax)}, {"fllc_start_time", num(b.fllc_start_time)},
+                               {"fllc_eps_chord", num(b.fllc_eps_chord)}, {"fllc_eps_dr", num(b.fllc_eps_dr)}});
+        }
+    } else {
+        r.insert(r.end(), {{"rotor_radius", num(b.rotor_radius)}, {"hub_height", num(b.hub_height)}, {"ct", num(b.ct)},
+                           {"yaw", num(b.yaw_deg)}, {"num_points_r", std::to_string(b.num_points_r)},
+                           {"sample_diameters_upstream", num(b.sample_diameters_upstream)}});
+    }
+    return r;
+}
+
+bool
+MovingBodiesInputs::changed_record_entry (const std::map<std::string,std::string>& chk,
+                                          const std::vector<std::pair<std::string,std::string>>& now,
+                                          std::string& key, std::string& chk_value, std::string& now_value)
+{
+    for (const auto& kv : now) {
+        auto f = chk.find(kv.first);
+        if (f == chk.end() && (kv.first == "epsilon_tower" || kv.first == "epsilon_nacelle")) { f = chk.find("epsilon"); }
+        if (f != chk.end() && !same_record_value(f->second, kv.second)) {
+            key = kv.first;
+            chk_value = f->second;
+            now_value = kv.second;
+            return true;
+        }
+    }
+    return false;
 }
