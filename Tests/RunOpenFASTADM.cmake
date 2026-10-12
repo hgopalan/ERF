@@ -1,12 +1,12 @@
 # Run an OpenFAST turbine deck (OpenFAST_ADM_Uniform, OpenFAST_ALM_Uniform and their variants)
 # and check it three ways: the plotfile against its gold with fcompare; a log of the turbine
-# (FLOW_CSV: by default <output_root>_flow.csv, the sampled hub and blade-mean velocities,
-# which the rotor's induction lowers) against the committed gold log; and, row by row, that
-# the integrated momentum source (fx in SOURCE_CSV) equals minus the turbine's thrust
-# (thrust_x in TURBINE_CSV, or the FORCE_COLUMN given: load_x, the sum of thrust, tower and
-# nacelle forces, for a turbine with a forced tower and nacelle): the disk rings and the line
-# points preserve the rotor's force and the spreading is normalised exactly, so the two must
-# agree to roundoff. The turbine log's first row is the
+# (FLOW_CSV: by default <output_root>_flow.csv, the sampled hub and blade-mean velocities)
+# against the committed gold log; and, row by row, that the integrated momentum source (fx in
+# SOURCE_CSV) equals minus the turbine's thrust (thrust_x in TURBINE_CSV, or the FORCE_COLUMN
+# given: load_x, the sum of thrust, tower and nacelle forces, for a turbine with a forced tower
+# and nacelle): the line points carry the node forces, the disk rings carry each node's force
+# along the shaft and in-plane parts that cancel around the ring, and the spreading is normalised
+# exactly, so on a shaft along x the two agree to roundoff. The turbine log's first row is the
 # initial solution before any step; the source log's first row belongs to the state after the
 # first step, so turbine row r + 1 pairs with source row r.
 #
@@ -19,6 +19,10 @@
 # columns of FLOW_CSV compared with the gold, a ;-list; default all). FORCE_COLUMN = none is for a
 # turbine that adds no forcing (mode = none): SOURCE_CSV must then not be written, and thrust_x in
 # TURBINE_CSV must be non-zero in every row, so the turbine was stepped and carried a load.
+# FORCE_COLUMN = shaft_x is for an actuator disk on a tilted shaft, whose integrated source is the
+# thrust's shaft component: fx must equal -(T . n) n_x in every row, which
+# Tests/check_openfast_shaft_source.py checks with PYTHON_EXE. Optionally TURBINE_GOLD: TURBINE_CSV
+# is compared with it too, on the columns TURBINE_COLUMNS (a ;-list), to SIGDIGITS.
 
 cmake_minimum_required(VERSION 3.20)
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
@@ -41,6 +45,10 @@ if(NOT DEFINED ZERO_EXPONENT OR "${ZERO_EXPONENT}" STREQUAL "")
 endif()
 if(NOT DEFINED FORCE_COLUMN OR "${FORCE_COLUMN}" STREQUAL "")
     set(FORCE_COLUMN "thrust_x")
+endif()
+# the shaft check runs a Python script: refuse before the run, not after it
+if(FORCE_COLUMN STREQUAL "shaft_x" AND "${PYTHON_EXE}" STREQUAL "")
+    message(FATAL_ERROR "RunOpenFASTADM.cmake: FORCE_COLUMN = shaft_x needs PYTHON_EXE (no Python 3 interpreter was found)")
 endif()
 
 erf_resolve_executable(TEST_EXE "${TEST_EXE}" CONFIG "${CONFIG}"
@@ -66,6 +74,10 @@ foreach(f ${FLOW_CSV} ${TURBINE_CSV} ${SOURCE_CSV})
     file(REMOVE "${WORKING_DIRECTORY}/${f}")
 endforeach()
 file(REMOVE_RECURSE "${WORKING_DIRECTORY}/${PLTFILE}")
+file(GLOB _old_backtraces "${WORKING_DIRECTORY}/Backtrace.*")
+if(_old_backtraces)
+    file(REMOVE ${_old_backtraces})
+endif()
 execute_process(
     COMMAND ${launcher} ${TEST_EXE} ${INPUT} amrex.call_addr2line=0
     WORKING_DIRECTORY "${WORKING_DIRECTORY}"
@@ -101,11 +113,16 @@ foreach(f ${_required})
 endforeach()
 # Keep only LOG_COLUMNS of a comma-separated table, written whitespace-separated to out_file
 function(select_columns in_file out_file)
+    # the columns: LOG_COLUMNS, or the list given as a third argument
+    set(_cols "${LOG_COLUMNS}")
+    if(ARGC GREATER 2)
+        set(_cols "${ARGV2}")
+    endif()
     file(STRINGS "${in_file}" rows)
     list(GET rows 0 header)
     string(REPLACE "," ";" names "${header}")
     set(idx "")
-    foreach(c IN LISTS LOG_COLUMNS)
+    foreach(c IN LISTS _cols)
         list(FIND names "${c}" i)
         if(i LESS 0)
             message(FATAL_ERROR "RunOpenFASTADM.cmake: ${in_file} has no column ${c}: ${header}")
@@ -139,6 +156,20 @@ if(NOT logs_agree)
     message(FATAL_ERROR "RunOpenFASTADM.cmake: ${FLOW_CSV} differs from the gold log: ${log_message}\n${contents}")
 endif()
 
+# ---- the turbine log against its gold, on the chosen columns ----
+if(NOT "${TURBINE_GOLD}" STREQUAL "")
+    if("${TURBINE_COLUMNS}" STREQUAL "")
+        message(FATAL_ERROR "RunOpenFASTADM.cmake: TURBINE_GOLD needs TURBINE_COLUMNS")
+    endif()
+    select_columns("${TURBINE_GOLD}" "${WORKING_DIRECTORY}/turbine_gold_columns.txt" "${TURBINE_COLUMNS}")
+    select_columns("${WORKING_DIRECTORY}/${TURBINE_CSV}" "${WORKING_DIRECTORY}/turbine_run_columns.txt" "${TURBINE_COLUMNS}")
+    erf_compare_data_logs("${WORKING_DIRECTORY}/turbine_gold_columns.txt" "${WORKING_DIRECTORY}/turbine_run_columns.txt"
+                          ${SIGDIGITS} 2 turbine_agrees turbine_message "${ZERO_EXPONENT}")
+    if(NOT turbine_agrees)
+        file(READ "${WORKING_DIRECTORY}/${TURBINE_CSV}" contents)
+        message(FATAL_ERROR "RunOpenFASTADM.cmake: ${TURBINE_CSV} differs from its gold: ${turbine_message}\n${contents}")
+    endif()
+endif()
 # ---- integrated source equals minus the thrust, every row ----
 function(column_index csv_rows name out_var)
     list(GET csv_rows 0 header)
@@ -170,6 +201,19 @@ if(FORCE_COLUMN STREQUAL "none")
         endif()
     endforeach()
     message(STATUS "RunOpenFASTADM.cmake: plotfile matches the gold, ${FLOW_CSV} matches its gold, no momentum source was written and the turbine carried a load in ${nlast} rows")
+    return()
+endif()
+if(FORCE_COLUMN STREQUAL "shaft_x")
+    execute_process(
+        COMMAND ${PYTHON_EXE} ${CMAKE_CURRENT_LIST_DIR}/check_openfast_shaft_source.py
+                --turbine ${WORKING_DIRECTORY}/${TURBINE_CSV} --source ${WORKING_DIRECTORY}/${SOURCE_CSV}
+        OUTPUT_VARIABLE shaft_out
+        ERROR_VARIABLE shaft_out
+        RESULT_VARIABLE shaft_result)
+    if(NOT shaft_result EQUAL 0)
+        message(FATAL_ERROR "RunOpenFASTADM.cmake: the shaft-thrust check failed (${shaft_result}):\n${shaft_out}")
+    endif()
+    message(STATUS "RunOpenFASTADM.cmake: plotfile matches the gold, ${FLOW_CSV} (and ${TURBINE_CSV} if golded) match their golds, and fx equals -(T.n) n_x\n${shaft_out}")
     return()
 endif()
 file(STRINGS "${WORKING_DIRECTORY}/${SOURCE_CSV}" src_rows)
@@ -207,4 +251,4 @@ foreach(r RANGE 1 ${nsrc_data})
         message(FATAL_ERROR "RunOpenFASTADM.cmake: row ${r}: fx = ${fx} differs from -${FORCE_COLUMN} = ${minus_thrust}; the spread forces do not integrate back to the bodies' loads")
     endif()
 endforeach()
-message(STATUS "RunOpenFASTADM.cmake: plotfile matches the gold, ${FLOW_CSV} matches its gold, and fx equals -${FORCE_COLUMN} in ${nsrc_data} rows")
+message(STATUS "RunOpenFASTADM.cmake: plotfile matches the gold, ${FLOW_CSV} (and ${TURBINE_CSV} if golded) match their golds, and fx equals -${FORCE_COLUMN} in ${nsrc_data} rows")

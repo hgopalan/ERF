@@ -98,6 +98,8 @@ jobs:
               '.github/workflows/gcc.yml',
               '.github/workflows/hip.yml',
               '.github/workflows/macos.yml',
+              '.github/workflows/openfast-real.yml',
+              '.github/workflows/openfast-stub.yml',
               '.github/workflows/style.yml',
               '.github/workflows/sycl.yml',
               '.github/workflows/windows-mpi.yml',
