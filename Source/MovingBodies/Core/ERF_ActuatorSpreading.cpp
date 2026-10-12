@@ -22,7 +22,7 @@ namespace erf_actuator {
 namespace {
 
 // The kernel weight exp(-r^2/eps^2) of face (i,j,k) of grid dir for the point (px,py,pz) (one
-// periodic image), 0 beyond the cut-off radius sqrt(reach2) = 3 eps
+// periodic image) of width eps, 0 beyond the cut-off radius sqrt(reach2) = 3 eps
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 Real kernel_weight (int dir, int i, int j, int k, Real px, Real py, Real pz,
                     const GpuArray<Real,AMREX_SPACEDIM>& plo,
@@ -64,9 +64,23 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
                const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom,
                MultiFab& src_x, MultiFab& src_y, MultiFab& src_z)
 {
+    spread_forces(pos, force, std::vector<Real>(pos.size() / 3, epsilon), z_phys_nd, detJ_cc, geom, src_x, src_y, src_z);
+}
+
+void
+spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, const std::vector<Real>& epsilon,
+               const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom,
+               MultiFab& src_x, MultiFab& src_y, MultiFab& src_z)
+{
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() == force.size() && pos.size() % 3 == 0,
                                      "spread_forces: one x,y,z force per x,y,z point");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(epsilon > 0.0, "spread_forces: epsilon must be positive");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(3 * epsilon.size() == pos.size(), "spread_forces: one kernel width per point");
+    for (std::size_t p = 0; p < epsilon.size(); ++p) {
+        if (!(epsilon[p] > 0.0) || !std::isfinite(epsilon[p])) {
+            Abort("spread_forces: point " + std::to_string(p) + " (0-based) has the kernel width " + std::to_string(epsilon[p]) +
+                  " m; it must be positive and finite");
+        }
+    }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(src_x.ixType() == IndexType(IntVect(1,0,0)) && src_y.ixType() == IndexType(IntVect(0,1,0)) &&
                                      src_z.ixType() == IndexType(IntVect(0,0,1)),
                                      "spread_forces: src_x, src_y and src_z must be face-centred in x, y and z");
@@ -103,17 +117,12 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
         dlo[d] = geom.Domain().smallEnd(d);
         dhi[d] = geom.Domain().bigEnd(d);
     }
-    const Real inv_eps2 = Real(1.0) / (epsilon * epsilon);
-    const Real reach2 = Real(9.0) * epsilon * epsilon;
     const bool has_znd = (z_phys_nd != nullptr);
     const bool has_detj = (detJ_cc != nullptr);
 
-    // Work per point over the faces within its reach, so the cost is npts x (6 eps / dx)^3
-    // (npts x (6 eps / dx)^2 x nz with z_phys_nd) rather than nfaces x npts. A point near a periodic boundary is visited again as its
-    // periodic image(s), which is how the kernel wraps.
-    const int reach_cells[3] = {static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[0])) + 1,
-                                static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[1])) + 1,
-                                static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[2])) + 1};
+    // Work per point over the faces within its reach, so the cost is the sum over the points of
+    // (6 eps_p / dx)^3 ((6 eps_p / dx)^2 x nz with z_phys_nd) rather than nfaces x npts. A point near a periodic
+    // boundary is visited again as its periodic image(s), which is how the kernel wraps.
     // the index box of the faces of grid dir within reach of a point at (px,py,pz); with z_phys_nd
     // (terrain-following or stretched) a face's height is not its index times dz, so the box takes
     // every k a height within reach may lie in, from the mesh's bounds (all of them for a level
@@ -121,17 +130,18 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
     // (bounds from the boxes that reach the ground do not hold for a box aloft over higher ground)
     ZBounds zb = has_znd ? mesh_z_bounds(*z_phys_nd, geom) : ZBounds{};
     if (!zb.all_ground) { zb = ZBounds{}; }
-    auto reach_box = [&](int dir, Real px, Real py, Real pz) {
+    auto reach_box = [&](int dir, Real px, Real py, Real pz, Real eps) {
         const Real pc[3] = {px, py, pz};
         IntVect lo, hi;
         for (int d = 0; d < 3; ++d) {
+            const int reach_cells = static_cast<int>(std::ceil(Real(3.0) * eps / dx[d])) + 1;
             const Real fi = (pc[d] - plo[d]) / dx[d] - ((d == dir) ? Real(0.0) : Real(0.5));
-            lo[d] = static_cast<int>(std::floor(fi)) - reach_cells[d];
-            hi[d] = static_cast<int>(std::floor(fi)) + reach_cells[d] + 1;
+            lo[d] = static_cast<int>(std::floor(fi)) - reach_cells;
+            hi[d] = static_cast<int>(std::floor(fi)) + reach_cells + 1;
         }
         if (has_znd) {
             int kb = dlo[2], kt = dhi[2];
-            zb.k_range(pz - Real(3.0) * epsilon, pz + Real(3.0) * epsilon, dlo[2], dhi[2], kb, kt);
+            zb.k_range(pz - Real(3.0) * eps, pz + Real(3.0) * eps, dlo[2], dhi[2], kb, kt);
             // the faces bounding those cells, one more each way for the faces of a cell's neighbours
             lo[2] = std::max(kb - 1, dlo[2]);
             hi[2] = std::min(kt + 2, dhi[2] + 1);
@@ -139,14 +149,14 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
         return Box(lo, hi, IntVect::TheDimensionVector(dir));
     };
     // the periodic images of a point that can reach the domain: shifts of -n L .. +n L per
-    // periodic direction, with n the number of domain widths the kernel reaches (one unless
-    // the domain is narrower than 3 epsilon, as in a unit test)
-    int n_img[2] = {0, 0};
-    for (int d = 0; d < 2; ++d) {
-        if (per[d] != 0) { n_img[d] = static_cast<int>(std::ceil(Real(3.0) * epsilon / period[d])); }
-    }
+    // periodic direction, with n the number of domain widths its kernel reaches (one unless
+    // the domain is narrower than 3 epsilon_p, as in a unit test)
     std::vector<std::array<Real,3>> images;
-    auto point_images = [&](Real px, Real py, Real pz) {
+    auto point_images = [&](Real px, Real py, Real pz, Real eps) {
+        int n_img[2] = {0, 0};
+        for (int d = 0; d < 2; ++d) {
+            if (per[d] != 0) { n_img[d] = static_cast<int>(std::ceil(Real(3.0) * eps / period[d])); }
+        }
         images.clear();
         for (int sx = -n_img[0]; sx <= n_img[0]; ++sx) {
             for (int sy = -n_img[1]; sy <= n_img[1]; ++sy) {
@@ -169,9 +179,12 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
         for (int dir = 0; dir < 3; ++dir) {
             const Box fbx = owned_faces(dir, vbx);
             for (int p = 0; p < npts; ++p) {
-                point_images(pos[3*p], pos[3*p+1], pos[3*p+2]);
+                const Real eps = epsilon[p];
+                const Real inv_eps2 = Real(1.0) / (eps * eps);
+                const Real reach2 = Real(9.0) * eps * eps;
+                point_images(pos[3*p], pos[3*p+1], pos[3*p+2], eps);
                 for (const auto& q : images) {
-                    const Box rb = reach_box(dir, q[0], q[1], q[2]) & fbx;
+                    const Box rb = reach_box(dir, q[0], q[1], q[2], eps) & fbx;
                     if (rb.isEmpty()) { continue; }
                     const Real qx = q[0], qy = q[1], qz = q[2];
                     Real* np = &p_norm[3*p+dir];
@@ -195,7 +208,7 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
             if (!(norm[3*p+dir] > Real(0.0))) {
                 Abort("spread_forces: point (" + std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) +
                       ", " + std::to_string(pos[3*p+2]) + ") reaches no face of the mesh within 3 epsilon = " +
-                      std::to_string(3.0 * epsilon) + " m; actuator points must lie inside the domain");
+                      std::to_string(3.0 * epsilon[p]) + " m; actuator points must lie inside the domain");
             }
         }
     }
@@ -210,9 +223,12 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
             for (int p = 0; p < npts; ++p) {
                 const Real f_over_s = force[3*p+dir] / norm[3*p+dir];
                 if (f_over_s == Real(0.0)) { continue; }
-                point_images(pos[3*p], pos[3*p+1], pos[3*p+2]);
+                const Real eps = epsilon[p];
+                const Real inv_eps2 = Real(1.0) / (eps * eps);
+                const Real reach2 = Real(9.0) * eps * eps;
+                point_images(pos[3*p], pos[3*p+1], pos[3*p+2], eps);
                 for (const auto& q : images) {
-                    const Box rb = reach_box(dir, q[0], q[1], q[2]) & fbx;
+                    const Box rb = reach_box(dir, q[0], q[1], q[2], eps) & fbx;
                     if (rb.isEmpty()) { continue; }
                     const Real qx = q[0], qy = q[1], qz = q[2];
                     ParallelFor(rb, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept

@@ -2,10 +2,20 @@
 #define ERF_MOVING_BODIES_INPUTS_H
 
 #include <array>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <AMReX_REAL.H>
+
+/** The Gaussian widths (m) a body's points are spread with, one per kind of point. */
+struct KernelWidths
+{
+    amrex::Real rotor{0.0};     //!< the rotor's points: blade nodes and the hub node (alm), ring points (adm), a disk's points
+    amrex::Real tower{0.0};     //!< an OpenFAST turbine's tower force nodes
+    amrex::Real nacelle{0.0};   //!< an OpenFAST turbine's nacelle drag point
+};
 
 /**
  * One body from the erf.moving_bodies.<name>.* input block.
@@ -15,7 +25,10 @@ struct MovingBodyInputs
     std::string name;
     std::string type;                        //!< openfast_turbine | ct_disk
     std::array<amrex::Real,3> base_pos{{0.0, 0.0, 0.0}}; //!< tower base in ERF coordinates (m)
-    amrex::Real epsilon{2.0};                //!< Gaussian spreading width in cells of the anchor level (its x spacing)
+    amrex::Real epsilon{2.0};                //!< Gaussian spreading width of the rotor's points, in cells of the anchor
+                                             //!< level (its x spacing); the default of epsilon_tower and epsilon_nacelle
+    amrex::Real epsilon_tower{-1.0};         //!< width of the tower force nodes, in the same cells (-1: epsilon)
+    amrex::Real epsilon_nacelle{-1.0};       //!< width of the nacelle drag point, in the same cells (-1: epsilon)
     std::string output_root;                 //!< prefix of the per-body diagnostics files
     // openfast_turbine
     std::string fst_file;                    //!< OpenFAST primary input file
@@ -44,6 +57,13 @@ struct MovingBodyInputs
     amrex::Real correction_relax{-1.0};     //!< disk_corrected: relaxation of the free-stream update (-1: from its gain; (0,1]: fixed, 1 = none)
     amrex::Real correction_time{-1.0};      //!< with correction_relax = -1: the update's time scale, s (-1: rotor radius / free stream; 0: none)
     amrex::Real air_density{1.225};          //!< air density (kg/m^3): ct_disk thrust; turbines: nacelle drag, lifting-line correction, disk_corrected momentum theory (must equal the model's AirDens)
+
+    /** The widths (m) on a level of x spacing dx: epsilon_tower and epsilon_nacelle fall back to epsilon when not given. */
+    KernelWidths kernel_widths (amrex::Real dx) const
+    {
+        return {epsilon * dx, ((epsilon_tower > 0.0) ? epsilon_tower : epsilon) * dx,
+                ((epsilon_nacelle > 0.0) ? epsilon_nacelle : epsilon) * dx};
+    }
 };
 
 /**
@@ -57,13 +77,15 @@ struct MovingBodyInputs
  *   erf.moving_bodies.T1.sampling    = disk_corrected     (adm: disk | disk_corrected | upstream; upstream samples the free stream
  *                                                          sample_diameters_upstream diameters ahead and keeps OpenFAST's BEM)
  *   erf.moving_bodies.T1.num_force_points_blade = 50
- *   erf.moving_bodies.T1.num_force_points_tower = 0    (> 0: the tower's loads from OpenFAST forced too)
- *   erf.moving_bodies.T1.nacelle_cd  = 0                (> 0 with nacelle_area: a drag point at the hub)
- *   erf.moving_bodies.T1.nacelle_area = 0               (m^2)
+ *   erf.moving_bodies.T1.num_force_points_tower = 10   (> 0: the tower's loads from OpenFAST forced too; default 0)
+ *   erf.moving_bodies.T1.nacelle_cd  = 1.0              (> 0 with nacelle_area: a drag point at the hub; default 0)
+ *   erf.moving_bodies.T1.nacelle_area = 60.0            (m^2; default 0)
  *   erf.moving_bodies.T1.fllc        = true               (alm: filtered lifting-line correction; the alm default, set false to run without it)
  *   erf.moving_bodies.T1.fllc_relax  = 0.1                fllc_start_time = 0, fllc_eps_chord = 0.25, fllc_eps_dr = 1
  *   erf.moving_bodies.T1.output_root = moving_bodies/T1
- *   erf.moving_bodies.T1.epsilon     = 2.0                (spreading width, dx units)
+ *   erf.moving_bodies.T1.epsilon     = 2.0                (spreading width of the rotor's points, dx units)
+ *   erf.moving_bodies.T1.epsilon_tower   = 2.0            (tower force nodes, needs num_force_points_tower > 0; default epsilon)
+ *   erf.moving_bodies.T1.epsilon_nacelle = 2.0            (nacelle drag point, needs nacelle_cd > 0; default epsilon)
  *   erf.moving_bodies.D1.type        = ct_disk
  *   erf.moving_bodies.D1.base_pos    = 1000 1000 0
  *   erf.moving_bodies.D1.rotor_radius = 120
@@ -118,6 +140,25 @@ struct MovingBodiesInputs
 
     /** The anchor level for the input (-1: the finest level). */
     static int resolve_anchor_level (int requested, int max_level) { return requested < 0 ? max_level : requested; }
+
+    /**
+     * The inputs that place a body and decide how it forces the flow, as key/value pairs for the
+     * checkpoint: a restart that changes one of them would continue another run's state. Only the
+     * keys the body's options read are listed; the kernel widths are the resolved ones (cells).
+     */
+    static std::vector<std::pair<std::string,std::string>> restart_record (const MovingBodyInputs& b);
+
+    /**
+     * Find the first entry of the record `now` that differs from the checkpoint's record `chk`;
+     * returns false when none does. Numbers agree to single precision (a checkpoint written by a
+     * double build may be continued by a single one). A checkpoint record without epsilon_tower or
+     * epsilon_nacelle spread the tower and the nacelle with its epsilon, so those entries are
+     * compared with its epsilon; any other entry the checkpoint lacks is taken as unchanged.
+     * @param[out] key,chk_value,now_value the entry that differs
+     */
+    static bool changed_record_entry (const std::map<std::string,std::string>& chk,
+                                      const std::vector<std::pair<std::string,std::string>>& now,
+                                      std::string& key, std::string& chk_value, std::string& now_value);
 };
 
 #endif

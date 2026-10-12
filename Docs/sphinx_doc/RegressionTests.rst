@@ -716,6 +716,23 @@ row, and the plotfile with the tower wake matches its gold;
 on a box face and requires the plotfiles and flow logs to agree with the
 one-box run.
 
+``OpenFAST_ALM_ComponentWidths`` is that deck with a kernel width for each kind
+of point: the blade and hub nodes 1 cell (``epsilon``), the tower force nodes
+2 cells (``epsilon_tower``) and the nacelle drag point 1.5 cells
+(``epsilon_nacelle``). The plotfile and ``T1_flow.csv`` match their golds and
+the integrated source still equals minus ``load_x``, which holds whatever the
+widths are; which point gets which width is checked by the gtest
+``OpenFASTRotor.TurbinePointsCarryTheWidthOfTheirKind``.
+``OpenFAST_ALM_Tower_ExplicitWidths`` runs ``OpenFAST_ALM_Tower`` with and
+without ``epsilon_tower`` and ``epsilon_nacelle`` given equal to ``epsilon``
+and requires the two plotfiles to be identical (zero tolerance, one machine):
+widths that are not given are ``epsilon``, and ``OpenFAST_ALM_Tower``'s own
+gold then holds the shared width to its answers.
+``OpenFASTALM_ComponentWidths_BoxParity`` puts the tower axis on
+a box face, ``OpenFAST_ALM_ComponentWidths_Restart`` restarts it from step 5
+exactly, and ``MovingBodies_Restart_ChangedTowerWidth`` requires a restart
+with another ``epsilon_tower`` to stop, naming it.
+
 ``OpenFAST_ALM_FLLC`` runs the actuator-line deck with the filtered
 lifting-line correction on (the stub reports a chord of 6 m, so the optimal
 kernel is 1.5 m against the run's 100 m): the correction log
@@ -726,10 +743,11 @@ velocities the blades see, not the force identity).
 step 10: the relaxed correction comes back from the checkpoint, so the
 plotfile and the correction log must equal the straight run's exactly.
 
-Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_ComponentWidths`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_ComponentWidths`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_ComponentWidths
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart
 
@@ -764,9 +782,19 @@ on rank 0) against two ranks with the domain split (one turbine per rank) and
 requires the plotfiles and ``T2_flow.csv`` to agree, so the ownership does
 not change the answer.
 
-Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`_
+``OpenFAST_ADM_TwoWidths`` is that farm with a kernel width per turbine (T1
+2 cells, T2 1 cell, which also sets T2's filtered-disk correction): the same
+checks against its own golds and a box-parity twin.
+``OpenFAST_ADM_DiskAndTurbine`` puts a prescribed-Ct disk spread over 1 cell
+where T2 stood, behind the turbine spread over 2: the disk's log ``D2_disk.csv``
+and the plotfile match their golds and the integrated source equals minus the
+total load of both bodies.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoWidths`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskAndTurbine`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoWidths`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoWidths
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskAndTurbine`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskAndTurbine
 
 Real OpenFAST on terrain
 ------------------------
@@ -854,8 +882,8 @@ must equal the straight run's with zero tolerance and its logs (the wake
 average, the correction, the turbine, flow and statistics logs, the momentum
 source and the total load) must match to ten significant digits. The run that
 writes the checkpoint goes on to step 10 (``OVERRUN``), so its logs already
-hold rows past the checkpoint, which the restart must drop; the four OpenFAST
-restart-parity tests all run this way.
+hold rows past the checkpoint, which the restart must drop; every OpenFAST
+restart-parity test runs this way.
 
 ``MovingBodies_Restart_ChangedBodyKey``, ``_ChangedStep``, ``_LaterStopTime``
 and ``_AddedBody`` (``Tests/RunRestartAbort.cmake``) restart the same

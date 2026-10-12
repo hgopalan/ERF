@@ -34,10 +34,13 @@ terrain file of `../Real_Terrain/Askervein`, both copied next to the deck by the
 | `OpenFAST_ADM_LES` | stub turbine, disk, precursor planes | `RunPrecursorInflow.cmake` | turbulent inflow from a precursor; body statistics |
 | `OpenFAST_ADM_CPM` | stub turbine, disk, cell perturbations | `RunOpenFASTADM.cmake` | turbulent inflow from the perturbation method; statistics |
 | `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity; restart parity on two ranks, with T2's logs written by rank 1 |
+| `OpenFAST_ADM_TwoWidths` | two stub turbines, disks, a kernel width each | `RunOpenFASTADM.cmake` | plotfile, T2's flow log, `fx == -load_x` |
+| `OpenFAST_ADM_DiskAndTurbine` | stub turbine (disk, 2 cells) and a prescribed-Ct disk (1 cell) | `RunOpenFASTADM.cmake` | the disk's log, `fx == -load_x` of both bodies |
 | `OpenFAST_ADM_TwoLevel` | stub turbine, disk, on level 1 of two | `RunOpenFASTADM.cmake` | the anchor level: sampled and forced on the fine patch, stepped with its step |
 | `OpenFAST_ADM_TwoLevel_Restart` | as above | `RunRestartParity.cmake` | restart parity with the fine level, every log |
 | `OpenFAST_ALM_Uniform` | stub turbine, line | `RunOpenFASTADM.cmake` | the rotating line; tip-travel limit |
 | `OpenFAST_ALM_Tower` | stub turbine, line, tower, nacelle | `RunOpenFASTADM.cmake` | `fx == -load_x` with the tower and nacelle |
+| `OpenFAST_ALM_ComponentWidths` | stub turbine, line, tower, nacelle, each with its own kernel width | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake`, `RunRestartAbort.cmake` | plotfile, flow log, `fx == -load_x`; restart parity; a changed `epsilon_tower` stops a restart (`OpenFAST_ALM_Tower_ExplicitWidths`, `RunOptionParity.cmake`: widths given equal to `epsilon` change nothing) |
 | `OpenFAST_ALM_FLLC` | stub turbine, line, lifting-line correction | `RunOpenFASTADM.cmake` | the correction log |
 | `OpenFAST_ALM_FLLC_Restart` | as above | `RunRestartParity.cmake` | restart parity of the correction and every log |
 | `OpenFAST_ADM_Askervein` | IEA 15 MW, **real OpenFAST**, disk, on the Askervein summit | `RunOpenFASTADM.cmake` | plotfile, flow and turbine logs (1e-6, six digits), `fx == -(T.n) n_x` (`Tests/check_openfast_shaft_source.py`) |
@@ -53,8 +56,9 @@ level above the finest or missing at the start, a stop time that is not a
 whole number of steps (of the single level, and of level 0 of two), a
 prescribed-Ct disk's `air_density` off ERF's density, a finer level over the
 bodies, floating-point traps with a turbine, an out-of-range
-`correction_relax`, and an actuator-line tip that sweeps more cells per step
-than `alm_max_tip_cells` allows. `MovingBodies_StopDatetime` runs `OpenFAST_ADM_Restart` to
+`correction_relax`, an actuator-line tip that sweeps more cells per step
+than `alm_max_tip_cells` allows, a nacelle kernel too narrow for its drag area (correction factor under 0.5),
+and a tower width given without a tower. `MovingBodies_StopDatetime` runs `OpenFAST_ADM_Restart` to
 a `stop_datetime` past the deck's `stop_time` and requires it to get there.
 
 The decks that do not set `sampling` run the default `disk_corrected`; on the

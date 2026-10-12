@@ -2560,7 +2560,7 @@ The run aborts at start-up, naming the input, unless it has:
   date); the span from the start to the stop time must be a whole number of ``erf.fixed_dt``
   steps, since ERF would cut the last one, unless ``max_step`` ends the run first;
 - the bodies on one level, the anchor level (``erf.moving_bodies.anchor_level``), whose grids
-  cover every body point with the kernel's reach; no finer level may cover any of them, since
+  cover every body point with its kernel's reach; no finer level may cover any of them, since
   the average-down would overwrite the force there;
 - with an ``openfast_turbine``, no floating-point traps (``amrex.fpe_trap_invalid``,
   ``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow`` all off), since OpenFAST raises
@@ -2568,14 +2568,19 @@ The run aborts at start-up, naming the input, unless it has:
 
 Every real input must be finite. Bodies are named in ``erf.moving_bodies.bodies``; each body
 has its own ``erf.moving_bodies.<name>.*`` block. The common cases of a key that the chosen
-options do not use (``fllc_relax`` with ``fllc = false``, say) are reported with a warning;
+options do not use (``fllc_relax`` with ``fllc = false``, say) are reported with a warning
+(with ``mode`` adm or alm, ``epsilon_tower`` or ``epsilon_nacelle`` given while
+``num_force_points_tower`` or ``nacelle_cd`` is not set at all aborts instead, as the width then
+most likely meant the component to be on; a ``ct_disk`` warns about every key of an
+``openfast_turbine``);
 ``amrex.parmparse.verbose = 1`` lists every input that was never read. The velocity at each
 body's nodes is sampled from the flow every step unless ``erf.moving_bodies.prescribed_velocity``
 is given.
 
 A restart continues the same bodies with the same inputs: the bodies, the keys of their blocks
 that place or force them under the chosen options (base_pos, epsilon, air_density, the model
-file, mode, sampling and its keys, the force points, the nacelle, the FLLC keys; a ct_disk's
+file, mode, sampling and its keys, the force points, the nacelle, the widths of the tower and
+nacelle points when they are forced, the FLLC keys; a ct_disk's
 geometry, Ct and sampling distance), the anchor level and its step must match the checkpoint, and
 with OpenFAST turbines the stop time must not lie past the one they were started with (OpenFAST
 keeps it in its own checkpoint); the run aborts otherwise, naming the changed input. The diagnostics files keep
@@ -2596,8 +2601,22 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | 0 puts the base on the ground                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.epsilon**                   | Gaussian width of the force spreading, in units of the   | Real > 0                 | 2.0                      |
-|                                                        | anchor level's x cell size; every body must use the      |                          |                          |
-|                                                        | same value                                               |                          |                          |
+|                                                        | anchor level's x cell size: of the rotor's points (the   |                          |                          |
+|                                                        | blade and hub nodes of an actuator line, the rings of a  |                          |                          |
+|                                                        | disk, a ct_disk's points), and of the tower and nacelle  |                          |                          |
+|                                                        | points unless their own widths are given; each body has  |                          |                          |
+|                                                        | its own                                                  |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.epsilon_tower**             | openfast_turbine, mode adm or alm, with                  | Real > 0                 | epsilon                  |
+|                                                        | num_force_points_tower > 0: width of the tower force     |                          |                          |
+|                                                        | points, in the same units                                |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.epsilon_nacelle**           | openfast_turbine, mode adm or alm, with nacelle_cd > 0:  | Real > 0                 | epsilon                  |
+|                                                        | width of the nacelle drag point, in the same units;      |                          |                          |
+|                                                        | also the width in its kernel correction, which needs     |                          |                          |
+|                                                        | nacelle_cd * nacelle_area at most 2 pi                   |                          |                          |
+|                                                        | epsilon_nacelle^2 (in metres), or the start-up audit     |                          |                          |
+|                                                        | aborts                                                   |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.output_root**               | prefix of the body's diagnostics files, one per body     | String                   | <diagnostics_dir>/<name> |
 |                                                        | (two bodies with one prefix abort); the files are        |                          |                          |
@@ -2624,7 +2643,10 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.nacelle_cd**                | openfast_turbine: drag coefficient of a nacelle drag     | Real >= 0                | 0                        |
 |                                                        | point at the hub (0: no nacelle drag), on the velocity   |                          |                          |
-|                                                        | at the hub and with air_density                          |                          |                          |
+|                                                        | at the hub and with air_density; nacelle_cd *            |                          |                          |
+|                                                        | nacelle_area must not exceed 2 pi epsilon_nacelle^2      |                          |                          |
+|                                                        | (epsilon_nacelle, or epsilon when it is not given, in    |                          |                          |
+|                                                        | metres), or the start-up audit aborts                    |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
@@ -2751,7 +2773,8 @@ at the start of the step whose forcing they describe.
   and the relaxation used.
 - ``<output_root>_fllc.csv`` (FLLC): the correction's size.
 - ``<output_root>_disk.csv`` (ct_disk): time, upstream speed, disk speed, thrust, power and the
-  integrated source.
+  integrated source of all bodies projected on the disk's normal (the disk's own thrust when it is
+  the only body).
 - ``<output_root>_wake.csv`` and ``<output_root>_wake_avg.csv`` (wake lines): the instantaneous
   and running-averaged velocity along the lines.
 - ``<output_root>_stats.csv``: running statistics from ``avg_start`` on, rewritten whole at each

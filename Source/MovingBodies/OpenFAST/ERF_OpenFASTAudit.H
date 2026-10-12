@@ -51,14 +51,17 @@ std::vector<AuditFinding> audit_model (const MovingBodyInputs& b, amrex::Real er
 
 /**
  * The rotor against the domain and the mesh: the swept disc must clear the ground, the top
- * and every non-periodic side (fatal) and the base must lie in the domain (fatal); the mesh
- * should resolve the rotor (at least 8 cells across the diameter), the kernel should be at
- * least a cell wide, an actuator line's points should be no farther apart than the kernel,
- * and the kernel should not be cut by a non-periodic boundary (warnings).
+ * and every non-periodic side (fatal), the base must lie in the domain (fatal), and the nacelle's
+ * drag area must stay at or below 2 pi epsilon_nacelle^2, where its kernel correction factor
+ * 1 - cd area / (4 pi epsilon_nacelle^2) reaches 0.5 and the linear estimate stops holding (fatal); the
+ * mesh should resolve the rotor (at least 8 cells across the diameter), every kernel in use should be
+ * at least a cell wide, an actuator line's and the tower's points should be no farther apart than
+ * their kernels, and the rotor's kernel should not be cut by a non-periodic boundary (warnings).
+ * @param eps the widths (m) the rotor's, the tower's and the nacelle's points are spread with
  * @param prob_lo,prob_hi the domain, dx the cell sizes, periodic 1 for each periodic direction,
  *        ground_z the height of the terrain surface under the hub (prob_lo z on a flat mesh)
  */
-std::vector<AuditFinding> audit_geometry (const TurbineState& t, const MovingBodyInputs& b, amrex::Real epsilon,
+std::vector<AuditFinding> audit_geometry (const TurbineState& t, const MovingBodyInputs& b, const KernelWidths& eps,
                                           const std::array<amrex::Real,3>& prob_lo, const std::array<amrex::Real,3>& prob_hi,
                                           const std::array<amrex::Real,3>& dx, const std::array<int,3>& periodic,
                                           amrex::Real ground_z);

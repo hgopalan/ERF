@@ -76,6 +76,9 @@ erf_openfast::TurbineState rotor (const std::string& name, const std::array<Real
     return t;
 }
 
+// every kind of point spread with one width (m)
+KernelWidths same (Real eps) { return {eps, eps, eps}; }
+
 MovingBodyInputs body (const std::string& fst, const std::string& mode = "adm")
 {
     MovingBodyInputs b;
@@ -158,42 +161,94 @@ TEST(OpenFASTAudit, GeometryChecksTheRotorAgainstTheDomainAndTheMesh)
     b.base_pos = {{750.0, 600.0, 0.0}};
     // a 240 m rotor at 150 m on 50 m cells with a 100 m kernel: fine but coarse (4.8 cells across)
     auto t = rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 10);
-    auto f = erf_openfast::audit_geometry(t, b, 100.0, plo, phi, dx, per, 0.0);
+    auto f = erf_openfast::audit_geometry(t, b, same(100.0), plo, phi, dx, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "cells across the rotor diameter"));
     // on 10 m cells the default 16 ring points sit 47 m apart at the tip, over two 20 m kernel widths: a note
-    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    f = erf_openfast::audit_geometry(t, b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "ring points"));
     // with 48 points nothing is left to say
     b.num_points_t = 48;
-    EXPECT_TRUE(erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0).empty());
+    EXPECT_TRUE(erf_openfast::audit_geometry(t, b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0).empty());
     b.num_points_t = 16;
     // the rotor cuts the ground / the top: fatal
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 100.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 100.0}}, 120.0, 10), b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "below the ground"));
     // on terrain the ground under the hub is the terrain surface: a 150 m hub with a 120 m rotor clears
     // flat ground but not a 100 m hill beneath it
-    EXPECT_EQ(fatal_count(erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0)), 0);
-    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 100.0);
+    EXPECT_EQ(fatal_count(erf_openfast::audit_geometry(t, b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0)), 0);
+    f = erf_openfast::audit_geometry(t, b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 100.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "terrain surface at z = 100"));
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 500.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 500.0}}, 120.0, 10), b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "above the domain top"));
     // the base outside the domain: fatal
     b.base_pos = {{-10.0, 600.0, 0.0}};
-    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    f = erf_openfast::audit_geometry(t, b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "outside the domain in x"));
     b.base_pos = {{750.0, 600.0, 0.0}};
     // a non-periodic y boundary: the rotor near it warns about the kernel, across it is fatal
     const std::array<int,3> per_y{{1, 0, 0}};
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 150.0, 150.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per_y, 0.0);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 150.0, 150.0}}, 120.0, 10), b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per_y, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "kernel"));
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 100.0, 150.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per_y, 0.0);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 100.0, 150.0}}, 120.0, 10), b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per_y, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "non-periodic y boundary"));
     // an actuator line whose points are farther apart than the kernel; a kernel under a cell
     b.mode = "alm";
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 4), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 4), b, same(20.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "farther apart than the kernel"));
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 50), b, 5.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 50), b, same(5.0), plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "narrower than the smallest cell"));
+}
+
+// Every kernel the body spreads with is audited under its own key: a tower or nacelle kernel under a
+// cell warns, the tower's force points farther apart than its kernel warn, and a nacelle drag area
+// above 2 pi epsilon_nacelle^2 is fatal (its kernel correction factor falls under 0.5, where the linear
+// estimate fails); widths of points that are not forced, or of tower nodes the model lacks, say nothing.
+TEST(OpenFASTAudit, EveryKernelInUseIsAuditedUnderItsKey)
+{
+    const std::array<Real,3> plo{{0.0, 0.0, 0.0}}, phi{{3000.0, 1200.0, 600.0}}, dx{{10.0, 10.0, 10.0}};
+    const std::array<int,3> per{{1, 1, 0}};
+    MovingBodyInputs b = body("stub.fst", "alm");
+    b.base_pos = {{750.0, 600.0, 0.0}};
+    // 50 blade nodes 2.4 m apart under a 20 m kernel; 10 tower nodes 15 m apart from the base to the hub
+    auto t = rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 50);
+    const int ntw = 10;
+    t.num_force_pts_tower = ntw;
+    t.num_force_nodes += ntw;
+    for (int k = 0; k < ntw; ++k) { t.force_pos.insert(t.force_pos.end(), {Real(750.0), Real(600.0), Real(15.0 * k)}); }
+    t.force.resize(t.force_pos.size(), 0.0);
+    EXPECT_TRUE(erf_openfast::audit_geometry(t, b, {20.0, 5.0, 2.0}, plo, phi, dx, per, 0.0).empty());   // tower and nacelle off
+    b.num_force_points_tower = ntw;
+    b.nacelle_cd = 1.0;
+    b.nacelle_area = 60.0;
+    EXPECT_TRUE(erf_openfast::audit_geometry(t, b, {20.0, 20.0, 20.0}, plo, phi, dx, per, 0.0).empty());
+    auto f = erf_openfast::audit_geometry(t, b, {20.0, 5.0, 20.0}, plo, phi, dx, per, 0.0);
+    EXPECT_EQ(fatal_count(f), 0);
+    EXPECT_TRUE(mentions(f, "epsilon_tower = 5 m is narrower than the smallest cell"));
+    EXPECT_TRUE(mentions(f, "tower force points up to 15 m apart"));
+    EXPECT_FALSE(mentions(f, "the kernel width epsilon ="));
+    // cd area 60 m^2 against 2 pi eps^2: 39.3 m^2 at 2.5 m (factor 0.24, fatal), 56.5 m^2 at 3 m (0.47, fatal),
+    // 61.6 m^2 at 3.13 m (0.51, fine)
+    f = erf_openfast::audit_geometry(t, b, {20.0, 20.0, 2.5}, plo, phi, dx, per, 0.0);
+    EXPECT_EQ(fatal_count(f), 1);
+    EXPECT_TRUE(mentions(f, "exceeds 2 pi epsilon_nacelle^2"));
+    EXPECT_TRUE(mentions(f, "erf.moving_bodies.T1.epsilon_nacelle"));
+    EXPECT_TRUE(mentions(f, "epsilon_nacelle = 2.5 m is narrower than the smallest cell"));
+    EXPECT_EQ(fatal_count(erf_openfast::audit_geometry(t, b, {20.0, 20.0, 3.0}, plo, phi, dx, per, 0.0)), 1);
+    EXPECT_EQ(fatal_count(erf_openfast::audit_geometry(t, b, {20.0, 20.0, 3.13}, plo, phi, dx, per, 0.0)), 0);
+    // a model without tower force nodes spreads none, whatever num_force_points_tower asked for: its width
+    // is not audited, and the run is told the tower is not forced
+    {
+        auto t0 = rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 50);
+        f = erf_openfast::audit_geometry(t0, b, {20.0, 5.0, 20.0}, plo, phi, dx, per, 0.0);
+        EXPECT_FALSE(mentions(f, "epsilon_tower = "));
+        EXPECT_TRUE(mentions(f, "the model has no tower force nodes"));
+    }
+    // mode = none forces nothing: only the rotor's width is looked at
+    b.mode = "none";
+    f = erf_openfast::audit_geometry(t, b, {20.0, 5.0, 2.0}, plo, phi, dx, per, 0.0);
+    EXPECT_EQ(fatal_count(f), 0);
+    EXPECT_FALSE(mentions(f, "epsilon_tower"));
+    EXPECT_FALSE(mentions(f, "epsilon_nacelle"));
 }
 
 TEST(OpenFASTAudit, OverlapDensityAndFacing)

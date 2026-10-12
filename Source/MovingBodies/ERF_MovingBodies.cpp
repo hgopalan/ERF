@@ -30,52 +30,6 @@ using namespace amrex;
 
 namespace {
 
-// The inputs that place a body and decide how it forces the flow, as key/value pairs for the
-// checkpoint: a restart that changes one of them would continue another run's state
-std::vector<std::pair<std::string,std::string>>
-body_record (const MovingBodyInputs& b)
-{
-    auto num = [] (double v) { std::ostringstream o; o << std::setprecision(17) << v; return o.str(); };
-    std::vector<std::pair<std::string,std::string>> r{
-        {"type", b.type}, {"base_x", num(b.base_pos[0])}, {"base_y", num(b.base_pos[1])}, {"base_z", num(b.base_pos[2])},
-        {"epsilon", num(b.epsilon)}, {"air_density", num(b.air_density)}};
-    // the keys the body's options use: one it ignores may change freely
-    if (b.type != "openfast_turbine" || b.mode == "adm") { r.push_back({"num_points_t", std::to_string(b.num_points_t)}); }
-    if (b.type == "openfast_turbine") {
-        r.insert(r.end(), {{"fst_file", b.fst_file}, {"mode", b.mode}, {"sampling", b.sampling},
-                           {"num_force_points_blade", std::to_string(b.num_force_points_blade)},
-                           {"num_force_points_tower", std::to_string(b.num_force_points_tower)},
-                           {"fllc", b.fllc ? "1" : "0"}});
-        if (b.mode != "none") { r.insert(r.end(), {{"nacelle_cd", num(b.nacelle_cd)}, {"nacelle_area", num(b.nacelle_area)}}); }
-        if (b.sampling == "upstream") { r.push_back({"sample_diameters_upstream", num(b.sample_diameters_upstream)}); }
-        if (b.sampling == "disk_corrected") {
-            r.insert(r.end(), {{"correction_relax", num(b.correction_relax)}, {"correction_time", num(b.correction_time)}});
-        }
-        if (b.fllc) {
-            r.insert(r.end(), {{"fllc_relax", num(b.fllc_relax)}, {"fllc_start_time", num(b.fllc_start_time)},
-                               {"fllc_eps_chord", num(b.fllc_eps_chord)}, {"fllc_eps_dr", num(b.fllc_eps_dr)}});
-        }
-    } else {
-        r.insert(r.end(), {{"rotor_radius", num(b.rotor_radius)}, {"hub_height", num(b.hub_height)}, {"ct", num(b.ct)},
-                           {"yaw", num(b.yaw_deg)}, {"num_points_r", std::to_string(b.num_points_r)},
-                           {"sample_diameters_upstream", num(b.sample_diameters_upstream)}});
-    }
-    return r;
-}
-
-// two record values agree: equal strings, or numbers equal to single precision (a checkpoint
-// written by a double build may be continued by a single one)
-bool same_record_value (const std::string& a, const std::string& b)
-{
-    if (a == b) { return true; }
-    char* ea = nullptr;
-    char* eb = nullptr;
-    const double x = std::strtod(a.c_str(), &ea);
-    const double y = std::strtod(b.c_str(), &eb);
-    if (ea == a.c_str() || eb == b.c_str() || *ea != '\0' || *eb != '\0') { return false; }
-    return std::abs(x - y) <= 1.0e-6 * std::max(1.0, std::max(std::abs(x), std::abs(y)));
-}
-
 // the input key a record entry comes from
 std::string record_key (const std::string& k)
 {
@@ -162,14 +116,6 @@ MovingBodies::create (const SolverChoice& sc, int max_level, const Vector<double
 #endif
         }
     }
-    // one spreading width for the run: the bodies share the momentum sources
-    for (const MovingBodyInputs& b : in.bodies) {
-        if (b.epsilon != in.bodies[0].epsilon) {
-            Abort("erf.moving_bodies: every body must use the same epsilon in this version (" + b.name +
-                  " differs from " + in.bodies[0].name + ")");
-        }
-    }
-
     auto bodies = std::unique_ptr<MovingBodies>(new MovingBodies(std::move(in), anchor, fixed_dt, stop_time, restarting));
     bodies->m_input_fixed_dt = input_fixed_dt;
     bodies->m_steps_end_first = steps_end_first;
@@ -192,6 +138,7 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
         placed.push_back(b);
         if (b.type == "ct_disk") {
             m_disks.push_back(std::make_unique<erf_actuator::PrescribedCtDisk>(b));
+            m_disk_epsilon.push_back(b.epsilon);
             Print() << "  " << b.name << ": uniform-Ct disk, R " << b.rotor_radius << " m, hub "
                     << b.hub_height << " m, Ct " << b.ct << ", " << m_disks.back()->num_points()
                     << " points, spreading " << b.epsilon << " dx\n";
@@ -200,12 +147,17 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
             m_turbine_mode.push_back(b.mode);
             m_turbine_points_t.push_back(b.num_points_t);
             m_turbine_in.push_back(b);
+            const KernelWidths w = b.kernel_widths(1.0);
+            if (b.mode != "none") {
+                Print() << "  " << b.name << ": rotor points spread " << w.rotor << " dx\n";
+            }
             if (b.mode != "none" && b.num_force_points_tower > 0) {
-                Print() << "  " << b.name << ": tower loads forced on " << b.num_force_points_tower << " points\n";
+                Print() << "  " << b.name << ": tower loads forced on " << b.num_force_points_tower << " points, spread "
+                        << w.tower << " dx\n";
             }
             if (b.mode != "none" && b.nacelle_cd > 0.0) {
                 Print() << "  " << b.name << ": nacelle drag point, cd " << b.nacelle_cd << ", area " << b.nacelle_area
-                        << " m^2, density " << b.air_density << "\n";
+                        << " m^2, density " << b.air_density << ", spread " << w.nacelle << " dx\n";
             }
             if (b.fllc) {
                 Print() << "  " << b.name << ": filtered lifting-line correction, optimal kernel " << b.fllc_eps_chord
@@ -213,7 +165,6 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
             }
         }
     }
-    m_epsilon_dx = m_in.bodies.empty() ? 2.0 : m_in.bodies[0].epsilon;
     for (const auto& d : m_disks) {
         m_disk_stats.emplace_back(d->name(), d->output_root(),
                                   std::vector<std::string>{"u_inf", "u_disk", "thrust", "power"});
@@ -265,7 +216,7 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
 #endif
         for (const auto& b : m_in.bodies) {
             out << "body " << b.name;
-            for (const auto& kv : body_record(b)) { out << " " << kv.first << "=" << kv.second; }
+            for (const auto& kv : MovingBodiesInputs::restart_record(b)) { out << " " << kv.first << "=" << kv.second; }
             out << "\n";
         }
 #ifdef ERF_USE_OPENFAST
@@ -486,12 +437,10 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
             if (it == bodies.end()) {
                 Abort("erf.moving_bodies." + b.name + " is not in the checkpoint '" + dir + "'; a restart continues the same bodies");
             }
-            for (const auto& kv : body_record(b)) {
-                const auto f = it->second.find(kv.first);
-                if (f != it->second.end() && !same_record_value(f->second, kv.second)) {
-                    Abort("erf.moving_bodies." + b.name + "." + record_key(kv.first) + " changed on restart (" + f->second + " in the "
-                          "checkpoint, " + kv.second + " now); a restart continues the same bodies with the same inputs");
-                }
+            std::string key, chk_value, now_value;
+            if (MovingBodiesInputs::changed_record_entry(it->second, MovingBodiesInputs::restart_record(b), key, chk_value, now_value)) {
+                Abort("erf.moving_bodies." + b.name + "." + record_key(key) + " changed on restart (" + chk_value + " in the "
+                      "checkpoint, " + now_value + " now); a restart continues the same bodies with the same inputs");
             }
         }
         for (const auto& kv : bodies) {
@@ -896,7 +845,10 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         m_src_z.define(amrex::convert(ba, IntVect(0,0,1)), dm, 1, 0);
         m_src_defined = true;
     }
-    std::vector<Real> pos, force;
+    // every point with its own kernel width (m): the points appended since the last call get eps
+    std::vector<Real> pos, force, widths;
+    auto widen = [&pos, &widths] (Real eps) { widths.resize(pos.size() / 3, eps); };
+    const Real dx0 = static_cast<Real>(geom.CellSize(0));
 #ifdef ERF_USE_OPENFAST
     // each turbine's loads as actuator-disk rings (mode = adm) or as an actuator line on its
     // blade nodes (mode = alm); none puts no force in the flow
@@ -923,9 +875,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                             << " blade points, tip radius " << erf_actuator::tip_radius(turbs[i]) << " m\n";
                 }
             }
-            if (m_turbine_mode[i] == "adm") {
-                erf_actuator::adm_rings(turbs[i], m_turbine_points_t[i], pos, force);
-            } else {
+            if (m_turbine_mode[i] == "alm") {
                 // the line's force must not jump over cells between two steps: the tip, the
                 // fastest point, may sweep at most alm_max_tip_cells cells per ERF step
                 const Real cells = erf_actuator::tip_cells_per_step(turbs[i], m_dt, dx_min);
@@ -940,29 +890,24 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                           " (a step of " + std::to_string(dt_max) + " s on level " + std::to_string(m_anchor) +
                           ") or finer cells for the actuator line");
                 }
-                erf_actuator::alm_points(turbs[i], pos, force);
             }
-            // the tower's loads (OpenFAST's tower force nodes, if the model has them and the
-            // user asked for them) and the nacelle drag point at the hub, in either mode
-            erf_actuator::tower_points(turbs[i], pos, force);
-            if (m_turbine_in[i].nacelle_cd > 0.0) {
-                for (int d = 0; d < 3; ++d) {
-                    pos.push_back(turbs[i].hub_pos[d]);
-                    force.push_back(-turbs[i].nacelle_force[d]);   // on the fluid
-                }
-            }
+            // the rotor's points, the tower's loads (OpenFAST's tower force nodes, if the model has
+            // them and the user asked for them) and the nacelle drag point at the hub, in either
+            // mode, each with its own kernel
+            erf_actuator::turbine_points(turbs[i], m_turbine_mode[i], m_turbine_points_t[i], m_turbine_in[i].nacelle_cd > 0.0,
+                                         m_turbine_in[i].kernel_widths(dx0), pos, force, widths);
         }
         m_axis_checked = true;
     }
 #endif
-    for (const auto& d : m_disks) {
-        const auto& p = d->disk_points();
-        const auto& f = d->forces();
+    for (std::size_t k = 0; k < m_disks.size(); ++k) {
+        const auto& p = m_disks[k]->disk_points();
+        const auto& f = m_disks[k]->forces();
         pos.insert(pos.end(), p.begin(), p.end());
         force.insert(force.end(), f.begin(), f.end());
+        widen(m_disk_epsilon[k] * dx0);
     }
-    const Real eps = m_epsilon_dx * geom.CellSize(0);
-    erf_actuator::spread_forces(pos, force, eps, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
+    erf_actuator::spread_forces(pos, force, widths, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
 }
 
 void
@@ -985,6 +930,24 @@ MovingBodies::sampling_positions (int i) const
         return erf_actuator::upstream_sampling_positions(t, m_turbine_in[i].sample_diameters_upstream);
     }
     return t.vel_pos;
+}
+
+std::vector<MovingBodies::PointGroup>
+MovingBodies::turbine_point_groups (int i, Real dx) const
+{
+    const erf_openfast::TurbineState& t = m_driver->turbines()[i];
+    const MovingBodyInputs& b = m_turbine_in[i];
+    const KernelWidths w = b.kernel_widths(dx);
+    if (m_turbine_mode[i] == "none") { return {PointGroup{t.force_pos, w.rotor}}; }
+    // OpenFAST's force nodes: the hub, the blades' nodes, then the tower's
+    const std::size_t n_rotor = std::min(t.force_pos.size(), static_cast<std::size_t>(3 * (1 + t.num_blades * t.num_force_pts_blade)));
+    std::vector<PointGroup> g;
+    g.push_back({std::vector<Real>(t.force_pos.begin(), t.force_pos.begin() + n_rotor), w.rotor});
+    if (t.force_pos.size() > n_rotor) {
+        g.push_back({std::vector<Real>(t.force_pos.begin() + n_rotor, t.force_pos.end()), w.tower});
+    }
+    if (b.nacelle_cd > 0.0) { g.push_back({{t.hub_pos[0], t.hub_pos[1], t.hub_pos[2]}, w.nacelle}); }
+    return g;
 }
 #endif
 
@@ -1040,7 +1003,7 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
             }
             if (uvw.size() >= 3) {
                 const std::array<Real,3> u_hub{{uvw[0], uvw[1], uvw[2]}};
-                const Real eps = m_epsilon_dx * geom.CellSize(0);
+                const Real eps = b.kernel_widths(static_cast<Real>(geom.CellSize(0))).nacelle;
                 const auto u_free = erf_actuator::nacelle_corrected_velocity(u_hub, b.nacelle_cd, b.nacelle_area, eps);
                 const auto f_fluid = erf_actuator::nacelle_drag_force(u_free, b.air_density, b.nacelle_cd, b.nacelle_area);
                 for (int d = 0; d < 3; ++d) { f_nac[d] = -f_fluid[d]; }
@@ -1063,22 +1026,28 @@ MovingBodies::check_levels (int finest_level, const Vector<BoxArray>& grids, con
               std::to_string(finest_level) + " only now (did a regrid remove it?); the bodies would not be stepped");
     }
     if (finest_level == m_anchor || !m_ground_set) { return; }
-    // what the bodies force, with the kernel's reach, in metres (centre x y z, half-size): each rotor's or
-    // disk's extent about its hub or centre, and every force point of a turbine (blades, tower, hub)
+    // what the bodies force, with each kernel's reach, in metres (centre x y z, half-size): each rotor's or
+    // disk's extent about its hub or centre with the rotor's kernel, and every force point of a turbine
+    // (blades, tower, hub) with the kernel it is spread with
     const Geometry& ga = geoms[m_anchor];
-    const Real reach = Real(3.0) * m_epsilon_dx * ga.CellSize(0) + ga.CellSize(0);
+    const Real dxa = static_cast<Real>(ga.CellSize(0));
     std::vector<std::pair<std::string, std::array<Real,4>>> extents;
 #ifdef ERF_USE_OPENFAST
-    for (const auto& t : m_driver->turbines()) {
+    for (int i = 0; i < static_cast<int>(m_driver->turbines().size()); ++i) {
+        const auto& t = m_driver->turbines()[i];
+        // the widths in cells, so each reach is (3 eps) dx + dx as for one shared width
+        const Real reach = Real(3.0) * m_turbine_in[i].kernel_widths(1.0).rotor * dxa + dxa;
         extents.push_back({t.name, {t.hub_pos[0], t.hub_pos[1], t.hub_pos[2], erf_actuator::tip_radius(t) + reach}});
-        for (std::size_t p = 0; p + 2 < t.force_pos.size(); p += 3) {
-            extents.push_back({t.name, {t.force_pos[p], t.force_pos[p+1], t.force_pos[p+2], reach}});
+        for (const auto& g : turbine_point_groups(i, 1.0)) {
+            for (std::size_t p = 0; p + 2 < g.pos.size(); p += 3) {
+                extents.push_back({t.name, {g.pos[p], g.pos[p+1], g.pos[p+2], Real(3.0) * g.eps * dxa + dxa}});
+            }
         }
     }
 #endif
-    for (const auto& d : m_disks) {
-        const auto c = d->center();
-        extents.push_back({d->name(), {c[0], c[1], c[2], d->radius() + reach}});
+    for (std::size_t k = 0; k < m_disks.size(); ++k) {
+        const auto c = m_disks[k]->center();
+        extents.push_back({m_disks[k]->name(), {c[0], c[1], c[2], m_disks[k]->radius() + Real(3.0) * m_disk_epsilon[k] * dxa + dxa}});
     }
     for (int lev = m_anchor + 1; lev <= finest_level; ++lev) {
         const Geometry& g = geoms[lev];
@@ -1127,8 +1096,7 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
     // a level with a box that does not reach the ground has no height bounds: the whole column, as
     // the spreading takes it
     const erf_actuator::ZBounds* zbp = (fitted && zb.all_ground) ? &zb : nullptr;
-    const Real eps = m_epsilon_dx * geom.CellSize(0);
-    const Real reach = Real(3.0) * eps + geom.CellSize(0);
+    const Real dx0 = static_cast<Real>(geom.CellSize(0));
 #ifdef ERF_USE_OPENFAST
     // every node of every turbine, with the kernel's reach, must lie on the anchor level's grids, and the
     // whole swept disk with it (the rings of a disk, the blades of a line as they turn and the rotor as
@@ -1137,6 +1105,7 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
     const auto& turbs = m_driver->turbines();
     for (int i = 0; i < static_cast<int>(turbs.size()); ++i) {
         const auto& t = turbs[i];
+        const Real reach = Real(3.0) * m_turbine_in[i].kernel_widths(dx0).rotor + dx0;
         // the swept disk: rings at half and the full tip radius in the plane normal to the shaft
         std::vector<Real> disk;
         {
@@ -1158,21 +1127,37 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
                 }
             }
         }
+        // every force node with the reach of the kernel it is spread with, then the swept disk with the rotor's
         std::string outside;
-        if (!erf_actuator::points_covered_by(level_grids, geom, t.force_pos, reach, outside,
-                                             fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp) ||
-            !erf_actuator::points_covered_by(level_grids, geom, disk, reach, outside,
-                                             fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp) ||
-            !erf_actuator::points_covered_by(level_grids, geom, sampling_positions(i), geom.CellSize(0), outside,
-                                             fitted ? erf_actuator::CoverZ::Footprint : erf_actuator::CoverZ::Reach)) {
-            Abort("erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(reach) +
+        Real missed = reach;
+        bool covered = true;
+        for (const auto& g : turbine_point_groups(i, dx0)) {
+            if (!covered) { break; }
+            missed = Real(3.0) * g.eps + dx0;
+            covered = erf_actuator::points_covered_by(level_grids, geom, g.pos, missed, outside,
+                                                      fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp);
+        }
+        if (covered) {
+            missed = reach;
+            covered = erf_actuator::points_covered_by(level_grids, geom, disk, reach, outside,
+                                                      fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp);
+        }
+        if (covered) {
+            missed = static_cast<Real>(geom.CellSize(0));
+            covered = erf_actuator::points_covered_by(level_grids, geom, sampling_positions(i), geom.CellSize(0), outside,
+                                                      fitted ? erf_actuator::CoverZ::Footprint : erf_actuator::CoverZ::Reach);
+        }
+        if (!covered) {
+            Abort("erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(missed) +
                   " m) is not covered by the grids of level " + std::to_string(m_anchor) +
                   "; enlarge the refinement region around the rotor (the force lives on the anchor level only, so that "
                   "level must hold the whole kernel)");
         }
     }
 #endif
-    for (const auto& d : m_disks) {
+    for (std::size_t k = 0; k < m_disks.size(); ++k) {
+        const auto& d = m_disks[k];
+        const Real reach = Real(3.0) * (m_disk_epsilon[k] * dx0) + dx0;
         std::string outside;
         if (!erf_actuator::points_covered_by(level_grids, geom, d->disk_points(), reach, outside,
                                              fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp) ||
@@ -1203,7 +1188,7 @@ MovingBodies::apply_disk_correction (int i, std::vector<Real>& uvw, const Geomet
     const auto f = m_driver->thrust(t);
     Real thrust = 0.0;
     for (int d = 0; d < 3; ++d) { thrust += f[d] * t.hub_axis[d]; }
-    const Real eps = m_epsilon_dx * geom.CellSize(0);
+    const Real eps = b.kernel_widths(static_cast<Real>(geom.CellSize(0))).rotor;
     erf_actuator::DiskCorrection c =
         erf_actuator::filtered_disk_correction(u_disk, thrust, m_corr_uinf[i], b.air_density, erf_actuator::tip_radius(t), eps);
     // The update U = M u_disk / (1 - a), with Ct from the previous step's thrust, is unstable on its own
@@ -1276,11 +1261,12 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
         plo[d] = static_cast<Real>(geom.ProbLo(d)); phi[d] = static_cast<Real>(geom.ProbHi(d));
         dx[d] = static_cast<Real>(geom.CellSize(d)); per[d] = geom.isPeriodic(d) ? 1 : 0;
     }
-    const Real eps = m_epsilon_dx * geom.CellSize(0);
     const std::vector<Real> ground = hub_ground(z_phys_nd, geom);
     bool any_fatal = false;
     for (std::size_t i = 0; i < turbs.size(); ++i) {
         const MovingBodyInputs& b = m_turbine_in[i];
+        const KernelWidths w = b.kernel_widths(static_cast<Real>(geom.CellSize(0)));
+        const Real eps = w.rotor;
         if (b.sampling == "disk_corrected") {
             // the filtered-disk factor was derived for filter widths up to about 1.25 rotor radii
             const Real ratio = erf_actuator::filter_width_from_eps(eps) / erf_actuator::tip_radius(turbs[i]);
@@ -1292,7 +1278,7 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
             }
         }
         std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(b, CONST_GRAV);
-        const auto fg = erf_openfast::audit_geometry(turbs[i], b, eps, plo, phi, dx, per, ground[i]);
+        const auto fg = erf_openfast::audit_geometry(turbs[i], b, w, plo, phi, dx, per, ground[i]);
         f.insert(f.end(), fg.begin(), fg.end());
         erf_openfast::report_audit(turbs[i].name + " (model and geometry)", f, any_fatal);
     }
@@ -1357,10 +1343,11 @@ MovingBodies::build_fllc (const Geometry& geom)
     const auto& turbs = m_driver->turbines();
     m_fllc.clear();
     m_fllc.resize(turbs.size());
-    const Real eps = m_epsilon_dx * geom.CellSize(0);
     for (std::size_t i = 0; i < turbs.size(); ++i) {
         const MovingBodyInputs& b = m_turbine_in[i];
         if (!b.fllc) { continue; }
+        // the blades' own kernel: the correction is for the width the line is spread with
+        const Real eps = b.kernel_widths(static_cast<Real>(geom.CellSize(0))).rotor;
         const auto& t = turbs[i];
         const int nfb = t.num_force_pts_blade;
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nfb >= 2 && t.num_force_nodes >= 1 + t.num_blades * nfb,

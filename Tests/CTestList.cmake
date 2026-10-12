@@ -1421,6 +1421,35 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 
+  # The actuator line, tower and nacelle each spread with their own kernel width (blades 1 cell, tower
+  # 2, nacelle 1.5): the plotfile and flow log against their golds, and the source must still integrate
+  # to minus the total load (which point gets which width is the gtest OpenFASTRotor.TurbinePoints*).
+  add_test_openfast_adm(OpenFAST_ALM_ComponentWidths OpenFAST_ALM_ComponentWidths "plt00010" "T1_flow.csv" "load_x")
+  # OpenFAST_ALM_Tower with and without the tower and nacelle widths given equal to epsilon: identical
+  # plotfiles, both legs on this machine at zero tolerance (a width not given is epsilon), while that
+  # case's own gold holds the shared width to the answers it gave.
+  # (each leg runs in its own subdirectory, so the model file is named from there)
+  add_test_option_parity(OpenFAST_ALM_Tower_ExplicitWidths OpenFAST_ALM_Tower "plt00010"
+      COMMON_OPTIONS "erf.moving_bodies.T1.fst_file=../stub_turbine.fst"
+      ON_OPTIONS "erf.moving_bodies.T1.epsilon_tower=2.0 erf.moving_bodies.T1.epsilon_nacelle=2.0")
+  set_property(TEST OpenFAST_ALM_Tower_ExplicitWidths APPEND PROPERTY LABELS "moving-bodies")
+  # The tower axis on a box face, as for OpenFAST_ALM_Tower: the per-point reach of each kernel must not
+  # depend on the decomposition.
+  add_test_box_parity(OpenFASTALM_ComponentWidths_BoxParity OpenFAST_ALM_ComponentWidths "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=15 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+  # Checkpointed at step 5 and restarted to step 10: the widths come back with the body record, so the
+  # restarted run must equal the straight one exactly; a changed tower width must stop the restart.
+  add_test_restart_parity(OpenFAST_ALM_ComponentWidths_Restart OpenFAST_ALM_ComponentWidths 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      DATALOG "T1_fllc.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+  add_test_restart_abort(MovingBodies_Restart_ChangedTowerWidth OpenFAST_ALM_ComponentWidths 5
+      "T1[.]epsilon_tower changed on restart"
+      RESTART_OPTIONS "erf.moving_bodies.T1.epsilon_tower=3.0")
+
   # The actuator line with the filtered lifting-line correction: the correction log and the
   # plotfile against their golds, and the source still integrates to minus the thrust.
   add_test_openfast_adm(OpenFAST_ALM_FLLC OpenFAST_ALM_FLLC "plt00010" "T1_fllc.csv")
@@ -1470,6 +1499,19 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # The farm on one rank (both turbines owned by rank 0, one box) against two ranks with the
   # domain split (one turbine per rank): the ownership must not change the answer.
   add_test_box_parity(OpenFASTADM_TwoTurbines_BoxParity OpenFAST_ADM_TwoTurbines "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=32 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
+      DATALOG "T2_flow.csv"
+      DATALOG_SIGDIGITS 8)
+
+  # The farm with a kernel width per turbine (T1 2 cells, T2 1 cell): T2's flow log against its gold,
+  # the source against minus the farm's total load, and the one-box against the split run (one turbine
+  # per rank).
+  add_test_openfast_adm(OpenFAST_ADM_TwoWidths OpenFAST_ADM_TwoWidths "plt00010" "T2_flow.csv" "load_x" "moving_bodies/total_load.csv")
+  # A turbine and a prescribed-Ct disk behind it, each with its own width: the disk's log against its
+  # gold and the source against minus the total load of both.
+  add_test_openfast_adm(OpenFAST_ADM_DiskAndTurbine OpenFAST_ADM_DiskAndTurbine "plt00010" "D2_disk.csv" "load_x" "moving_bodies/total_load.csv")
+  add_test_box_parity(OpenFASTADM_TwoWidths_BoxParity OpenFAST_ADM_TwoWidths "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
       SPLIT_OPTIONS "amr.max_grid_size_x=32 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
       DATALOG "T2_flow.csv"
@@ -2332,6 +2374,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # so the run starts with level 0 only (amr.max_level = 0 would instead put the bodies on level 0)
   add_test_abort(MovingBodies_AnchorLevelMissingAtStart ${_mb_cases}/OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel.i
       "the bodies live on level 1" "erf.rotor.max_level=0")
+  # a nacelle drag area above 2 pi epsilon_nacelle^2 takes its kernel correction factor under 0.5, where the
+  # linear estimate fails: 60 m^2 against 2 pi (0.06 x 50 m)^2 = 56.5 m^2 (factor 0.47); and a width for a
+  # component that is off
+  add_test_abort(MovingBodies_NacelleKernelTooNarrow ${_mb_cases}/OpenFAST_ALM_ComponentWidths OpenFAST_ALM_ComponentWidths.i
+      "nacelle_area = 60 m.2 exceeds 2 pi epsilon_nacelle" "erf.moving_bodies.T1.epsilon_nacelle=0.06")
+  add_test_abort(MovingBodies_TowerWidthWithoutTower ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "T1[.]epsilon_tower is given but erf[.]moving_bodies[.]T1[.]num_force_points_tower is not" "erf.moving_bodies.T1.epsilon_tower=1.0")
   add_test_abort(MovingBodies_CtDiskDensityMismatch ${_mb_cases}/Actuator_UniformCtDisk Actuator_UniformCtDisk.i
       "D1[.]air_density = 1[.]2.*more than erf[.]moving_bodies[.]density_tolerance" "erf.moving_bodies.D1.air_density=1.2")
   add_test_abort(MovingBodies_FinerLevelOverTheBodies ${_mb_cases}/OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel.i
@@ -2346,7 +2395,7 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   foreach(_t MovingBodies_AnchorLevelAboveFinest MovingBodies_StopTimeNotWholeSteps MovingBodies_CtDiskDensityMismatch
              MovingBodies_FinerLevelOverTheBodies MovingBodies_FPETrapsRefused MovingBodies_CorrectionRelaxOutOfRange
              MovingBodies_ALMTipTravelLimit MovingBodies_StopTimeNotWholeCoarseSteps MovingBodies_AnchorLevelMissingAtStart
-             MovingBodies_MaxStepEndsTheRunFirst)
+             MovingBodies_MaxStepEndsTheRunFirst MovingBodies_NacelleKernelTooNarrow MovingBodies_TowerWidthWithoutTower)
     set_property(TEST ${_t} APPEND PROPERTY LABELS "moving-bodies")
   endforeach()
 

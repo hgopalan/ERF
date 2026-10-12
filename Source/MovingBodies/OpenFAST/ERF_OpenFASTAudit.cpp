@@ -121,11 +121,13 @@ audit_model (const MovingBodyInputs& b, Real erf_gravity)
 }
 
 std::vector<AuditFinding>
-audit_geometry (const TurbineState& t, const MovingBodyInputs& b, Real epsilon,
+audit_geometry (const TurbineState& t, const MovingBodyInputs& b, const KernelWidths& eps,
                 const std::array<Real,3>& prob_lo, const std::array<Real,3>& prob_hi,
                 const std::array<Real,3>& dx, const std::array<int,3>& periodic, Real ground_z)
 {
     std::vector<AuditFinding> f;
+    const std::string key = "erf.moving_bodies." + b.name + ".";   // the prefix of the body's keys
+    const Real epsilon = eps.rotor;
     const Real R = erf_actuator::tip_radius(t);
     const Real D = Real(2.0) * R;
     const Real dmin = std::min(dx[0], std::min(dx[1], dx[2]));
@@ -165,7 +167,7 @@ audit_geometry (const TurbineState& t, const MovingBodyInputs& b, Real epsilon,
             const Real ring_spacing = Real(2.0) * Real(3.14159265358979323846) * R / static_cast<Real>(b.num_points_t);
             if (ring_spacing > Real(2.0) * epsilon) {
                 f.push_back({false, "actuator-disk ring points " + fmt(ring_spacing) + " m apart at the tip are more than two kernel "
-                                    "widths (" + fmt(epsilon) + " m) apart, so the disk's force is lumpy there; raise num_points_t to "
+                                    "widths (" + fmt(epsilon) + " m) apart, so the disk's force is lumpy there; raise " + key + "num_points_t to "
                                     "about " + std::to_string(static_cast<int>(std::ceil(Real(3.14159265358979323846) * R / epsilon))) +
                                     " so the disk is smooth"});
             }
@@ -174,13 +176,64 @@ audit_geometry (const TurbineState& t, const MovingBodyInputs& b, Real epsilon,
             const Real spacing = R / static_cast<Real>(t.num_force_pts_blade);
             if (spacing > epsilon) {
                 f.push_back({false, "actuator-line points " + fmt(spacing) + " m apart along the blade are farther apart than the kernel width " +
-                                    fmt(epsilon) + " m; raise num_force_points_blade (or epsilon) so the line is continuous"});
+                                    fmt(epsilon) + " m; raise " + key + "num_force_points_blade (or " + key + "epsilon) so the line is continuous"});
             }
         }
     }
-    if (epsilon < dmin) {
-        f.push_back({false, "the kernel width epsilon = " + fmt(epsilon) + " m is narrower than the smallest cell (" + fmt(dmin) +
-                            " m); the spread force is not resolved, use epsilon >= 1 (in cells), 2 is usual"});
+    // every kernel the body spreads with: the rotor's, and the tower's and the nacelle's when they are forced
+    // (the tower's only when the model has tower force nodes to spread)
+    const bool forces = (b.mode != "none");
+    const bool tower = forces && b.num_force_points_tower > 0 && t.num_force_pts_tower > 0;
+    const bool nacelle = forces && b.nacelle_cd > Real(0.0);
+    std::vector<std::pair<std::string,Real>> widths{{"epsilon", eps.rotor}};
+    if (tower) { widths.push_back({"epsilon_tower", eps.tower}); }
+    if (nacelle) { widths.push_back({"epsilon_nacelle", eps.nacelle}); }
+    for (const auto& kw : widths) {
+        if (kw.second < dmin) {
+            // an actuator line with the lifting-line correction is run that narrow on purpose (about the chord)
+            const bool line = (kw.first == "epsilon" && b.mode == "alm");
+            f.push_back({false, "the kernel width " + kw.first + " = " + fmt(kw.second) + " m is narrower than the smallest cell (" +
+                                fmt(dmin) + " m), so the mesh does not resolve the spread force" +
+                                (line ? std::string("; an actuator line with the lifting-line correction may be run so (a width "
+                                                    "about the chord), otherwise use ") + key + kw.first + " >= 1 (in cells)"
+                                      : "; use " + key + kw.first + " >= 1 (in cells)")});
+        }
+    }
+    if (forces && b.num_force_points_tower > 0 && t.num_force_pts_tower == 0) {
+        f.push_back({false, key + "num_force_points_tower = " + std::to_string(b.num_force_points_tower) + " but the model has no "
+                            "tower force nodes, so no tower force is put into the flow and " + key + "epsilon_tower is not used"});
+    }
+    // the tower's force nodes, after the hub's and the blades', must overlap like the line's
+    if (tower) {
+        const int first = 1 + t.num_blades * t.num_force_pts_blade;
+        const int last = std::min(t.num_force_nodes, first + t.num_force_pts_tower);
+        Real gap = 0.0;
+        for (int nd = first + 1; nd < last && 3 * nd + 2 < static_cast<int>(t.force_pos.size()); ++nd) {
+            Real d2 = 0.0;
+            for (int c = 0; c < 3; ++c) { const Real d = t.force_pos[3*nd+c] - t.force_pos[3*(nd-1)+c]; d2 += d * d; }
+            gap = std::max(gap, std::sqrt(d2));
+        }
+        if (gap > eps.tower) {
+            f.push_back({false, "tower force points up to " + fmt(gap) + " m apart are farther apart than the tower's kernel width " +
+                                fmt(eps.tower) + " m; raise " + key + "num_force_points_tower (or " + key + "epsilon_tower) so the tower "
+                                "is continuous"});
+        }
+    }
+    // the nacelle's drag point lowers the velocity it samples by the factor 1 - cd area / (4 pi eps^2), which the
+    // drag divides out. That is a linear estimate: along the axis Bernoulli gives u^2 = U^2 (1 - 2 cd area / (4 pi eps^2)),
+    // so the centre stagnates when the factor reaches 0.5, and the drag fed back through the corrected velocity is
+    // then no longer a small change: the factor must stay at 0.5 or above
+    if (nacelle) {
+        const Real cda = b.nacelle_cd * b.nacelle_area;
+        const Real lim = Real(4.0) * Real(3.14159265358979323846) * eps.nacelle * eps.nacelle;
+        if (!(Real(2.0) * cda <= lim)) {
+            const std::string given = (b.epsilon_nacelle > Real(0.0)) ? std::string("epsilon_nacelle") : std::string("epsilon, as epsilon_nacelle is not given");
+            f.push_back({true, key + "nacelle_cd * " + key + "nacelle_area = " + fmt(cda) + " m^2 exceeds 2 pi epsilon_nacelle^2 = " +
+                               fmt(Real(0.5) * lim) + " m^2 (the nacelle's kernel is " + fmt(eps.nacelle) + " m wide, from " + given +
+                               "): the kernel correction of the hub velocity, 1 - cd area / (4 pi epsilon_nacelle^2) = " +
+                               fmt(Real(1.0) - cda / lim) + ", is a linear estimate valid only at 0.5 or above; widen " + key +
+                               "epsilon_nacelle (a factor of 0.8 or more on two cells or more is accurate)"});
+        }
     }
     return f;
 }
