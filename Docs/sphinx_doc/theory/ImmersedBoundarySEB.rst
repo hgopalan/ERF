@@ -166,7 +166,9 @@ temperature gives the temperature scale with :cpp:`erf.ibseb.z0h_wall`; and
 positive out of the face. Vertical faces are neutral, since buoyancy runs
 along them; on roofs :cpp:`erf.ibseb.stability_correction` applies the
 surface layer's similarity functions with a few fixed-point passes on the
-Obukhov length. The latent flux is zero in this version and its argument
+Obukhov length (``stability_scheme = iterative``), or the Louis (1979)
+factors on the bulk Richardson number without iteration (``louis``; see
+below). The latent flux is zero in this version and its argument
 is in place for a wet-surface option.
 
 The flux enters the atmosphere as a source: every face deposits
@@ -599,9 +601,10 @@ It still uses the state at the start of the step. Three things follow:
   its radiation from the level below.
 - The faces also see this step's ground surface layer (its Obukhov length and
   boundary-layer height) and any direct inflow perturbation. So with
-  :cpp:`erf.ibseb.stability_correction`, :cpp:`erf.ibseb.convective_velocity` or an
-  inflow perturbation, the two options differ in more than the radiation, even
-  under the same sky.
+  :cpp:`erf.ibseb.stability_correction` (when the roofs seed their iteration from
+  the ground: ``stability_scheme = iterative`` with ``obukhov_seed = ground``),
+  :cpp:`erf.ibseb.convective_velocity` or an inflow perturbation, the two options
+  differ in more than the radiation, even under the same sky.
 
 **Before the first step's radiation.** The report at the start of a run has no
 sunlight on the faces (and no longwave with ``lw_mode = two_stream``), and neither
