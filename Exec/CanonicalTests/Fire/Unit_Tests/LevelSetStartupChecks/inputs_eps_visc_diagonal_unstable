@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# eps_visc = 12 m on 25 m fire cells at cfl 0.4, first order away from the
+# front: stable for a front facing a grid axis (0.4 (2 + 8 x 0.48) = 2.34 <=
+# 2.513) and unstable for one along the cell diagonal (0.4 (2.83 + 3.84) =
+# 2.67 > 2.513). Every curved front has a part facing the diagonal, so the
+# run stops at start-up, naming the largest stable value (10.79 m).
+# Expected: The level-set substep is unstable: erf.fire.levelset.eps_visc = 12 m
+erf.fire.levelset.eps_visc = 12.0

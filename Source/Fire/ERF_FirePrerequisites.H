@@ -54,6 +54,35 @@ void verify_fire_precip_source(const FireParams& fire_params,
                                const SurfacePrecipAccumulationSources& sources);
 
 /**
+ * @brief Start-up check of the level-set artificial viscosity against the
+ *        linear stability limit of the substep (levelset_viscous_stability).
+ *
+ * Each viscosity is checked with the one-sided derivatives used where it
+ * acts: erf.fire.levelset.eps_visc away from the front (first order with
+ * gradient "upwind" and "weno5z_front", WENO5 with "weno5z"), and
+ * erf.fire.levelset.eps_visc_front, when it is >= 0, near the front (WENO5
+ * inside the band of "weno5z_front"). With "weno5z_front" the coefficient
+ * just beyond the WENO band, eps_visc_front itself or a value of the blend
+ * toward eps_visc, is also checked with first-order differences when it is
+ * larger than eps_visc, and, with erf.fire.levelset.wall_extrapolate, every
+ * WENO5 coefficient again with first-order differences (the stencil falls back
+ * to them next to a non-burnable cell). Aborts, naming the inputs and the largest stable
+ * viscosity and cfl, when a coefficient is unstable for any front direction
+ * (levelset_substep_gain > 1): every curved front has a part facing the
+ * least favourable direction. A no-op on the FARSITE path.
+ *
+ * The check takes R_max as the factor of the viscous term. With
+ * erf.fire.directional_split_hamiltonian the term is R0 eps lap(phi), R0
+ * the no-wind, no-slope rate, while the substep is still set by R_max, so
+ * the check is conservative there by about R_max / R0.
+ *
+ * @param[in] fire_params  Fire configuration parameters (cfl > 0)
+ * @param[in] dx, dy       Fire cell size [m]
+ */
+void verify_levelset_viscous_stability(const FireParams& fire_params,
+                                       amrex::Real dx, amrex::Real dy);
+
+/**
  * @brief Verify fire module prerequisites in ERF configuration
  *
  * Called once at startup from FireLayer::initialize() after SurfaceLayer is ready.
@@ -77,7 +106,9 @@ void verify_fire_precip_source(const FireParams& fire_params,
  * 11. Domain z, x and y indices start at 0
  * 12. Domain depth (prob_hi - prob_lo in z) > the wind's sampling height (FireParams::sampled_wind_ht,
  *     or erf.fire.wind_sample_ht when set); terrain is not included
- * 13-14. Level-set and FARSITE divisors and step sizes
+ * 13-14. Level-set and FARSITE divisors and step sizes, and the level-set
+ *        artificial viscosity against the substep's stability limit
+ *        (verify_levelset_viscous_stability)
  */
 void verify_fire_prerequisites(const ERF& erf,
                                int lev,

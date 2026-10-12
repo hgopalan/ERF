@@ -6,7 +6,7 @@ Canonical fire tests covering analytical ROS checks, atmospheric coupling, ignit
 ## Subcases
 | Subdirectory | Description | Character |
 |---|---|---|
-| `Verification` | Cases with an independent answer: exact solutions of the equations the fire module solves (geometry of the level set with a prescribed rate, Snell refraction, a speed gradient, Rothermel on a slope, the moisture time lag) and plume theory for the injected heat. Each has a check script. | verification |
+| `Verification` | Cases with an independent answer: exact solutions of the equations the fire module solves (geometry of the level set with a prescribed rate, Snell refraction, a speed gradient, Rothermel on a slope, the moisture time lag), plume theory for the injected heat, and WRF-Fire on the UNR case studies 1-3. Each has a check script. | verification |
 | `Core_Physics` | Rothermel spread on flat and sloped ground, fuel models and moisture, the wind adjustment factor and wind speed, terrain-wind coupling, vertical grid refinement. | empirical / regression |
 | `Fire_Behavior` | Behaviour options: rate-of-spread models, the FARSITE elliptical spread, acceleration, crown fire, ignition patterns, spatial fuel, spotting. | empirical / regression |
 | `Fire_Atmosphere_Coupling` | Passive, lagged and synchronous coupling and the smoke tracer. | empirical / regression |

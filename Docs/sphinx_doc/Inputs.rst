@@ -3883,17 +3883,35 @@ the ones marked **Required** abort the run if they are not given.
 |                                       |                                                          | YSUNew              |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
 | **erf.most.surf_temp**                | prescribed surface potential temperature [K]; a positive | Real > 0            | -1.0 (not set)   |
-|                                       | value selects the surface-temperature formulation        |                     |                  |
+|                                       | value selects the surface-temperature formulation.       |                     |                  |
+|                                       | **Required** when ``flux_type`` = ``bulk_coeff`` (the    |                     |                  |
+|                                       | surface value of the ``Ch`` form); with                  |                     |                  |
+|                                       | ``erf.most.surf_temp_flux`` it is still read but no      |                     |                  |
+|                                       | longer sets the heat flux                                |                     |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
 | **erf.most.surf_moist**               | prescribed surface moisture [kg/kg]; read only with an   | Real >= 0           | -1.0 (not set)   |
-|                                       | active moisture model                                    |                     |                  |
+|                                       | active moisture model, except with ``flux_type`` =       |                     |                  |
+|                                       | ``bulk_coeff``, where it is **Required** in every run    |                     |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
 | **erf.most.surf_heating_rate**        | rate of change [K/h] applied to the prescribed surface   | Real                | 0.0              |
 |                                       | potential temperature; may not be combined with          |                     |                  |
-|                                       | ``erf.most.surf_temp_flux``                              |                     |                  |
+|                                       | ``erf.most.surf_temp_flux`` (an abort with               |                     |                  |
+|                                       | ``bulk_coeff``); not read by the ``bulk_coeff`` ``Ch``   |                     |                  |
+|                                       | form                                                     |                     |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
-| **erf.most.surf_temp_flux**           | prescribed surface heat flux [K m/s]; may not be         | Real                | 0.0              |
-|                                       | combined with ``erf.most.surf_heating_rate``             |                     |                  |
+| **erf.most.surf_temp_flux**           | prescribed surface heat flux <theta'w'> [K m/s],         | Real (finite with   | 0.0 (bulk_coeff: |
+|                                       | positive upward; may not be combined with                | ``bulk_coeff``)     | not set)         |
+|                                       | ``erf.most.surf_heating_rate``.  With ``flux_type`` =    |                     |                  |
+|                                       | ``bulk_coeff`` it is optional and, when given, imposes   |                     |                  |
+|                                       | the heat flux rho*F in place of the ``Ch`` form (WRF's   |                     |                  |
+|                                       | ``isfflx = 0`` with ``tke_heat_flux``), at any wind; it  |                     |                  |
+|                                       | then may not be combined with SST/TSK data,              |                     |                  |
+|                                       | ``most.use_sfc_fluxes``, ``most.use_sfc_sst``, a         |                     |                  |
+|                                       | land-surface or surface model or a coupled ocean.  In    |                     |                  |
+|                                       | calm air t*, q* and the Obukhov length then use u*       |                     |                  |
+|                                       | floored at 0.001 m/s (as the MOST imposed-flux path      |                     |                  |
+|                                       | does), so t* = -F/0.001 there: finite, but not a         |                     |                  |
+|                                       | meaningful stability scale for a PBL scheme              |                     |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
 | **erf.most.surf_moist_flux**          | prescribed surface moisture flux; used when              | Real                | 0.0              |
 |                                       | ``erf.most.surf_moist`` is not set                       |                     |                  |
@@ -3915,7 +3933,9 @@ the ones marked **Required** abort the run if they are not given.
 |                                       | when ``flux_type`` = ``bulk_coeff``                      |                     |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
 | **erf.most.Ch**                       | bulk transfer coefficient for heat.  **Required** when   | Real                | must be set      |
-|                                       | ``flux_type`` = ``bulk_coeff``                           |                     |                  |
+|                                       | ``flux_type`` = ``bulk_coeff``, unless                   |                     |                  |
+|                                       | ``erf.most.surf_temp_flux`` is given: then it is not     |                     |                  |
+|                                       | used, and a warning says so if it is set                 |                     |                  |
 +---------------------------------------+----------------------------------------------------------+---------------------+------------------+
 | **erf.most.Cq**                       | bulk transfer coefficient for moisture.  **Required**    | Real                | must be set      |
 |                                       | when ``flux_type`` = ``bulk_coeff``                      |                     |                  |
@@ -5863,10 +5883,22 @@ Propagation
 |                                                | rectangle of the Richards coefficients read as a support   |                                |                        |
 |                                                | function (the shape before 2026-10, head/back ratio 5)     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.cfl**                      | CFL number of the level-set subcycle                       | Real > 0                       | 0.4                    |
+| **erf.fire.levelset.cfl**                      | CFL number of the level-set subcycle, dt = cfl h / R_max.  | Real > 0                       | 0.4                    |
+|                                                | Start-up aborts when it makes the substep unstable with    |                                |                        |
+|                                                | the viscosity (see eps_visc). Without viscosity, on square |                                |                        |
+|                                                | cells, the substep is stable up to cfl 0.888 with          |                                |                        |
+|                                                | first-order differences and 1.015 with WENO5               |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.eps_visc**                 | Artificial viscosity coefficient [m]: a length, so the     | Real >= 0                      | 0.4                    |
-|                                                | smoothing in cells is eps_visc / dx                        |                                |                        |
+| **erf.fire.levelset.eps_visc**                 | Artificial viscosity coefficient [m] away from the front:  | Real >= 0, below the stability | 0.4                    |
+|                                                | a length, so the smoothing in cells is eps_visc / dx.      | limit                          |                        |
+|                                                | Start-up aborts, naming the largest stable eps_visc and    |                                |                        |
+|                                                | cfl, when the substep is unstable for any front direction  |                                |                        |
+|                                                | (a von Neumann scan of the RK3 substep; see the theory     |                                |                        |
+|                                                | page). On square cells at cfl 0.4 the limit is 0.432 dx    |                                |                        |
+|                                                | with first-order differences (gradient "upwind" or         |                                |                        |
+|                                                | "weno5z_front") and 0.597 dx with "weno5z", so the default |                                |                        |
+|                                                | 0.4 m aborts on fire cells finer than 0.927 m; set         |                                |                        |
+|                                                | eps_visc to about 0.4 dx there                             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.gradient**                 | One-sided derivatives of the level set: first-order        | "upwind" / "weno5z" /          | "weno5z_front"         |
 |                                                | everywhere, HJ-WENO5-Z everywhere, or HJ-WENO5-Z within    | "weno5z_front"                 |                        |
@@ -5875,26 +5907,44 @@ Propagation
 | **erf.fire.levelset.weno_band_cells**          | Half-width of the front band, in fire cells, that uses     | Integer > 0                    | 4                      |
 |                                                | WENO with "weno5z_front"                                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.eps_visc_front**           | Artificial viscosity within visc_front_cells of the front  | Real                           | 0.1                    |
-|                                                | (WRF-Fire fire_viscosity_bg); negative keeps eps_visc      |                                |                        |
-|                                                | everywhere                                                 |                                |                        |
+| **erf.fire.levelset.eps_visc_front**           | Artificial viscosity within visc_front_cells of the front  | Real; when >= 0, below the     | 0.1                    |
+|                                                | (WRF-Fire fire_viscosity_bg); negative keeps eps_visc      | stability limit                |                        |
+|                                                | everywhere. Checked at start-up like eps_visc: with WENO5  |                                |                        |
+|                                                | inside the WENO band of "weno5z_front" (0.597 dx at cfl    |                                |                        |
+|                                                | 0.4, so the default 0.1 m aborts on fire cells finer than  |                                |                        |
+|                                                | 0.168 m), and with first-order differences for the value   |                                |                        |
+|                                                | just beyond the band when that is larger than eps_visc (a  |                                |                        |
+|                                                | band that ends inside visc_front_cells or inside the       |                                |                        |
+|                                                | blend)                                                     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.visc_front_cells**         | Half-width, in fire cells, of the near-front viscosity     | Integer >= 0                   | 2                      |
 |                                                | band (WRF-Fire fire_viscosity_ngp)                         |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.visc_transition_cells**    | Width, in fire cells, of the linear blend from             | Real >= 0                      | 2.0                    |
-|                                                | eps_visc_front to eps_visc beyond that band                |                                |                        |
+|                                                | eps_visc_front to eps_visc beyond that band (WRF-Fire      |                                |                        |
+|                                                | blends over fire_viscosity_band x fire_viscosity_ngp       |                                |                        |
+|                                                | cells, 1 cell with its defaults)                           |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_every**             | Reinitialise every N subcycles                             | Integer > 0                    | 5                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_iters**             | Outer RK3 pseudo-time steps per reinitialisation; 0 skips  | Integer >= 0                   | 1                      |
-|                                                | the reinitialisation                                       |                                |                        |
+|                                                | the reinitialisation and its final clamp (see              |                                |                        |
+|                                                | reinit_clamp)                                              |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_dtau**              | Reinitialisation pseudo-timestep [m]; <= 0 selects 0.01 dx | Real                           | -1.0                   |
 |                                                | (WRF-Fire's value) for both schemes                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_scheme**            | Reinitialisation scheme: WRF-Fire's reinit_ls_rk3, or      | "wrf", "jiang_peng"            | "wrf"                  |
 |                                                | Jiang and Peng's (2000) HJ-WENO5 with SSP-RK3              |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.reinit_clamp**             | Reference of the reinitialisation's final clamp phi =      | "step_start", "post_advection" | "step_start"           |
+|                                                | min(phi, phi_ref), "the burned area only grows": the level |                                |                        |
+|                                                | set at the start of the subcycle that ends with the        |                                |                        |
+|                                                | reinitialisation, before its advection (WRF-Fire's), or    |                                |                        |
+|                                                | the advected field the reinitialisation starts from (the   |                                |                        |
+|                                                | form before 2026-10, which never lets a too-steep burned   |                                |                        |
+|                                                | side relax and moves the front forward). No effect with    |                                |                        |
+|                                                | reinit_iters = 0                                           |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_jp_sign_eps2**      | jiang_peng only: term added to phi0^2 under the            | Real                           | -1.0                   |
 |                                                | smoothed-sign square root; <= 0 selects dx^2               |                                |                        |

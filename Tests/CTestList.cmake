@@ -2626,6 +2626,42 @@ set_tests_properties(FireReactionVelocityFormula_behave_warning PROPERTIES
 # and a misspelt formula stops at start-up
 add_test_fire_abort(FireReactionVelocityFormula_bad_abort FireReactionVelocityFormula inputs_albini
     "erf.fire.reaction_velocity_formula = \"rothermal\" is not one of" "erf.fire.reaction_velocity_formula=rothermal")
+# level-set start-up checks (Exec/CanonicalTests/Fire/Unit_Tests/LevelSetStartupChecks):
+# a misspelt reinit_clamp, and an artificial viscosity or cfl past the substep's
+# linear stability limit for any front direction, stop the run
+function(add_test_fire_levelset_startup TEST_NAME INPUT_FILE EXPECTED_MESSAGE)
+    add_test_abort(${TEST_NAME} ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Fire/Unit_Tests/LevelSetStartupChecks
+                   ${INPUT_FILE} "${EXPECTED_MESSAGE}" "")
+    set_tests_properties(${TEST_NAME} PROPERTIES LABELS "regression;fire")
+endfunction(add_test_fire_levelset_startup)
+add_test_fire_levelset_startup(FireLevelSetReinitClampBadValue_abort inputs_reinit_clamp_bad_value
+    "erf.fire.levelset.reinit_clamp = \"step_begin\" is not one of")
+add_test_fire_levelset_startup(FireLevelSetEpsViscUnstable_abort inputs_eps_visc_unstable
+    "The level-set substep is unstable: erf.fire.levelset.eps_visc = 20 m")
+add_test_fire_levelset_startup(FireLevelSetEpsViscFrontUnstable_abort inputs_eps_visc_front_unstable
+    "The level-set substep is unstable: erf.fire.levelset.eps_visc_front = 20 m")
+add_test_fire_levelset_startup(FireLevelSetCflUnstable_abort inputs_cfl_unstable_without_viscosity
+    "No viscosity is stable at this cfl")
+add_test_fire_levelset_startup(FireLevelSetEpsViscDiagonal_abort inputs_eps_visc_diagonal_unstable
+    "The level-set substep is unstable: erf.fire.levelset.eps_visc = 12 m")
+add_test_fire_levelset_startup(FireLevelSetEpsViscFrontBlend_abort inputs_eps_visc_front_blend_unstable
+    "The level-set substep is unstable: the viscosity 13.53 m, blended from erf.fire.levelset.eps_visc_front = 14.75 m")
+add_test_fire_levelset_startup(FireLevelSetEpsViscFrontWall_abort inputs_eps_visc_front_wall_first_order
+    "The level-set substep is unstable: erf.fire.levelset.eps_visc_front = 12 m near the front, inside the WENO band, next to a non-burnable cell")
+# erf.fire.levelset.reinit_clamp, old against new on one level-set deck
+# (Exec/RegTests/FireReinitClamp): the "post_advection" front runs ahead of the
+# "step_start" one, and with reinit_iters = 0 the two clamps give the same field
+if(ERF_ENABLE_MPI AND NOT WIN32)
+    add_test_fire_script(FireReinitClamp FireReinitClamp run_reinit_clamp.sh NRANKS 1)
+endif()
+# the checker's own pass/fail logic on synthetic fields. Pure Python.
+add_test(FireReinitClamp_checker_SelfTest ${ERF_RANS_PYTHON}
+    ${PROJECT_SOURCE_DIR}/Exec/RegTests/FireReinitClamp/check_reinit_clamp.py --self-test)
+set_tests_properties(FireReinitClamp_checker_SelfTest
+    PROPERTIES
+    TIMEOUT 60
+    PROCESSORS 1
+    LABELS "unit;fire")
 # every documented fire/dust key is read, every read key is documented, no deck sets an unread key.
 # Labelled unit as well as docs: no CI job runs "ctest -L docs", so on the docs label alone this
 # test went red for a whole PR without anyone seeing it (erf.fire.custom_fuel.*). It is pure
@@ -2818,6 +2854,37 @@ if(ERF_ENABLE_FFT)
     add_test_checked(AnelasticScalarAdvection_Fitted    AnelasticScalarAdvection inputs_fitted    50 check_scalar_centroid.py)
     add_test_checked(AnelasticScalarAdvection_Stretched AnelasticScalarAdvection inputs_stretched 50 check_scalar_centroid.py)
 endif()
+
+# ABL warm bubble (prob.bubble_*) and the bulk_coeff surface layer with an imposed
+# heat flux (erf.most.surf_temp_flux), checked against closed forms on a stretched
+# mesh (Exec/RegTests/ABLWarmBubble). The anelastic deck uses the FFT solve.
+if(ERF_ENABLE_MPI AND NOT WIN32)
+    add_test_checked(ABLWarmBubble ABLWarmBubble inputs 10 check_warm_bubble.py)
+    set_tests_properties(ABLWarmBubble PROPERTIES LABELS "regression")
+    if(ERF_ENABLE_FFT)
+        add_test_checked(ABLWarmBubble_Anelastic ABLWarmBubble inputs_anelastic 10 check_warm_bubble.py)
+    endif()
+endif()
+# the checker's own pass/fail logic on synthetic fields: it must fail the
+# fixed-density bubble, the uniform-height bubble and the ignored flux. Pure Python.
+add_test(ABLWarmBubble_checker_SelfTest ${ERF_RANS_PYTHON}
+    ${PROJECT_SOURCE_DIR}/Exec/RegTests/ABLWarmBubble/check_warm_bubble.py --self-test)
+set_tests_properties(ABLWarmBubble_checker_SelfTest
+    PROPERTIES
+    TIMEOUT 60
+    PROCESSORS 1
+    LABELS "unit")
+# start-up checks of the bubble keys and of the imposed bulk_coeff heat flux
+add_test_abort(ABLWarmBubble_BadRadius_abort ${PROJECT_SOURCE_DIR}/Exec/RegTests/ABLWarmBubble inputs
+    "needs positive, finite prob.bubble_x_r" "prob.bubble_z_r=0")
+add_test_abort(ABLWarmBubble_KeysWithoutDT_abort ${PROJECT_SOURCE_DIR}/Exec/RegTests/ABLWarmBubble inputs_keys_without_dT
+    "are set but prob.bubble_dT is not" "")
+add_test_abort(BulkCoeffFlux_SfcSst_abort ${PROJECT_SOURCE_DIR}/Exec/RegTests/ABLWarmBubble inputs
+    "cannot be combined with most.use_sfc_fluxes or most.use_sfc_sst" "erf.most.use_sfc_sst=1")
+add_test_abort(BulkCoeffFlux_NonFinite_abort ${PROJECT_SOURCE_DIR}/Exec/RegTests/ABLWarmBubble inputs
+    "must be a finite number" "erf.most.surf_temp_flux=nan")
+add_test_abort(BulkCoeffFlux_HeatingRate_abort ${PROJECT_SOURCE_DIR}/Exec/RegTests/ABLWarmBubble inputs
+    "may not be combined with erf.most.surf_heating_rate" "erf.most.surf_heating_rate=2")
 
 function(add_test_rans TEST_NAME CASE_DIR INPUT_FILE NSTEPS CHECK_SCRIPT)
     set(options )

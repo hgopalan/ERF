@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# erf.fire.levelset.reinit_clamp takes "step_start" (the default, WRF-Fire's
+# clamp) or "post_advection"; a misspelt value stops the run at start-up.
+# Expected: erf.fire.levelset.reinit_clamp = "step_begin" is not one of
+erf.fire.levelset.reinit_clamp = "step_begin"

@@ -131,7 +131,10 @@ inline std::vector<FireModelLine> fire_model_summary (const FireParams& fp)
     add("Front propagation", "propagation_method", fp.propagation_method);
     if (levelset) {
         add("  level-set gradient", "levelset.gradient", fp.levelset_gradient);
-        add("  level-set reinitialization", "levelset.reinit_scheme", fp.levelset_reinit_scheme);
+        // reinit_iters = 0 skips the reinitialisation and its clamp (FireLayer::advance)
+        const std::string reinit_off = (fp.levelset_reinit_iters == 0) ? " (off: levelset.reinit_iters = 0)" : "";
+        add("  level-set reinitialization", "levelset.reinit_scheme", fp.levelset_reinit_scheme + reinit_off);
+        add("  level-set reinitialization clamp", "levelset.reinit_clamp", fp.levelset_reinit_clamp + reinit_off);
         add("  level-set artificial viscosity", "levelset.eps_visc", real_str(fp.levelset_eps_visc));
         add("  level-set wall extrapolation", "levelset.wall_extrapolate", on_off(fp.levelset_wall_extrapolate));
         add("  level-set ellipse", "levelset.ellipse", on_off(fp.levelset_ellipse));

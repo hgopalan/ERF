@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# cfl 1.5 with the default viscosity (0.4 m on 25 m cells): first-order
+# differences need cfl (2 + 8 eps/dx) <= 2.513 for a front facing a grid
+# axis, here 1.5 x 2.128 = 3.19, and no viscosity makes a diagonal front
+# stable (cfl must stay below 0.888 for that), so the run stops at start-up
+# naming the largest stable cfl.
+# Expected: No viscosity is stable at this cfl
+erf.fire.levelset.cfl = 1.5

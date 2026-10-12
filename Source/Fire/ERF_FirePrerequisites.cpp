@@ -1,10 +1,14 @@
 #include <ERF_FirePrerequisites.H>
+#include <ERF_NumericalSchemes.H>
 #include <ERF.H>
 #include <ERF_SurfaceLayer.H>
 #include <ERF_IndexDefines.H>
 #include <AMReX_ParmParse.H>
 
+#include <iomanip>
+#include <sstream>
 #include <string>
+#include <vector>
 
 using namespace amrex;
 
@@ -32,6 +36,94 @@ void verify_fire_precip_source(const FireParams& fire_params,
           "surface precipitation accumulators, but erf.moisture_model = \"" + moisture_model + "\" provides "
           "none (Kessler, SAM, Morrison, WSM6 and WDM6 with precipitation do; Kessler_NoRain, SatAdj, "
           "MoistNoCondensation and None do not). Choose one of those, or set erf.fire.precip_source = uniform.");
+}
+
+void verify_levelset_viscous_stability(const FireParams& fp, Real dx, Real dy)
+{
+    if (fp.propagation_method != "levelset") { return; }
+    using fire_levelset::LevelSetViscousStability;
+    auto num = [] (Real v) { std::ostringstream o; o << std::setprecision(4) << v; return o.str(); };
+    const Real h = amrex::min(dx, dy);
+    const Real eps_v = fp.levelset_eps_visc;
+    const Real eps_f = fp.levelset_eps_visc_front;
+    const bool front_hybrid = (fp.levelset_gradient == "weno5z_front");
+    const bool band_on      = front_hybrid && fp.levelset_weno_band_cells > 0;
+    // Where each kind of difference acts (FireLayer: band = weno_band_cells h,
+    // WENO for |phi| <= band; LevelSetGradient::eps_at: eps_visc_front for
+    // |phi| <= d0, eps_visc for |phi| >= d1, linear in between).
+    const bool all_first = (fp.levelset_gradient == "upwind");
+    const bool all_weno  = (fp.levelset_gradient == "weno5z") || (front_hybrid && !band_on);
+
+    struct Coef { std::string key; Real eps; bool weno; std::string where; bool blended; };
+    std::vector<Coef> coefs;
+    if (all_first || all_weno) {
+        coefs.push_back({"eps_visc", eps_v, all_weno, "away from the front", false});
+        if (eps_f >= 0.0) {
+            coefs.push_back({"eps_visc_front", eps_f, all_weno, "within erf.fire.levelset.visc_front_cells of the front", false});
+        }
+    } else {
+        // weno5z_front: first order beyond the band, where the coefficient
+        // runs from its value at the band's edge to eps_visc; WENO5 inside,
+        // where it runs from eps_visc_front to that same edge value. First
+        // order is the tighter limit at every cfl, so a value checked with it
+        // needs no WENO5 check as well.
+        coefs.push_back({"eps_visc", eps_v, false, "away from the front", false});
+        if (eps_f >= 0.0) {
+            const Real band = fp.levelset_weno_band_cells * h;
+            const Real d0   = fp.levelset_visc_front_cells * h;
+            const Real d1   = d0 + fp.levelset_visc_transition_cells * h;
+            // the coefficient just beyond the band's edge
+            Real eps_edge = eps_v;
+            if (band < d0)      { eps_edge = eps_f; }
+            else if (band < d1) { eps_edge = eps_f + (band - d0) / (d1 - d0) * (eps_v - eps_f); }
+            coefs.push_back({"eps_visc_front", eps_f, true, "near the front, inside the WENO band", false});
+            if (eps_edge > eps_v) {
+                const std::string where = (band < d0)
+                    ? "within erf.fire.levelset.visc_front_cells of the front, beyond the WENO band "
+                      "(weno_band_cells < visc_front_cells)"
+                    : "just beyond the WENO band (weno_band_cells = " + std::to_string(fp.levelset_weno_band_cells)
+                      + "), inside the blend to eps_visc that ends visc_front_cells + visc_transition_cells = "
+                      + num(fp.levelset_visc_front_cells + fp.levelset_visc_transition_cells) + " cells from the front";
+                coefs.push_back({"eps_visc_front", eps_edge, false, where, eps_edge != eps_f});
+            }
+        }
+    }
+    // With erf.fire.levelset.wall_extrapolate, one_sided_derivatives falls
+    // back to first-order differences wherever its stencil reaches a
+    // non-burnable cell, so a coefficient that acts with WENO5 elsewhere also
+    // acts with first-order differences next to the mask.
+    if (fp.levelset_wall_extrapolate) {
+        const std::size_t n = coefs.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!coefs[i].weno) { continue; }
+            Coef c = coefs[i];
+            c.weno = false;
+            c.where += ", next to a non-burnable cell (erf.fire.levelset.wall_extrapolate = true falls back to "
+                       "first-order differences there)";
+            coefs.push_back(c);
+        }
+    }
+    for (const Coef& c : coefs) {
+        if (fire_levelset::levelset_substep_gain(fp.levelset_cfl, c.eps, dx, dy, c.weno)
+            <= 1.0 + fire_levelset::LEVELSET_GAIN_TOL) { continue; }
+        const LevelSetViscousStability st =
+            fire_levelset::levelset_viscous_stability(fp.levelset_cfl, c.eps, dx, dy, c.weno, true);
+        const std::string what = (c.blended ? "the viscosity " + num(c.eps) + " m, blended from erf.fire.levelset."
+                                              + c.key + " = " + num(eps_f) + " m,"
+                                            : "erf.fire.levelset." + c.key + " = " + num(c.eps) + " m") + " " + c.where
+            + " (" + (c.weno ? "WENO5" : "first-order") + " differences there, erf.fire.levelset.gradient = "
+            + fp.levelset_gradient + ") with erf.fire.levelset.cfl = " + num(fp.levelset_cfl) + " on "
+            + num(dx) + " x " + num(dy) + " m fire cells";
+        const std::string limits = (st.eps_max > 0.0)
+            ? "Keep that viscosity <= " + num(st.eps_max) + " m (" + num(st.eps_max / h)
+              + " fire cells), or erf.fire.levelset.cfl <= " + num(st.cfl_max) + "."
+            : "No viscosity is stable at this cfl with these differences; keep erf.fire.levelset.cfl <= "
+              + num(st.cfl_max) + ".";
+        Abort("[FIRE] The level-set substep is unstable: " + what + ". The term R eps lap(phi) and the "
+              "upwind |grad phi|, stepped with RK3 at dt = cfl h / R_max, grow a short wave by a factor "
+              + num(st.gain) + " per substep on the least favourable front direction (near the cell "
+              "diagonal), which every curved front and every windless fire has. " + limits);
+    }
 }
 
 void verify_fire_prerequisites(const ERF& erf,
@@ -193,6 +285,11 @@ void verify_fire_prerequisites(const ERF& erf,
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
             fire_params.levelset_reinit_iters >= 0,
             "[FIRE] erf.fire.levelset.reinit_iters must be >= 0");
+        // the artificial viscosity against the substep's stability limit, on
+        // the fire cells (grid_ratio >= 1 is checked above)
+        verify_levelset_viscous_stability(fire_params,
+                                          erf.Geom(lev).CellSize(0) / fire_params.grid_ratio,
+                                          erf.Geom(lev).CellSize(1) / fire_params.grid_ratio);
     }
 
     if (fire_params.spotting.enable) {

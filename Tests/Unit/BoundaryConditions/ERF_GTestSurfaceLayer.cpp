@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfenv>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -1397,4 +1398,225 @@ TEST(SurfaceLayer, MoengPreservesRequiredStressAtMixedFaceCorners)
         EXPECT_NEAR(second_transpose_after, first_value, Real(1.e-10));
         EXPECT_NEAR(first_value, mf_value(*first_required, corner), Real(1.e-10));
     }
+}
+
+namespace {
+
+// Compute_roughness for one set of inputs, and the expression it replaced
+// (zref / exp(arg), floored at 1e-7), evaluated on the device. A free function
+// so the device lambda is not inside a TEST body.
+std::array<Real, 2>
+roughness_new_and_old (const Real zref, const Real olen, const Real umm, const Real ustar)
+{
+    Gpu::DeviceVector<Real> out(2, Real(0.0));
+    Real* o = out.data();
+    const Box cell(IntVect(0), IntVect(0));
+    ParallelFor(cell, [=] AMREX_GPU_DEVICE (int, int, int)
+    {
+        o[0] = Compute_roughness(zref, olen, umm, ustar);
+        similarity_funs sfuns;
+        const Real arg = KAPPA*umm/ustar + sfuns.calc_psi_m2(zref / olen);
+        o[1] = (arg < Real(700.0)) ? amrex::max(zref / std::exp(arg), Real(1.0e-7)) : Real(-1.0);
+    });
+    std::array<Real, 2> h{};
+    Gpu::copy(Gpu::deviceToHost, out.begin(), out.end(), h.begin());
+    Gpu::streamSynchronize();
+    return h;
+}
+
+} // namespace
+
+// Compute_roughness inverts the log law, z0 = zref / exp(kappa U / u* + psi_m).
+// With no drag (bulk_coeff with Cd = 0, as in the UNR WRF-Fire case 1 decks) or
+// in calm air u* is the floor 2e-16, and exp(kappa 5 / 2e-16) overflowed: a run
+// with amrex.fpe_trap_overflow = 1 stopped at step 1. The floor z0 = 1e-7 is now
+// returned before exp is evaluated; every other input gives the same z0 to the bit.
+TEST(SurfaceLayer, ComputeRoughnessNoOverflowWithoutDrag)
+{
+    const Real eps = std::numeric_limits<Real>::epsilon();
+#ifndef AMREX_USE_GPU
+    std::feclearexcept(FE_ALL_EXCEPT);
+#endif
+    const auto none = roughness_new_and_old(Real(24.6), Real(1.0e6), Real(5.0), eps);
+#ifndef AMREX_USE_GPU
+    EXPECT_FALSE(std::fetestexcept(FE_OVERFLOW)) << "exp overflowed for u* = eps";
+#endif
+    EXPECT_EQ(none[0], Real(1.0e-7));
+
+    // Ordinary inputs: unchanged to the bit
+    for (const auto& c : {std::array<Real, 4>{Real(10.0), Real(1.0e6), Real(5.0), Real(0.4)},
+                          std::array<Real, 4>{Real(24.6), Real(-50.0), Real(3.79), Real(0.3)},
+                          std::array<Real, 4>{Real(5.0), Real(200.0), Real(8.0), Real(0.25)}}) {
+        const auto z = roughness_new_and_old(c[0], c[1], c[2], c[3]);
+        EXPECT_EQ(z[0], z[1]) << "zref " << c[0] << " L " << c[1] << " U " << c[2] << " u* " << c[3];
+    }
+}
+
+namespace {
+
+// Heat flux that bulk_coeff_flux returns for one surface cell with the given
+// state. A free function so the device lambda is not inside a TEST body. The
+// fields are rank-local FArrayBoxes, so every MPI rank evaluates the same cell
+// (a MultiFab's fab 0 does not exist on a rank that owns no box).
+Real
+bulk_coeff_heat_flux (const bulk_coeff_flux& flux, const Real rho, const Real theta,
+                      const Real theta_surf, const Real u, const Real v)
+{
+    const Box cells(IntVect(0), IntVect(1));
+    FArrayBox cons(cells, RhoTheta_comp + 1, The_Arena());
+    FArrayBox xvel(convert(cells, IntVect(AMREX_D_DECL(1, 0, 0))), 1, The_Arena());
+    FArrayBox yvel(convert(cells, IntVect(AMREX_D_DECL(0, 1, 0))), 1, The_Arena());
+    FArrayBox tsurf(cells, 1, The_Arena());
+    cons.setVal<RunOn::Device>(rho, cells, Rho_comp, 1);
+    cons.setVal<RunOn::Device>(rho * theta, cells, RhoTheta_comp, 1);
+    xvel.setVal<RunOn::Device>(u);
+    yvel.setVal<RunOn::Device>(v);
+    tsurf.setVal<RunOn::Device>(theta_surf);
+
+    const auto cons_arr  = cons.const_array();
+    const auto xvel_arr  = xvel.const_array();
+    const auto yvel_arr  = yvel.const_array();
+    const auto tsurf_arr = tsurf.const_array();
+    const Array4<const Real> unused{};
+    Gpu::DeviceScalar<Real> result(Real(0.0));
+    Real* out = result.dataPtr();
+    const Box cell(IntVect(0), IntVect(0));
+    ParallelFor(cell, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+    {
+        *out = flux.compute_t_flux(i, j, k, 2, cons_arr, xvel_arr, yvel_arr,
+                                   unused, unused, unused, unused, unused,
+                                   tsurf_arr);
+    });
+    return result.dataValue();
+}
+
+// Keys of a bulk_coeff surface layer under one ParmParse prefix, removed again
+// when the test ends so later tests see the default (moeng) surface layer.
+class ScopedBulkCoeffParams
+{
+public:
+    explicit ScopedBulkCoeffParams (const char* prefix)
+        : m_pp(prefix)
+    {
+        m_pp.add("surface_layer.flux_type", std::string("bulk_coeff"));
+        m_pp.add("most.Cd", Real(1.0e-3));
+        m_pp.add("most.Ch", Real(2.0e-3));
+        m_pp.add("most.Cq", Real(0.0));
+        m_pp.add("most.surf_moist", Real(0.0));
+    }
+
+    ~ScopedBulkCoeffParams ()
+    {
+        m_pp.remove("surface_layer.flux_type");
+        m_pp.remove("most.Cd");
+        m_pp.remove("most.Ch");
+        m_pp.remove("most.Cq");
+        m_pp.remove("most.surf_moist");
+        m_pp.remove("most.surf_temp_flux");
+    }
+
+private:
+    ParmParse m_pp;
+};
+
+} // namespace
+
+// Motivation: erf.most.surf_temp_flux with bulk_coeff imposes the kinematic
+// heat flux (WRF's isfflx = 0 with tke_heat_flux), so the returned flux is
+// rho * F whatever the wind, the surface temperature or Ch. A struct that kept
+// the Ch form returns rho*Ch*|U|*(theta_s - theta) = 0.024 instead of 0.18.
+TEST(SurfaceLayer, BulkCoeffImposedHeatFluxReplacesCh)
+{
+    constexpr Real rho = Real(1.2);
+    constexpr Real theta = Real(300.0);
+    constexpr Real theta_surf = Real(302.0);
+    constexpr Real Ch = Real(2.0e-3);
+    const Real tol = Real(64.0) * std::numeric_limits<Real>::epsilon();
+
+    // Ch form, the default: rho * Ch * |U| * (theta_s - theta), |U| = 5
+    const bulk_coeff_flux ch_form(Real(1.0e-3), Ch, Real(0.0));
+    ERF_EXPECT_NEAR(bulk_coeff_heat_flux(ch_form, rho, theta, theta_surf, Real(3.0), Real(4.0)),
+                    rho * Ch * Real(5.0) * (theta_surf - theta), Real(1.e3) * tol);
+
+    // Imposed form: rho * F, upward and downward, and with no wind at all
+    const bulk_coeff_flux up(Real(1.0e-3), Ch, Real(0.0), true, Real(0.15));
+    ERF_EXPECT_NEAR(bulk_coeff_heat_flux(up, rho, theta, theta_surf, Real(3.0), Real(4.0)),
+                    rho * Real(0.15), tol);
+    ERF_EXPECT_NEAR(bulk_coeff_heat_flux(up, rho, theta, theta_surf, Real(0.0), Real(0.0)),
+                    rho * Real(0.15), tol);
+    const bulk_coeff_flux down(Real(1.0e-3), Ch, Real(0.0), true, Real(-0.05));
+    ERF_EXPECT_NEAR(bulk_coeff_heat_flux(down, rho, theta, theta_surf, Real(3.0), Real(4.0)),
+                    -rho * Real(0.05), tol);
+}
+
+// Motivation: the input path, end to end. surface_layer.flux_type = bulk_coeff
+// with most.surf_temp_flux must reach the applied heat flux (rho * F at the
+// surface face) and the u*/t* that the PBL schemes read (t* = -F/u*). Without
+// the key the same layer applies the Ch form, 1*Ch*5*(300 - 1) = 2.99, which is
+// what a constructor that dropped the key would give with it set. The domain
+// starts at k = 0, as every ERF level does: bulk_coeff reads the surface fields
+// at k = 0.
+TEST(SurfaceLayer, BulkCoeffSurfTempFluxReachesAppliedFlux)
+{
+    const std::string prefix = "unit_surface_layer_bulk_flux";
+    ScopedSurfaceLayerParams params(prefix.c_str());
+    ScopedBulkCoeffParams bulk(prefix.c_str());
+    const Orientation face(Direction::z, Orientation::low);
+    const Real tol = Real(1.e3) * std::numeric_limits<Real>::epsilon();
+
+    {
+        SurfaceLayerFields fields(make_qsurf_geometry());
+        auto layer = fields.prepare_layer(face, active_faces({face}), prefix);
+        fields.impose(*layer);
+        const IntVect point = face_point(fields.domain, face);
+        ERF_EXPECT_NEAR(mf_value(fields.zheat_flux, point),
+                        test_rho * Real(2.0e-3) * Real(5.0) *
+                        (test_surface_temperature - test_rho_theta / test_rho), tol);
+    }
+
+    ParmParse pp(prefix);
+    pp.add("most.surf_temp_flux", Real(0.15));
+    SurfaceLayerFields fields(make_qsurf_geometry());
+    auto layer = fields.prepare_layer(face, active_faces({face}), prefix);
+    fields.impose(*layer);
+    const IntVect point = face_point(fields.domain, face);
+    ERF_EXPECT_NEAR(mf_value(fields.zheat_flux, point), test_rho * Real(0.15), tol);
+
+    const IntVect surface(point[0], point[1], 0);
+    const Real ustar = mf_value(*layer->get_u_star(0), surface);
+    ASSERT_GT(ustar, Real(0.0));
+    ERF_EXPECT_NEAR(mf_value(*layer->get_t_star(0), surface), -Real(0.15) / ustar, tol);
+}
+
+// Motivation: with an imposed bulk_coeff heat flux the flux stays on in calm air,
+// where u* = sqrt(Cd)|U| falls to machine epsilon. t* = -F/u* was then about
+// -6.8e14 K and the Obukhov length about -1e-44 m (double), values that reach the
+// PBL schemes, the plotfile and the scalar-profile logs. They now use u* floored
+// at 0.001 m/s, as the MOST imposed-flux path does: t* = -F / 0.001.
+TEST(SurfaceLayer, BulkCoeffImposedHeatFluxInCalmAirKeepsTStarFinite)
+{
+    const std::string prefix = "unit_surface_layer_bulk_flux_calm";
+    ScopedSurfaceLayerParams params(prefix.c_str());
+    ScopedBulkCoeffParams bulk(prefix.c_str());
+    ParmParse pp(prefix);
+    pp.add("most.surf_temp_flux", Real(0.15));
+    const Orientation face(Direction::z, Orientation::low);
+    SurfaceLayerFields fields(make_qsurf_geometry());
+    fields.xvel.setVal(Real(0.0));
+    fields.yvel.setVal(Real(0.0));
+    auto layer = fields.prepare_layer(face, active_faces({face}), prefix);
+    fields.impose(*layer);
+    const IntVect point = face_point(fields.domain, face);
+    // the imposed flux is applied whatever the wind
+    ERF_EXPECT_NEAR(mf_value(fields.zheat_flux, point), test_rho * Real(0.15),
+                    Real(1.e3) * std::numeric_limits<Real>::epsilon());
+    const IntVect surface(point[0], point[1], 0);
+    EXPECT_LT(mf_value(*layer->get_u_star(0), surface), Real(1.e-3)) << "calm: u* is below the floor";
+    const Real tstar = mf_value(*layer->get_t_star(0), surface);
+    const Real olen  = mf_value(*layer->get_olen(0), surface);
+    ERF_EXPECT_NEAR(tstar, -Real(0.15) / Real(1.e-3), Real(1.e-4) * Real(150.0));
+    EXPECT_TRUE(std::isfinite(olen));
+    // L = u*^2 Thv / (kappa g t*) with the floored u*: about -7.8e-7 m, not -1e-44 m
+    const Real theta = test_rho_theta / test_rho;
+    ERF_EXPECT_NEAR(olen, Real(1.e-6) * theta / (KAPPA * CONST_GRAV * tstar), Real(1.e-3) * std::abs(olen));
 }

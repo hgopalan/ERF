@@ -87,6 +87,7 @@ TEST(FireModelSummary, OptionsFollowTheModelInUse)
     EXPECT_EQ(m.at("cheney_gould.pasture"), "grazed");
     EXPECT_EQ(m.at("cheney_gould.curing_curve"), "cruz2015");
     EXPECT_EQ(m.at("levelset.gradient"), "weno5z_front");
+    EXPECT_EQ(m.at("levelset.reinit_clamp"), "step_start") << "WRF-Fire's clamp is the default since 2026-10";
     EXPECT_EQ(m.at("directional_shape"), "ellipse");
     EXPECT_EQ(m.count("reaction_velocity_formula"), 0u) << "Rothermel's options only when Rothermel runs";
     EXPECT_EQ(m.count("wind_limit"), 0u) << "the midflame wind limit is Rothermel's and BEHAVE's";
@@ -119,5 +120,15 @@ TEST(FireModelSummary, InactiveOptionsAreLeftOutAndForcedValuesMarked)
         const auto m = by_key(fp);
         EXPECT_EQ(m.at("directional_ros"), "false (off: levelset.ellipse)");
         EXPECT_EQ(m.count("directional_shape"), 0u);
+    }
+    {
+        // reinit_iters = 0 skips the reinitialisation and its clamp (FireLayer::advance)
+        ScopedKeys deck;
+        deck.add("propagation_method", std::string("levelset"));
+        deck.add("levelset.reinit_iters", std::string("0"));
+        FireParams fp;
+        const auto m = by_key(fp);
+        EXPECT_EQ(m.at("levelset.reinit_scheme"), "wrf (off: levelset.reinit_iters = 0)");
+        EXPECT_EQ(m.at("levelset.reinit_clamp"), "step_start (off: levelset.reinit_iters = 0)");
     }
 }

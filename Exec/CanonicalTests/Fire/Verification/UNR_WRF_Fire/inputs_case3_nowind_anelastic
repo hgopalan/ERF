@@ -1,0 +1,106 @@
+# UNR WRF-Fire case study 3 in ERF (anelastic): LES of a convective boundary layer, fire coupled, ignited after 30 min of spin-up
+# wind 0 m/s; written by gen_unr_decks.py; run from this folder (README.md)
+# first layer 18.2 m, top layer 59.7 m (WRF eta levels: hyperbolic 1.09)
+erf.prob_name = "ABL"
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 5120.0 5120.0 2000.0
+amr.n_cell = 128 128 51
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.blocking_factor = 1
+amr.max_grid_size = 32 32 51
+erf.terrain_z_levels = 0.000 18.222 37.098 56.644 76.879 97.821 119.487 141.894 165.059 189.001 213.734 239.276 265.643 292.850 320.913 349.844 379.658 410.367 441.983 474.518 507.980 542.379 577.722 614.014 651.261 689.465 728.629 768.751 809.831 851.864 894.844 938.764 983.615 1029.398 1076.153 1123.874 1172.544 1222.149 1272.670 1324.085 1376.371 1429.502 1483.451 1538.186 1593.675 1649.883 1706.772 1764.304 1822.437 1881.128 1940.331 2000.000
+zlo.type = "surface_layer"
+erf.surface_layer.flux_type = "bulk_coeff"   # WRF isfflx = 0
+erf.most.Cd = 0.005                     # WRF tke_drag_coefficient
+erf.most.Cq = 0.0
+erf.most.surf_temp = 305.0                # = the sounding header (ERF requires a match); the heat flux is imposed
+erf.most.surf_moist = 0.0
+erf.most.surf_temp_flux = 0.1         # WRF tke_heat_flux [K m/s]
+erf.most.z0 = 0.1
+zhi.type = "SlipWall"                 # WRF rigid lid, w = 0 at ztop; no damping (WRF damp_opt = 0)
+erf.molec_diff_type = "None"
+erf.les_type = "Deardorff"            # WRF diff_opt = 2, km_opt = 2
+erf.Ck = 0.10
+prob.KE_0 = 0.1
+prob.bubble_dT = 0.5                  # WRF delt_perturbation: one theta bubble, no other start-up perturbation
+prob.bubble_x_c = 2460.0   # WRF centres it on mass point i_c = (ide-ids)/2 = 62: (62 - 1/2) x 40 m
+prob.bubble_y_c = 2460.0
+prob.bubble_z_c = 40.0   # WRF hght_perturbation
+prob.bubble_x_r = 2500.0
+prob.bubble_y_r = 2500.0
+prob.bubble_z_r = 40.0   # WRF x/y/zrad_perturbation
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding_case3_nowind"
+erf.sounding_type = Ideal
+erf.fixed_dt = 0.5                   # WRF time_step
+erf.anelastic = 1
+erf.use_fft = 1
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+max_step = 10000000
+stop_time = 7200.0
+erf.v = 0
+amr.v = 0
+erf.sum_interval = 400
+erf.check_int = -1
+erf.plot_file_1 = plt_case3_nowind_anelastic_
+erf.plot_per_1 = 600.0
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta rhoKE
+erf.fire.enable = true
+erf.fire.grid_ratio = 8               # WRF sr_x = sr_y
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.directional_wind_coupling = "advective"   # WRF fire_advection = 1 (default): phi_w(|U|) x cos to the normal
+erf.fire.fuel_model_id = 1000           # WRF fuel category 1 exactly (namelist.fire), with its heat content
+erf.fire.custom_fuel.codes = 1000
+erf.fire.custom_fuel.1000.name = "wrf_fm1"
+erf.fire.custom_fuel.1000.w_1h_kg_m2 = 0.166
+erf.fire.custom_fuel.1000.w_10h_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.w_100h_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.w_live_herb_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.w_live_woody_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.sav_1h_1_m = 11483.0   # savr 3500 /ft
+erf.fire.custom_fuel.1000.depth_m = 0.305
+erf.fire.custom_fuel.1000.moisture_ext = 0.12
+erf.fire.custom_fuel.1000.heat_content_J_kg = 17.433e6   # cmbcnst; Rothermel sees 7496 Btu/lb as WRF
+erf.fire.custom_fuel.1000.density_kg_m3 = 512.0
+erf.fire.custom_fuel.1000.burnout_time_s = 7.0   # weight(1)
+erf.fire.burnout_model = "sfire"
+erf.fire.burnout_time_to_efold = 0.85   # WRF fuel_time = weight/0.85
+erf.fire.heat_flux_alfg = 50.0          # WRF fire_ext_grnd default
+erf.fire.levelset.reinit_every = 1   # WRF fire_lsm_reinit every step
+erf.fire.moisture_1hr = 0.08            # WRF fuelmc_g
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.08
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 1020.0
+erf.fire.ignition_y = 2500.0
+erf.fire.ignition_r = 0.0
+erf.fire.ignition.polygon_file = "line_case3.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 40.0   # WRF fire_ignition_radius1
+erf.fire.ignition.polygon_time = 1800.0      # WRF fire_ignition_start_time1
+erf.fire.wind_ref_ht = 6.5                # WRF fire_wind_height
+erf.fire.wind_below_first_cell = "log"     # WRF: log law from z0 below the first level
+erf.fire.wind_sample_z0 = 0.1              # WRF land roughness ZZLND
+erf.fire.use_waf = false                  # WRF master reads windrf but never applies it (module_fr_fire_phys.F)
+erf.fire.use_wind_limit = false
+erf.fire.use_terrain_wind = false
+erf.fire.ros_model = "rothermel"
+erf.fire.reaction_velocity_formula = "rothermel"   # WRF: A = 1/(4.774 s^0.1 - 7.27) (Rothermel 1972)
+erf.fire.wrf_bmst_compat = true                   # WRF: load net of its moisture share, (1 - M/(1+M)) fgi
+erf.fire.levelset.gradient = "weno5z_front"   # WRF fire_upwinding 9
+erf.fire.levelset.eps_visc = 2.000   # WRF fire_viscosity 0.4 is in fire cells (adds visc |R| dx lap phi); ERF eps is metres
+erf.fire.levelset.eps_visc_front = 2.000   # WRF fire_viscosity_bg default 0.4 cells
+erf.fire.coupling_type = "lagged"
+erf.fire.inject_latent = true
+erf.fire.fire_atm_feedback = 0.9259   # coupled; WRF: burnt mass x (1 - M/(1+M)) x cmbcnst
+erf.fire.write_fire_stats_csv = true
+erf.fire.fire_stats_csv_file = "fire_stats_case3_nowind_anelastic.csv"
+erf.fire_plot_file = "plt_fire_case3_nowind_anelastic_"
+erf.fire_plot_per = 60.0

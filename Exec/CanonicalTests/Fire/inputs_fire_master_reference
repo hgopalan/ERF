@@ -336,11 +336,16 @@ erf.fire.propagation_method = "farsite"
 # "wrf" (default, WRF-Fire's reinit_ls_rk3) or "jiang_peng" (Jiang and Peng's
 # HJ-WENO5 with SSP-RK3))
 erf.fire.levelset.cfl = 0.4
-erf.fire.levelset.eps_visc = 0.4
+erf.fire.levelset.eps_visc = 0.4                 # [m]; start-up aborts above the subcycle's stability limit (0.432 dx on square cells at cfl 0.4 with first-order differences, any front direction; 0.597 dx with WENO5)
 erf.fire.levelset.reinit_every = 5
 erf.fire.levelset.reinit_iters = 1
 erf.fire.levelset.reinit_dtau = -1.0
 erf.fire.levelset.reinit_scheme = "wrf"
+# Reference of the reinitialisation's final min(phi, phi_ref) clamp: "step_start"
+# (WRF-Fire's: the level set before the subcycle's advection) or "post_advection"
+# (the advected field, the form before 2026-10; it never lets a too-steep burned
+# side relax and moves the front forward)
+erf.fire.levelset.reinit_clamp = "step_start"
 # jiang_peng only: term added to phi0^2 under the smoothed-sign square root;
 # <= 0 selects dx^2 (Jiang and Peng's "delta comparable to the spatial step size").
 erf.fire.levelset.reinit_jp_sign_eps2 = -1.0

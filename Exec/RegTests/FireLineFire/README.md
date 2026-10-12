@@ -4,12 +4,15 @@ The idealized surface line fire of Coen et al. (2013), the WRF-Fire paper,
 without and with an ambient wind: short grass (Anderson fuel model 1) at
 5.5 % moisture on flat ground, a 40 m wide line fire across the whole
 (periodic) y extent, so the fire is a pair of straight fronts, a head fire
-spreading with the wind and a backing fire against it. The WRF-Fire choices
-are mirrored: the wind interpolated to 6.1 m and reduced by the fuel model's
-wind reduction factor (WRF-Fire's `windrf(1) = 0.36`, here Andrews'
-unsheltered factor 0.362 for the 1 ft grass bed), no midflame wind cap
-(WRF-Fire caps R at 6 m/s only), a 0.03 m roughness length. Nine decks share
-one base:
+spreading with the wind and a backing fire against it. As in WRF-Fire the
+wind is interpolated to 6.1 m, there is no midflame wind cap (WRF-Fire caps
+R at 6 m/s only) and the roughness length is 0.03 m. Unlike WRF-Fire, these
+decks then reduce the 6.1 m wind to a midflame wind with Andrews'
+unsheltered factor (0.362 for the 1 ft grass bed). The WRF master code
+(`module_fr_fire_phys.F`) lists a factor of the same size for this fuel
+(`windrf(1) = 0.36`), but it reads it and never applies it, so its spread
+uses the 6.1 m wind itself; `erf.fire.use_waf = false` reproduces that. The
+code version Coen et al. (2013) ran was not checked. Nine decks share one base:
 
 - `nowind`: no ambient wind. Both fronts must move at the no-wind rate R0.
 - `wind2p5`: a 2.5 m/s sounding, Coen's Control.

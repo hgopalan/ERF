@@ -23,11 +23,14 @@ spreading with the wind and a backing fire against it. The atmosphere runs at
 5 m with a Smagorinsky closure and a MOST surface layer over a 0.03 m
 roughness length (the paper's drag coefficient of 0.005), the fire grid at
 2.5 m with the level set, the directional Rothermel model and 0.25 s steps.
-The WRF-Fire choices are mirrored: the wind is interpolated to 6.1 m and
-reduced by the fuel model's wind reduction factor (WRF-Fire's ``windrf(1) =
-0.36`` for fuel model 1; here Andrews' unsheltered factor, 0.362 for the 1 ft
-grass bed), and there is no midflame wind cap (``erf.fire.use_wind_limit =
-false``; WRF-Fire caps R at 6 m/s only). Seven decks share one base: no wind,
+As in WRF-Fire the wind is interpolated to 6.1 m and there is no midflame
+wind cap (``erf.fire.use_wind_limit = false``; WRF-Fire caps R at 6 m/s
+only). Unlike WRF-Fire, the 6.1 m wind is then reduced to a midflame wind by
+Andrews' unsheltered factor (0.362 for the 1 ft grass bed). The WRF master
+code (``module_fr_fire_phys.F``) lists a factor of the same size
+(``windrf(1) = 0.36`` for fuel model 1) but reads it and never applies it, so
+its spread uses the 6.1 m wind itself, which ``erf.fire.use_waf = false``
+reproduces; the code version Coen et al. (2013) ran was not checked. Seven decks share one base: no wind,
 a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), the 5 m/s
 sounding with ERF's default midflame wind cap turned back on (``wind5_cap``),
 and the three winds with the heat coupled back.

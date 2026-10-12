@@ -883,7 +883,8 @@ private:
     std::unique_ptr<amrex::MultiFab>         m_crown_surface_flame_length;
 
     // Level set at the start of each subcycle, for the arrival-time stamp
-    // interpolated in time (fire_levelset::stamp_arrival_time).
+    // interpolated in time (fire_levelset::stamp_arrival_time) and the
+    // reference of the reinitialisation's clamp (reinit_clamp = "step_start").
     std::unique_ptr<amrex::MultiFab>         m_phi_prev;
     // Stage fields of the level-set advection and reinitialisation, allocated
     // once rather than on every subcycle.
