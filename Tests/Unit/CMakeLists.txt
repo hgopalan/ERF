@@ -311,7 +311,8 @@ if(ERF_ENABLE_MOVING_BODIES)
   )
   # Motivation: a point force spread onto the momentum sources must integrate back to the
   # force exactly on every component, with the terrain cell volumes, under the ground
-  # cut-off, for several points, and however the domain is split.
+  # cut-off, for several points, and however the domain is split; each point must be spread
+  # with its own kernel width.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSpreading.cpp
   )
@@ -349,7 +350,8 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # actuator-line points must be the force nodes with the forces on the fluid, tower nodes
   # left out, and the tip travel per step must follow the rotor speed and the tip radius;
   # the tower points must be the tower nodes, and the nacelle drag must follow the drag law
-  # with the kernel's self-induction correction.
+  # with the kernel's self-induction correction; every point a turbine spreads must carry the
+  # kernel width of its kind (rotor, tower, nacelle).
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTRotor.cpp
   )
@@ -370,7 +372,8 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the actuator-disk sampling mode must default to the corrected disk for
   # mode = adm and to plain disk sampling for an actuator line, keep an explicit choice, the
   # turbine's upstream sampling distance must default to two diameters, and the lifting-line
-  # correction must be on by default for an actuator line only.
+  # correction must be on by default for an actuator line only; the tower and nacelle widths must
+  # default to epsilon, need their part forced, and enter the restart record.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMovingBodiesInputs.cpp
   )

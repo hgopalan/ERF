@@ -81,8 +81,9 @@ nacelle_corrected_velocity (const std::array<Real,3>& u, Real cd, Real area, Rea
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(epsilon > Real(0.0), "nacelle_corrected_velocity: epsilon must be positive");
     const Real fac = Real(1.0) - cd * area / (Real(4.0) * pi * epsilon * epsilon);
     if (!(fac > Real(0.0))) {
-        amrex::Abort("nacelle drag: cd * area = " + std::to_string(cd * area) + " m^2 exceeds 4 pi epsilon^2 = " +
-                     std::to_string(4.0 * pi * epsilon * epsilon) + " m^2; the spreading kernel is too narrow for the nacelle");
+        amrex::Abort("nacelle drag: cd * area = " + std::to_string(cd * area) + " m^2 is not below 4 pi epsilon_nacelle^2 = " +
+                     std::to_string(4.0 * pi * epsilon * epsilon) + " m^2; the nacelle's spreading kernel (epsilon_nacelle) is too "
+                     "narrow for its drag area");
     }
     return {{u[0] / fac, u[1] / fac, u[2] / fac}};
 }
@@ -212,6 +213,31 @@ tip_cells_per_step (const erf_openfast::TurbineState& t, Real dt, Real dx)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dx > Real(0.0), "tip_cells_per_step: dx must be positive");
     return std::abs(t.rotor_speed) * tip_radius(t) * dt / dx;
+}
+
+void
+turbine_points (const erf_openfast::TurbineState& t, const std::string& mode, int num_points_t, bool nacelle,
+                const KernelWidths& w, std::vector<Real>& pos, std::vector<Real>& force, std::vector<Real>& eps)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(mode == "adm" || mode == "alm", "turbine_points: mode must be adm or alm");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(3 * eps.size() == pos.size(), "turbine_points: one width per point already listed");
+    // the points appended since the last call get width e
+    auto widen = [&pos, &eps] (Real e) { eps.resize(pos.size() / 3, e); };
+    if (mode == "adm") {
+        adm_rings(t, num_points_t, pos, force);
+    } else {
+        alm_points(t, pos, force);
+    }
+    widen(w.rotor);
+    tower_points(t, pos, force);
+    widen(w.tower);
+    if (nacelle) {
+        for (int d = 0; d < 3; ++d) {
+            pos.push_back(t.hub_pos[d]);
+            force.push_back(-t.nacelle_force[d]);   // on the fluid
+        }
+        widen(w.nacelle);
+    }
 }
 
 void

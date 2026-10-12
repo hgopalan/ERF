@@ -3,8 +3,9 @@
 // with its cell volumes, when the kernel is cut off by the ground, across a periodic boundary,
 // for several points at once, and however the domain is split; the source is zero beyond the
 // kernel's reach; over a hill taller than the kernel's reach the source is centred on the point
-// (the faces are found by their physical heights, not their index times dz); and a non-finite
-// position or force aborts, naming the point.
+// (the faces are found by their physical heights, not their index times dz); each point is spread
+// with its own kernel width; and a non-finite position or force, or a width that is not positive,
+// aborts, naming the point.
 
 #include <algorithm>
 #include <array>
@@ -88,6 +89,16 @@ struct Sources {
     std::array<Real,3> spread (const std::vector<Real>& pos, const std::vector<Real>& force, Real eps)
     {
         erf_actuator::spread_forces(pos, force, eps, znd.get(), detj.get(), geom, sx, sy, sz);
+        return totals();
+    }
+    // the same with a kernel width per point
+    std::array<Real,3> spread (const std::vector<Real>& pos, const std::vector<Real>& force, const std::vector<Real>& eps)
+    {
+        erf_actuator::spread_forces(pos, force, eps, znd.get(), detj.get(), geom, sx, sy, sz);
+        return totals();
+    }
+    std::array<Real,3> totals () const
+    {
         return {{erf_actuator::integrate_source(0, sx, detj.get(), geom),
                  erf_actuator::integrate_source(1, sy, detj.get(), geom),
                  erf_actuator::integrate_source(2, sz, detj.get(), geom)}};
@@ -337,4 +348,70 @@ TEST(ActuatorSpreading, EmptyPointListGivesZeroSources)
     const auto t = s.spread({}, {}, 2.0 * m.dx());
     expect_total(t, {{0.0, 0.0, 0.0}}, {{0.0, 0.0, 0.0}});
     EXPECT_EQ(s.sx.max(0), 0.0);
+}
+
+// Two points, 480 m apart on 20 m cells, spread with widths of 40 m and 80 m: the x-source of each,
+// summed over its own half of the domain, integrates to its own force and has the second moment of
+// its own kernel about it, in y and in z. For exp(-r^2/eps^2) cut off at 3 eps that is
+// eps^2/2 * (1 - 0.0025077) (the cut-off's share, from the radial integrals); the face sums lie
+// within 0.04 % of it at two and four cells per width. One width for both points (the first's)
+// would put the second's moment four times too low.
+TEST(ActuatorSpreading, EachPointIsSpreadWithItsOwnWidth)
+{
+    Mesh m;
+    m.nx = 48; m.ny = 48; m.nz = 48;
+    m.Lx = 960.0; m.Ly = 960.0; m.H = 960.0;
+    m.periodic = {{0, 0, 0}};
+    m.max_grid = {{16, 24, 48}};   // six boxes: the kernels cross box faces, and two ranks both own some
+    Sources s(m, false);
+    const std::array<Real,2> px{{247.0, 727.0}}, eps{{40.0, 80.0}}, fx{{-3.0e5, 2.0e5}};
+    const Real py = 473.0, pz = 483.0;   // off the cell centres and faces
+    std::vector<Real> pos, force;
+    for (int p = 0; p < 2; ++p) {
+        pos.insert(pos.end(), {px[p], py, pz});
+        force.insert(force.end(), {fx[p], Real(0.0), Real(0.0)});
+    }
+    s.spread(pos, force, std::vector<Real>{eps[0], eps[1]});
+    // per point (the half x < 480 m or above): sum of src dV, of src dV (y - py)^2 and of src dV (z - pz)^2
+    // in double: some 15 000 faces carry the wider kernel, which a float sum would blur to 1e-5
+    std::array<double,6> sums{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+    const Real dv = m.dx() * m.dy() * (m.H / m.nz);
+    for (amrex::MFIter mfi(s.sx, false); mfi.isValid(); ++mfi) {
+        // each x face once: a box's cells' low faces
+        amrex::Box fb = amrex::convert(amrex::enclosedCells(mfi.validbox()), amrex::IntVect(1,0,0));
+        fb.growHi(0, -1);
+        const auto a = s.sx.const_array(mfi);
+        amrex::LoopOnCpu(fb, [&](int i, int j, int k) {
+            const int p = (i * m.dx() < 0.5 * m.Lx) ? 0 : 1;
+            const double w = static_cast<double>(a(i,j,k)) * dv;
+            const double y = (j + 0.5) * m.dy() - py, z = (k + 0.5) * (m.H / m.nz) - pz;
+            sums[3*p] += w; sums[3*p+1] += w * y * y; sums[3*p+2] += w * z * z;
+        });
+    }
+    amrex::ParallelDescriptor::ReduceRealSum(sums.data(), 6);
+    constexpr double cut = 0.0025077;
+    for (int p = 0; p < 2; ++p) {
+        SCOPED_TRACE("point " + std::to_string(p) + ", width " + std::to_string(eps[p]) + " m");
+        // the spreader's own normalisation is a sum over some 7 000 faces in Real: 1e-4 in single precision
+        const double tol_total = (sizeof(Real) == 8) ? double(rel_tol) : 1.0e-4;
+        EXPECT_NEAR(sums[3*p], fx[p], tol_total * std::abs(fx[p]));
+        const double want = 0.5 * eps[p] * eps[p] * (1.0 - cut);
+        EXPECT_NEAR(sums[3*p+1] / sums[3*p], want, 1.0e-3 * want);
+        EXPECT_NEAR(sums[3*p+2] / sums[3*p], want, 1.0e-3 * want);
+    }
+}
+
+TEST(ActuatorSpreading, AWidthThatIsMissingOrNotPositiveIsRefused)
+{
+    Mesh m;
+    Sources s(m, false);
+    std::vector<Real> pos = xyz(0.4 * m.Lx, 0.55 * m.Ly, 0.5 * m.H), force = xyz(-2.0e6, 0.0, 0.0);
+    pos.insert(pos.end(), {Real(0.5 * m.Lx), Real(0.5 * m.Ly), Real(0.5 * m.H)});
+    force.insert(force.end(), {Real(1.0e5), Real(0.0), Real(0.0)});
+    std::string msg = erf_gtest::abort_message([&] { s.spread(pos, force, std::vector<Real>{Real(2.0 * m.dx())}); });
+    EXPECT_NE(msg.find("one kernel width per point"), std::string::npos) << msg;
+    for (const Real bad : {Real(0.0), Real(-1.0), std::numeric_limits<Real>::quiet_NaN()}) {
+        msg = erf_gtest::abort_message([&] { s.spread(pos, force, std::vector<Real>{Real(2.0 * m.dx()), bad}); });
+        EXPECT_NE(msg.find("point 1 (0-based) has the kernel width"), std::string::npos) << msg;
+    }
 }

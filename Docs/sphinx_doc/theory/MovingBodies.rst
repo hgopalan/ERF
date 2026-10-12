@@ -58,9 +58,13 @@ Force spreading and momentum source
 -----------------------------------
 
 The force a body exerts on the fluid is carried by actuator points (the rings
-of an OpenFAST rotor's actuator disk, the disk points of a prescribed-Ct disk)
+of an OpenFAST rotor's actuator disk or the nodes of its actuator line, its
+tower force nodes and nacelle drag point, the disk points of a prescribed-Ct disk)
 and spread onto ERF's face-centred momentum sources with a 3-D Gaussian kernel of width
-``epsilon`` (given in units of dx), cut off beyond three widths. The kernel is
+``epsilon`` (given in units of dx), cut off beyond three widths. Every point has its own width:
+each body its own ``epsilon``, and an OpenFAST turbine's tower force nodes and nacelle drag point
+their own ``epsilon_tower`` and ``epsilon_nacelle`` (``epsilon`` unless given; see "Kernel widths"
+below). The kernel is
 normalised discretely on each staggered grid, with the face volumes
 (``dx dy dz detJ`` on a terrain-following mesh), so the source integrates back
 to the point force exactly for every point and component, whatever the
@@ -74,7 +78,7 @@ differs from the point loads': the whole rotor's torque by 0.4 % at 40 m and
 1.7 % at 60 m. Each point is
 visited over the faces within three widths of it, and again as its periodic
 images, so a kernel wraps across a periodic boundary and the cost grows with
-the number of points, not with the mesh. Faces on a non-periodic domain
+the number of points and the cube of their widths, not with the mesh. Faces on a non-periodic domain
 boundary get no source. The sources are computed once per step, from the
 velocities sampled at the start of the step (the disks) or from the OpenFAST
 step just taken (the turbines), and added to the momentum right-hand side in
@@ -350,8 +354,8 @@ the unfiltered ``-1 / (2 r^2)``). The sum runs over a fine span grid with
 spacing ``epsilon_opt / fllc_eps_dr`` onto which ``G / |v|`` and
 ``epsilon_opt`` are interpolated, since the optimal kernel is far narrower
 than the node spacing. The correction ``du = (1 - f) du + f (u_opt - u_les)``
-with ``f = fllc_relax`` is a downwash (against the lift) when the run's kernel
-is wider than the optimal one, and vanishes when they coincide. It is
+with ``f = fllc_relax`` is a downwash (against the lift) when the line's own
+kernel (``epsilon``) is wider than the optimal one, and vanishes when they coincide. It is
 computed at the force nodes from the loads of the step just taken, applied
 after the sampling by linear interpolation along the span between OpenFAST's
 velocity and force nodes, starts at ``fllc_start_time``, and is checkpointed
@@ -368,8 +372,8 @@ Both are off unless asked for, in either rotor mode. With
 nodes (base to top); AeroDyn computes the tower's drag from the velocities ERF
 samples at its tower nodes (``TwrAero`` must be on in the AeroDyn file, and the
 stub applies a cylinder drag with its own ``tower_diameter`` and ``tower_cd``),
-and ERF spreads each tower node's force on the fluid with the same Gaussian
-kernel as the rotor points, so the tower wake and its shadow on the rotor
+and ERF spreads each tower node's force on the fluid with a Gaussian kernel of
+width ``epsilon_tower``, so the tower wake and its shadow on the rotor
 appear in the flow. AeroDyn's own tower-shadow correction of the blade inflow
 (``TwrShadow``) would then count the shadow twice, so ERF reads it from the
 AeroDyn file and prints a warning when it is not 0. With ``nacelle_cd > 0``
@@ -378,14 +382,74 @@ and ``nacelle_area`` ERF adds one drag point at the hub node,
 ``air_density`` and ``u`` the velocity sampled at the hub node (at the hub
 itself also with ``sampling = upstream``, whose velocity nodes lie ahead of the
 rotor), corrected for
-the point's own kernel: a Gaussian force of width ``epsilon`` induces a
+the point's own kernel: a Gaussian force of width ``epsilon_nacelle`` induces a
 velocity at its own centre that lowers the sampled one by the factor
-``1 - cd area / (4 pi epsilon^2)``, so the sampled velocity is divided by it
-(the correction Kynema applies with its own nacelle kernel width; here the
-run's kernel width is used, and the run aborts if the factor is not positive,
-which needs a kernel narrower than the nacelle). The tower force and the
+``1 - cd area / (4 pi epsilon_nacelle^2)``, so the sampled velocity is divided by it
+(the correction Kynema applies with its own nacelle kernel width). The
+start-up audit aborts when the factor is under 0.5 (see "Kernel widths"). The
+tower force and the
 nacelle drag are written in the turbine diagnostics with the thrust, and the
 integrated momentum source equals minus their sum.
+
+Kernel widths
+-------------
+
+The width that suits a point depends on what it stands for, so each kind of
+point has its own, in units of the anchor level's ``dx``, and each body has
+its own set:
+
+* ``epsilon``: the rotor's points (the blade and hub nodes of an actuator line,
+  the rings of an actuator disk, a ``ct_disk``'s points). For an actuator line
+  it is best of the order of the chord, about 2 m for the IEA 15 MW with the
+  FLLC (see above); the FLLC and the ``disk_corrected`` filtered-disk factor
+  both use it, as they correct for the width the rotor is spread with.
+* ``epsilon_tower``: the tower force nodes. A tower node samples the velocity
+  its own drag has already lowered: by the streamline argument that gives the
+  nacelle's factor, a line of drag ``1/2 rho cd d U^2`` per unit length spread
+  with a Gaussian of width ``eps`` slows the flow on its axis by the fraction
+  ``cd d / (4 sqrt(pi) eps)`` in linear theory, about 11 % for an 8 m tower
+  (Cd 1) at ``eps = 10 m`` and 6 % at 20 m; with the drag taken from the
+  lowered velocity the tower drag comes out about 18 % and 10 % low. No
+  correction is applied for it, so a narrow tower kernel costs tower drag:
+  keeping the velocity deficit near 5 % (the drag about 10 % low) takes a
+  width of about 2.8 ``cd d`` (some 23 m
+  for that tower), far wider than an actuator line's blades want on fine
+  cells. ``epsilon_tower`` lets the tower keep such a width while the blades
+  are narrower. The start-up audit warns when the tower's force points lie
+  farther apart than its kernel.
+* ``epsilon_nacelle``: the nacelle drag point, and the width in its kernel
+  correction ``1 - cd area / (4 pi epsilon_nacelle^2)``: for a 60 m^2 nacelle
+  with Cd 1 it is 0.24 at 2.5 m and 0.81 at 5 m. The correction is a linear
+  estimate: along the axis Bernoulli gives a sampled speed of
+  ``U sqrt(1 - 2 cd area / (4 pi epsilon_nacelle^2))``, which stagnates where
+  the linear factor reaches 0.5, and below 0.5 the drag fed back through the
+  corrected velocity is no longer a small change. The start-up audit therefore
+  aborts when the factor is under 0.5, i.e. when ``cd area`` exceeds
+  ``2 pi epsilon_nacelle^2`` (the 2.5 m example aborts; about 3.1 m is the
+  least for that nacelle). That limit is where the correction stops making
+  sense, not a target: near it the linear factor and the Bernoulli speed part
+  ways (the drag they give differs by 44 % at a factor of 0.6 and 5 % at 0.81).
+  The velocity interpolated at the hub also sees only part of the deficit the
+  correction removes, depending on where the hub sits in its cell: 60 to 100 %
+  with the kernel one cell wide, 88 to 100 % at two cells, so the corrected
+  drag can come out up to about twice the true one at the limit on one cell and
+  25 % high on two. A factor of 0.8 or more on two cells or more keeps both
+  effects to a few per cent; Kynema's choice ``sqrt(2 cd area / pi)`` gives a
+  factor of 7/8 (6.2 m for that nacelle).
+
+  The nacelle therefore usually wants its own width beside an actuator line:
+  for the IEA 15 MW (``cd area`` of about 50 to 60 m^2) the 2 m blade width of
+  the FLLC runs above leaves the factor between 0.02 and -0.19, which aborts, while
+  ``epsilon_nacelle`` of two 2.5 m cells gives 0.81 to 0.84.
+
+Unset, ``epsilon_tower`` and ``epsilon_nacelle`` take ``epsilon``, which
+spreads every point of a body with one width. With ``mode`` adm or alm, a width
+given for a tower or nacelle that is not forced aborts when its switch
+(``num_force_points_tower``, ``nacelle_cd``) was never set, and warns when it
+was set to zero; with ``mode = none``, which forces nothing, it warns. Bodies may
+use different widths, a narrow actuator line beside a wide actuator disk, say;
+their sources add on the same fields. The widths are part of the restart
+record: a restart that changes one aborts, naming it.
 
 Prescribed uniform-Ct disk
 --------------------------
@@ -545,11 +609,17 @@ OpenFAST computes with its density go into a flow of ERF's, so the two must
 agree, and an ABL's base state thins with height, hence the tolerance);
 ``CompAero = 0`` while the loads are meant to go into the flow; a rotor that
 reaches below the ground, above the domain top or across a non-periodic side;
-a base outside the domain; two rotors whose swept discs intersect. Warnings:
+a base outside the domain; two rotors whose swept discs intersect; a nacelle
+drag area ``nacelle_cd * nacelle_area`` above ``2 pi epsilon_nacelle^2`` (in
+metres), which takes its kernel correction factor under 0.5. Warnings:
 the model's gravity differs from ERF's; a forced tower with AeroDyn's
-``TwrAero`` off; fewer than 8 cells across the rotor diameter; a kernel
-narrower than a cell; an actuator line whose points are farther apart than
-the kernel; a kernel cut by a non-periodic boundary; a rotor facing away from
+``TwrAero`` off; fewer than 8 cells across the rotor diameter; a kernel in use
+(``epsilon``, and ``epsilon_tower`` and ``epsilon_nacelle`` when the tower and
+the nacelle are forced) narrower than a cell, named by its key; an actuator
+line whose points are farther apart than ``epsilon``; tower force points
+farther apart than ``epsilon_tower``; ``num_force_points_tower > 0`` with a
+model that has no tower force nodes; the rotor's kernel cut by a non-periodic
+boundary; a rotor facing away from
 the wind at its hub or yawed more than 30 degrees from it. The bundled stub's
 deck is not an OpenFAST primary file, so its model-file checks are skipped
 with a note. The checks made at start-up before the flow exists remain: the
