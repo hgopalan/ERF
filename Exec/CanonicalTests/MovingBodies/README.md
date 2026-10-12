@@ -14,7 +14,11 @@ inputs are in `Docs/sphinx_doc/theory/MovingBodies.rst` and
 Every case builds with `ERF_ENABLE_OPENFAST=ON`, `ERF_OPENFAST_USE_STUB=ON`,
 `ERF_ENABLE_FFT=ON` and MPI (`Actuator_UniformCtDisk` needs only
 `ERF_ENABLE_MOVING_BODIES=ON`), runs the anelastic solver on a small uniform
-box for ten steps or so, and is checked by the runner named below.
+box for ten steps or so, and is checked by the runner named below. The two
+Askervein cases are the exception: a 6 km x 3 km terrain-fitted domain, and the real OpenFAST library
+(`ERF_OPENFAST_USE_STUB=OFF`, label `openfast-real`) on the IEA 15 MW model in
+`IEA15_land_model` (see its README for the source, licence and changes) and the
+terrain file of `../Real_Terrain/Askervein`, both copied next to the deck by the test.
 
 | case | body | runner | what it checks |
 | --- | --- | --- | --- |
@@ -39,6 +43,8 @@ box for ten steps or so, and is checked by the runner named below.
 | `OpenFAST_ALM_ComponentWidths` | stub turbine, line, tower, nacelle, each with its own kernel width | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake`, `RunRestartAbort.cmake` | plotfile, flow log, `fx == -load_x`; restart parity; a changed `epsilon_tower` stops a restart (`OpenFAST_ALM_Tower_ExplicitWidths`, `RunOptionParity.cmake`: widths given equal to `epsilon` change nothing) |
 | `OpenFAST_ALM_FLLC` | stub turbine, line, lifting-line correction | `RunOpenFASTADM.cmake` | the correction log |
 | `OpenFAST_ALM_FLLC_Restart` | as above | `RunRestartParity.cmake` | restart parity of the correction and every log |
+| `OpenFAST_ADM_Askervein` | IEA 15 MW, **real OpenFAST**, disk, on the Askervein summit | `RunOpenFASTADM.cmake` | plotfile, flow and turbine logs (1e-6, six digits), `fx == -(T.n) n_x` (`Tests/check_openfast_shaft_source.py`) |
+| `OpenFAST_ALM_Askervein` | IEA 15 MW, **real OpenFAST**, line with FLLC, tower and nacelle, on the Askervein summit | `RunOpenFASTADM.cmake` | plotfile, flow and turbine logs (1e-6, six digits), `fx == -load_x` |
 
 Each case also has a box-parity twin registered next to it (one box on one
 rank against a split domain on several ranks) where the feature adds a

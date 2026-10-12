@@ -658,7 +658,9 @@ step's forcing (``momentum_source.csv``, ``_correction.csv``, ``_fllc.csv``,
 configured in the ``.fst`` file. Whenever a body puts a force into the flow,
 ``<diagnostics_dir>/momentum_source.csv`` records the time and the momentum
 source integrated over the domain, which equals the sum of the forces on the
-fluid (minus the turbines' total loads, plus the disks' ``-T n``), and
+fluid (minus the turbines' total loads, or for a turbine run as an actuator
+disk minus its thrust's shaft component, whose rings cancel the in-plane load;
+plus the prescribed-Ct disks' ``-T n``), and
 ``<diagnostics_dir>/total_load.csv``, in a build with OpenFAST, the
 bodies' total load and power (see Farms).
 

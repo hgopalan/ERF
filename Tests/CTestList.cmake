@@ -1661,6 +1661,94 @@ if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       "D1[.]air_density changed on restart"
       RESTART_OPTIONS "erf.moving_bodies.D1.air_density=1.02")
 endif()
+if(ERF_ENABLE_OPENFAST AND NOT ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
+  # The IEA 15 MW reference turbine run by the real OpenFAST library (built with ERF_OPENFAST_USE_STUB=OFF),
+  # on the summit of the Askervein hill in a uniform 10 m/s inflow with a pressure outflow 3.3 km downstream:
+  # an actuator disk and an actuator line with its tower and nacelle. Each test copies the model
+  # (Exec/CanonicalTests/MovingBodies/IEA15_land_model) and the Askervein terrain file next to its deck.
+  # The plotfile, the sampled flow log and the turbine's loads, torque and power (T1_erf.csv) are compared
+  # with golds made on macOS arm64 (Apple clang, Release, Homebrew gfortran, Accelerate) with OpenFAST 5.0.0,
+  # at tolerances that allow for another compiler, CPU and maths library inside OpenFAST and ERF: OpenFAST's
+  # loads cross to ERF in single precision (rounding is at most 6e-8 relative, of order 1e-8 relative in the
+  # flow), and 1-rank and 2-rank runs agree to 1e-15 and to every printed digit. The load check is an identity:
+  # minus the total load for the line (8 digits), minus the shaft component of the thrust for the disk (1e-8,
+  # Tests/check_openfast_shaft_source.py).
+  function(add_test_openfast_real TEST_NAME LOG FORCE_COLUMN)
+      set(TEST_FILES_DIR ${TEST_NAME})
+      setup_test()
+      file(COPY ${TEST_SOURCE_ROOT}/IEA15_land_model DESTINATION ${CURRENT_TEST_BINARY_DIR})
+      file(COPY ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Real_Terrain/Askervein/askervein.txt DESTINATION ${CURRENT_TEST_BINARY_DIR})
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+          "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+          "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+          "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+          "-DNRANKS=${NP}"
+          "-DTEST_EXE=${TEST_EXE}"
+          "-DCONFIG=$<CONFIG>"
+          "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.i"
+          "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+          "-DFCOMPARE=${FCOMPARE_EXE}"
+          "-DPLTFILE=plt00010"
+          "-DPLOT_GOLD=${PLOT_GOLD}"
+          "-DRTOL=1.0e-6"
+          "-DATOL=1.0e-6"
+          "-DFLOW_CSV=${LOG}"
+          "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/${LOG}.gold"
+          "-DSIGDIGITS=6"
+          "-DZERO_EXPONENT=-4"
+          "-DTURBINE_CSV=T1_erf.csv"
+          "-DTURBINE_GOLD=${CURRENT_TEST_SOURCE_DIR}/T1_erf.csv.gold"
+          "-DTURBINE_COLUMNS=time;rotor_speed;thrust_x;torque;power;tower_x;nacelle_x;load_x"
+          "-DFORCE_COLUMN=${FORCE_COLUMN}"
+          "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
+          "-DPYTHON_EXE=${ERF_TEST_PYTHON}"
+          -P ${PROJECT_SOURCE_DIR}/Tests/RunOpenFASTADM.cmake)
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+          TIMEOUT 900
+          PROCESSORS ${NP}
+          WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+          LABELS "regression;moving-bodies;openfast-real"
+          ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation.log")
+  endfunction()
+  # the disk's load check runs a Python script
+  if(NOT "${ERF_TEST_PYTHON}" STREQUAL "")
+      add_test_openfast_real(OpenFAST_ADM_Askervein "T1_flow.csv" "shaft_x")
+  else()
+      message(WARNING "OpenFAST_ADM_Askervein is not registered: its load check needs a Python 3 interpreter")
+  endif()
+  add_test_openfast_real(OpenFAST_ALM_Askervein "T1_flow.csv" "load_x")
+endif()
+
+if(ERF_ENABLE_MOVING_BODIES AND NOT "${ERF_TEST_PYTHON}" STREQUAL "")
+  # The shaft-thrust checker of the real-OpenFAST disk case on fixed logs: the real case's own logs must
+  # pass; with one row's source off by 1e-6 it must fail; and on a stub disk, whose loads lie along x, it
+  # must refuse to count the plain x identity as the shaft check.
+  # The verdict is the exit code (the runner acts on it), so each case requires the exit code as well as
+  # the message (Tests/RunExpectExit.cmake).
+  foreach(_case pass mismatch plain_x)
+      if(_case STREQUAL "pass")
+          set(_result 0)
+          set(_expect "fx equals -[(]T[.]n[)] n_x to")
+      elseif(_case STREQUAL "mismatch")
+          set(_result 1)
+          set(_expect "fx differs from -[(]T[.]n[)] n_x by 1[.]00e-06")
+      else()
+          set(_result 1)
+          set(_expect "the loads lie along x")
+      endif()
+      set(_dir ${PROJECT_SOURCE_DIR}/Tests/test_files/ShaftSourceChecker/${_case})
+      add_test(NAME MovingBodies_ShaftSourceChecker_${_case}
+          COMMAND ${CMAKE_COMMAND}
+              "-DCHECK_COMMAND=${ERF_TEST_PYTHON};${PROJECT_SOURCE_DIR}/Tests/check_openfast_shaft_source.py;--turbine;${_dir}/T1_erf.csv;--source;${_dir}/moving_bodies/momentum_source.csv"
+              "-DEXPECTED_RESULT=${_result}"
+              "-DEXPECTED_REGEX=${_expect}"
+              -P ${PROJECT_SOURCE_DIR}/Tests/RunExpectExit.cmake)
+      set_tests_properties(MovingBodies_ShaftSourceChecker_${_case} PROPERTIES
+          LABELS "regression;moving-bodies" TIMEOUT 60)
+  endforeach()
+endif()
 unset(TEST_SOURCE_ROOT)
 
 if(ERF_ENABLE_MPI)

@@ -2,14 +2,16 @@
 # Download, build and install the OpenFAST version ERF's turbine coupling links against.
 #
 #   Build/setup_openfast.sh [--version 5.0.0] [--prefix DIR] [--src DIR] [--jobs N]
-#                           [--fortran gfortran] [--configure-only] [--force]
+#                           [--fortran gfortran] [--no-cpp-api] [--configure-only] [--force]
 #
 # Clones the release tag into <src>/openfast-<version>, configures it the way ERF needs
 # (shared libraries, double precision, the C/C++ API on, no tests), builds and installs it under
 # <prefix> (default $HOME/opt/openfast-<version>), and prints the -DOPENFAST_DIR to pass to
 # ERF's cmake. Re-running is safe: an existing clone is reused and an existing install is left
 # alone unless --force is given. The ERF coupling uses the external-inflow C API, which is the
-# same in every 4.x and 5.x release; 5.0.0 is the tested version.
+# same in every 4.x and 5.x release; 5.0.0 is the tested version. ERF needs only the C interface
+# (FAST_Library.h and libopenfastlib, built either way); --no-cpp-api leaves out OpenFAST's C++ API,
+# which needs HDF5, NetCDF, LibXml2 and ZLIB, as the CI job does.
 set -euo pipefail
 
 version="5.0.0"
@@ -19,9 +21,10 @@ jobs=4
 fortran="${FC:-gfortran}"
 configure_only=0
 force=0
+cpp_api=ON
 repo="https://github.com/OpenFAST/openfast"
 
-usage() { sed -n '2,12p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,14p' "$0"; exit "${1:-0}"; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)        version="$2"; shift 2 ;;
@@ -30,6 +33,7 @@ while [[ $# -gt 0 ]]; do
         --jobs|-j)        jobs="$2"; shift 2 ;;
         --fortran)        fortran="$2"; shift 2 ;;
         --configure-only) configure_only=1; shift ;;
+        --no-cpp-api)     cpp_api=OFF; shift ;;
         --force)          force=1; shift ;;
         -h|--help)        usage 0 ;;
         *) echo "setup_openfast.sh: unknown argument '$1'" >&2; usage 1 ;;
@@ -66,7 +70,7 @@ cmake -S "$src" -B "$build" \
     -DCMAKE_INSTALL_PREFIX="$prefix" \
     -DBUILD_SHARED_LIBS=ON \
     -DDOUBLE_PRECISION=ON \
-    -DBUILD_OPENFAST_CPP_API=ON \
+    -DBUILD_OPENFAST_CPP_API=${cpp_api} \
     -DBUILD_OPENFAST_CPP_DRIVER=OFF \
     -DBUILD_TESTING=OFF \
     -DOPENMP=OFF > "$build/setup_openfast.configure.log" 2>&1 \

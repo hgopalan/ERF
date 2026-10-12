@@ -39,11 +39,14 @@ solver with the FFT Poisson solve:
    cmake -DERF_ENABLE_MPI=ON -DERF_ENABLE_FFT=ON -DERF_ENABLE_OPENFAST=ON \
          -DOPENFAST_DIR=$HOME/opt/openfast-5.0.0 ..
 
-At run time the OpenFAST library must be on the loader path
-(``DYLD_LIBRARY_PATH`` on macOS, ``LD_LIBRARY_PATH`` on Linux). Without an
+The CMake build records the OpenFAST library directory in ``erf_exec``'s run-time
+search path; a moved installation or another build system needs it on the loader
+path (``DYLD_LIBRARY_PATH`` on macOS, ``LD_LIBRARY_PATH`` on Linux). Without an
 OpenFAST installation, ``-DERF_OPENFAST_USE_STUB=ON`` builds against a bundled
-stub library with the same C API; the regression tests run on it, and so does
-the ``Linux GCC OpenFAST stub`` CI job.
+stub library with the same C API; most regression tests run on it, and so does
+the ``Linux GCC OpenFAST stub`` CI job. Two cases run the real library on the
+IEA 15 MW reference turbine (below); the ``Linux GCC OpenFAST 5`` CI job builds
+OpenFAST 5.0.0 with ``Build/setup_openfast.sh`` (cached between runs) for them.
 
 Floating-point traps must stay off in a run with an OpenFAST turbine
 (``amrex.fpe_trap_invalid``, ``amrex.fpe_trap_zero`` and
@@ -177,7 +180,9 @@ Per turbine, under ``output_root``, every ``diagnostics_int`` steps:
   whole at each write.
 - ``<diagnostics_dir>/total_load.csv``, ``momentum_source.csv``,
   ``ground.csv``: farm totals, the integrated source (equal to minus the
-  loads), the terrain height under each body.
+  loads; for an actuator disk on a tilted shaft, minus the thrust's shaft
+  component (T . n) n, since its rings cancel the in-plane load), the terrain
+  height under each body.
 
 The rows of ``_erf.csv``, ``_flow.csv`` and ``total_load.csv`` carry the time
 at the end of their step; the others carry the time at the start of the step
@@ -212,9 +217,17 @@ Tests
    ctest -L box-parity -R "OpenFAST|Actuator"
    Tests/Unit/erf_unit_tests --gtest_filter='OpenFAST*:Actuator*:FLLC*:WakeLines*:RunningStats*:PrescribedCtDisk.*:MovingBodiesInputs.*'
 
-The CTests run on the stub library only (``-DERF_OPENFAST_USE_STUB=ON``);
-their golds hold the stub's loads. With a real OpenFAST the same decks run, but
-the loads, and so the golds, differ.
+These CTests run on the stub library (``-DERF_OPENFAST_USE_STUB=ON``); their
+golds hold the stub's loads. With a real OpenFAST the same decks run, but the
+loads, and so the golds, differ. A build against the real library
+(``-DERF_OPENFAST_USE_STUB=OFF``) registers two other cases instead, label
+``openfast-real``: the IEA 15 MW reference turbine (the model is in
+``Exec/CanonicalTests/MovingBodies/IEA15_land_model``) on the Askervein hill as
+an actuator disk and as an actuator line with its tower and nacelle:
+
+.. code-block:: bash
+
+   ctest -L openfast-real
 
 Known limits
 ------------
@@ -228,6 +241,20 @@ Known limits
   in an anelastic run: the inflow theta is scaled by the density ratio.
 - The k-equation length-scale cap from the PBL height reads each level's own
   diagnosis; pin ``erf.max_geom_lscale`` on multi-level ABL runs.
+- On a terrain-fitted mesh, refined levels are not usable yet for turbines. In
+  the Askervein runs that led to the single-level real-OpenFAST cases, the
+  anelastic projection (an FFT-preconditioned GMRES solve) left a maximum
+  divergence of 1e-10 to 1e-9 on level 0, but on level 1 and finer 1e3 to 1e7
+  times the constant a refined level keeps by design (the mean it subtracts
+  from its right-hand side, printed as "Subtracting ... from rhs" with
+  ``erf.mg_v = 1``); a three-level actuator-line run blew up in its first step.
+  ERF prints no warning when this happens: compare the "divergence after" lines
+  with that constant. A refined level on a terrain-fitted mesh must also span
+  the full height, or the FFT preconditioner aborts.
+- The actuator line's tip-travel limit (``alm_max_tip_cells``) counts cells of
+  the computational grid; on a terrain-fitted mesh the cells over high ground
+  are shorter (42 m instead of 50 m over the Askervein summit), so a tip that
+  passes the check can cross a little more than one physical cell per step.
 
 Release notes
 -------------
@@ -240,6 +267,7 @@ actuator line modes with tower and nacelle forces, the filtered lifting-line
 correction, upstream and corrected-disk sampling, prescribed-Ct disks,
 multi-turbine farms with round-robin ownership, wake lines and running
 statistics, turbulent inflow from precursor planes or cell perturbations,
-the anchor level on multi-level grids, bodies on terrain, eighteen canonical
-cases with golds, box-parity and restart-parity tests, and the OpenFAST-stub
-CI job.
+the anchor level on multi-level grids, bodies on terrain, the canonical
+cases with golds, box-parity and restart-parity tests, the OpenFAST-stub CI
+job, and two cases with the real OpenFAST library and the IEA 15 MW reference
+turbine on the Askervein hill, with their own CI job.

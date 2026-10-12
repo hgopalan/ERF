@@ -796,6 +796,45 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`_, `Ex
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoWidths`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoWidths
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskAndTurbine`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskAndTurbine
 
+Real OpenFAST on terrain
+------------------------
+``OpenFAST_ADM_Askervein`` and ``OpenFAST_ALM_Askervein`` (needs
+``-DERF_ENABLE_OPENFAST=ON -DERF_OPENFAST_USE_STUB=OFF`` with an OpenFAST 5
+installation, FFT and MPI; label ``openfast-real``) run the real OpenFAST library
+on the IEA 15 MW reference turbine (``Exec/CanonicalTests/MovingBodies/IEA15_land_model``,
+from the IEA Wind Task 37 repository; its README lists every change) on the summit
+of the Askervein hill (``Exec/CanonicalTests/Real_Terrain/Askervein/askervein.txt``)
+on a terrain-fitted mesh of 50 m cells: a uniform 10 m/s mass inflow 2.7 km
+upstream, a pressure outflow 3.3 km downstream, slip walls elsewhere and no sponge,
+ten steps of 0.4 s. The base is raised 123 m onto the hill and the start-up audit
+compares the model's density with ERF's at the hub. Ten steps from a uniform flow
+are a start-up (the blades flap downwind once released: the thrust drops by 60 %
+and the torque by over 80 % in the first step, then recovers), so these are
+regressions of the coupling, not validations.
+
+The plotfile, ``T1_flow.csv`` and the turbine's rotor speed, loads, torque and
+power in ``T1_erf.csv`` match golds made on macOS arm64 with OpenFAST 5.0.0, at a
+relative tolerance of 1e-6 for the plotfile and two units of the sixth significant
+digit for the logs: OpenFAST's loads cross to ERF in single precision, so another
+compiler or maths library may round a load differently (at most 6e-8 relative, of
+order 1e-8 relative in the flow); one and two ranks agree to 1e-15. The load check
+is an identity. For the actuator line, with its tower and nacelle forced, the
+integrated source equals minus the total load ``load_x`` (to 8 digits). For the
+actuator disk, whose rings carry each blade node's force along the tilted (6
+degree) shaft and in-plane parts that cancel around each ring, it equals minus the
+shaft component of the thrust projected on x, ``(T . n) n_x``, to 1e-8
+(``Tests/check_openfast_shaft_source.py``; OpenFAST sets the hub node's force to
+zero). ``MovingBodies_ShaftSourceChecker_pass``, ``_mismatch`` and ``_plain_x``
+run that checker on fixed logs: the disk case's own, the same with one row off
+by 1e-6 (must fail), and a stub disk whose loads lie along x (must refuse, as the
+check would then be the plain x identity). The ``Linux GCC OpenFAST 5`` CI job runs
+the two cases.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Askervein`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Askervein`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Askervein`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Askervein
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Askervein`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Askervein
+
 Wake sampling lines
 -------------------
 ``OpenFAST_ADM_Wake`` (same build requirements) is the actuator-disk case with

@@ -1,0 +1,126 @@
+name: Linux GCC OpenFAST 5
+
+# The moving-bodies cases that run the real OpenFAST library rather than the bundled stub:
+# the IEA 15 MW reference turbine as an actuator disk and as an actuator line on the Askervein
+# hill (label openfast-real). OpenFAST 5.0.0 is built from source with Build/setup_openfast.sh
+# (without its C++ API, which ERF does not use) and cached between runs, keyed on the version and
+# on that script, and saved as soon as it is built, so a failing test does not throw it away; a
+# cold build takes about 20-30 minutes, a cached one a few seconds. Only erf_exec and fcompare are
+# built, since the unit tests of the coupling already run against the stub in the "Linux GCC
+# OpenFAST stub" job. Like that job, it runs on every pull request: the cases depend on the dycore,
+# the terrain and the pressure solve as much as on the coupling.
+
+on:
+  push:
+    branches: [development, ERF-MovingBodies]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.event.pull_request.number || github.ref }}-${{ github.head_ref }}-openfast-real
+  cancel-in-progress: ${{ github.ref != 'refs/heads/development' }}
+
+env:
+  OPENFAST_VERSION: 5.0.0
+
+jobs:
+  openfast:
+    name: GNU@11 C++17 - OpenFAST 5.0.0, real-model cases
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+
+    steps:
+
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+
+    - name: Install Dependencies
+      run: |
+        Submodules/AMReX/.github/workflows/dependencies/dependencies.sh
+        sudo apt-get install -y --no-install-recommends libblas-dev liblapack-dev
+
+    - name: Install CCache
+      run: Submodules/AMReX/.github/workflows/dependencies/dependencies_ccache.sh
+
+    - name: Restore OpenFAST
+      id: cache-openfast
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/opt/openfast-${{ env.OPENFAST_VERSION }}
+        key: openfast-${{ env.OPENFAST_VERSION }}-${{ runner.os }}-${{ hashFiles('Build/setup_openfast.sh') }}
+
+    - name: Build OpenFAST
+      if: steps.cache-openfast.outputs.cache-hit != 'true'
+      run: Build/setup_openfast.sh --version ${{ env.OPENFAST_VERSION }} --jobs 4 --no-cpp-api
+
+    - name: Save OpenFAST
+      if: steps.cache-openfast.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/opt/openfast-${{ env.OPENFAST_VERSION }}
+        key: openfast-${{ env.OPENFAST_VERSION }}-${{ runner.os }}-${{ hashFiles('Build/setup_openfast.sh') }}
+
+    - name: Set Up CCache
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.workflow }}-${{ github.job }}-git-${{ github.sha }}
+        restore-keys: |
+             ccache-${{ github.workflow }}-${{ github.job }}-git-
+
+    - name: Configure Project and Generate Build System
+      run: |
+        cmake \
+          -B${{runner.workspace}}/ERF/build \
+          -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DERF_DIM:STRING=3 \
+          -DERF_ENABLE_MPI:BOOL=ON \
+          -DERF_ENABLE_FFT:BOOL=ON \
+          -DERF_ENABLE_OPENFAST:BOOL=ON \
+          -DERF_OPENFAST_USE_STUB:BOOL=OFF \
+          -DOPENFAST_DIR:PATH=$HOME/opt/openfast-${{ env.OPENFAST_VERSION }} \
+          -DERF_ENABLE_TESTS:BOOL=ON \
+          -DERF_ENABLE_REGRESSION_TESTS_ONLY:BOOL=ON \
+          -DERF_ENABLE_ALL_WARNINGS:BOOL=ON \
+          -DERF_ENABLE_FCOMPARE:BOOL=ON \
+          -DERF_TEST_NRANKS:STRING=2 \
+          ${{github.workspace}};
+
+    - name: Compile and Link
+      run: |
+        export CCACHE_COMPRESS=1
+        export CCACHE_COMPRESSLEVEL=10
+        export CCACHE_MAXSIZE=400M
+        ccache -z
+
+        cmake --build ${{runner.workspace}}/ERF/build --target erf_exec fcompare --parallel 2 --verbose \
+          2>&1 | tee -a ${{runner.workspace}}/build-output.txt;
+
+        ccache -s
+
+    - name: Report
+      run: |
+        egrep "Warning:|Error:|warning:|error:" ${{runner.workspace}}/build-output.txt \
+          | egrep -v "Submodules/AMReX" | sort | uniq \
+          | awk 'BEGIN{i=0}{print $0}{i++}END{print "Warnings: "i}' > ${{runner.workspace}}/build-output-warnings.txt
+        cat ${{runner.workspace}}/build-output-warnings.txt
+        export return=$(tail -n 1 ${{runner.workspace}}/build-output-warnings.txt | awk '{print $2}')
+        exit ${return}
+
+    - name: Real-OpenFAST Regression Tests
+      run: |
+        ctest -L openfast-real --output-on-failure --no-tests=error
+      working-directory: ${{runner.workspace}}/ERF/build
+
+    - name: Upload logs and backtraces from failed tests
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: openfast-real-failures
+        path: |
+          ${{runner.workspace}}/ERF/build/Tests/**/Backtrace.*
+          ${{runner.workspace}}/ERF/build/Tests/**/simulation.log
+          ${{runner.workspace}}/ERF/build/Tests/**/T1_*.csv
+        if-no-files-found: ignore
