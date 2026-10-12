@@ -37,8 +37,20 @@
  *   - WENO5's upwind side is selected by sign(S(phi0) * D4th), D4th a
  *     4th-order central difference of the current iterate (WRF's select_4th).
  *   - No subcell (Russo-Smereka) correction.
- *   - Final safeguard phi_out = min(phi_out, phi_in) against the field at
- *     call entry ("fire area can only increase").
+ *   - Final safeguard phi_out = min(phi_out, phi_ref) ("fire area can only
+ *     increase"). WRF's phi_ref is the level set at the start of the step,
+ *     before advection (module_fr_fire_model.F passes lfn to prop_ls, whose
+ *     reinit_ls_rk3 ends with lfn_out = min(lfn_out, lfn_in)), so the
+ *     reinitialisation may raise phi by up to the step's own advance but
+ *     never above where it stood before the step. FireLayer passes that
+ *     field as clamp_ref (erf.fire.levelset.reinit_clamp = "step_start", the
+ *     default). Without clamp_ref ("post_advection", the form before
+ *     2026-10) the reference is the advected field at call entry, which
+ *     forbids raising phi anywhere: a burned side steeper than
+ *     |grad phi| = 1 never relaxes, and each correction on the unburned
+ *     side moves the front forward. The clamp runs even with zero
+ *     iterations, so FireLayer does not call the reinitialisation at all
+ *     with erf.fire.levelset.reinit_iters = 0.
  *
  *  "jiang_peng", reinitialize_phi_jiang_peng(): Jiang & Peng (2000)
  *  HJ-WENO5 with true Shu-Osher SSP-RK3. It differs from the WRF scheme in
@@ -266,11 +278,12 @@ amrex::Real reinit_rhs_cell(amrex::Array4<amrex::Real const> const& phi_state,
  *   phi3 = 1/3 phi0 + 2/3*(phi2 + dtau*L(phi2))
  *
  * No subcell fix, no per-iteration clamp (matching JP's own scheme, which
- * has neither) -- but the SAME final min(phi_out, phi_in) safeguard as
- * reinitialize_phi() is applied here too, since production needs "fire
- * area can only increase" regardless of which internal scheme produced
- * the update; JP's own scheme has no clamp at all, so this is a
- * production-integration difference, not part of JP's scheme itself.
+ * has neither) -- but the SAME final min(phi_out, phi_ref) safeguard as
+ * reinitialize_phi(), with the same clamp_ref, is applied here too, since
+ * production needs "fire area can only increase" regardless of which
+ * internal scheme produced the update; JP's own scheme has no clamp at
+ * all, so this is a production-integration difference, not part of JP's
+ * scheme itself.
  *
  * @param[in,out] phi        Level-set field [m], modified in place.
  * @param[in]     geom       Domain geometry.
@@ -282,6 +295,15 @@ amrex::Real reinit_rhs_cell(amrex::Array4<amrex::Real const> const& phi_state,
  *                           wall_extrap.
  * @param[in]     wall_extrap  Leave mask cells untouched and read
  *                           neighbours through a wall stencil.
+ * @param[in]     sign_eps2_override  Term added to phi0^2 in the smoothed
+ *                           sign (<= 0: dx^2).
+ * @param[in]     scratch    Stage fields allocated once (FireLayer); null
+ *                           allocates locally.
+ * @param[in]     clamp_ref  Reference of the final min() clamp, on phi's
+ *                           BoxArray and DistributionMapping (valid cells
+ *                           read): the level set before the advection that
+ *                           preceded this call. Null clamps against phi at
+ *                           call entry.
  */
 inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
                                          const amrex::Geometry& geom,
@@ -290,7 +312,8 @@ inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
                                          const amrex::MultiFab* mask = nullptr,
                                          bool wall_extrap = false,
                                          amrex::Real sign_eps2_override = -1.0,
-                                         Scratch* scratch = nullptr)
+                                         Scratch* scratch = nullptr,
+                                         const amrex::MultiFab* clamp_ref = nullptr)
 {
     using namespace amrex;
     // GpuArray by value: geom.CellSize() hands back a pointer into host Geometry
@@ -370,10 +393,15 @@ inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
     }
 
     // Same final safeguard as reinitialize_phi() -- see its comment.
+    // checked in every build: the clamp kernel reads clamp_ref through phi's MFIter
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(clamp_ref == nullptr || (clamp_ref->boxArray() == phi.boxArray()
+                                     && clamp_ref->DistributionMap() == phi.DistributionMap()),
+                                     "reinitialize: clamp_ref must share phi's BoxArray and DistributionMapping");
+    const MultiFab& clamp_mf = (clamp_ref != nullptr) ? *clamp_ref : phi_in;
     for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto out = phi_work.array(mfi);
-        auto pin = phi_in.const_array(mfi);
+        auto pin = clamp_mf.const_array(mfi);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             out(i, j, k) = amrex::min(out(i, j, k), pin(i, j, k));
         });
@@ -405,6 +433,13 @@ inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
  *                           wall_extrap.
  * @param[in]     wall_extrap  Leave mask cells untouched and read
  *                           neighbours through a wall stencil.
+ * @param[in]     scratch    Stage fields allocated once (FireLayer); null
+ *                           allocates locally.
+ * @param[in]     clamp_ref  Reference of the final min() clamp, on phi's
+ *                           BoxArray and DistributionMapping (valid cells
+ *                           read): WRF's lfn_in, the level set before the
+ *                           advection that preceded this call. Null clamps
+ *                           against phi at call entry.
  */
 inline void reinitialize_phi(amrex::MultiFab& phi,
                               const amrex::Geometry& geom,
@@ -413,7 +448,8 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                               amrex::Real band_m,
                               const amrex::MultiFab* mask = nullptr,
                               bool wall_extrap = false,
-                              Scratch* scratch = nullptr)
+                              Scratch* scratch = nullptr,
+                              const amrex::MultiFab* clamp_ref = nullptr)
 {
     using namespace amrex;
     // GpuArray by value, as above: the kernels read dx on the device.
@@ -500,12 +536,23 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
         MultiFab::Copy(phi0, stage, 0, 0, 1, 0); // phi3 becomes next outer iteration's base
     }
 
-    // lfn_out = min(lfn_out, lfn_in): reinitialization can never revert an
-    // already-burned cell (phi < 0) back to unburned.
+    // lfn_out = min(lfn_out, lfn_in): reinitialization never lifts phi
+    // above the reference, so a cell burned (phi < 0) in the reference stays
+    // burned. WRF's lfn_in is the level set at the start of the step, before
+    // advection (module_fr_fire_model.F passes lfn; prop_ls_rk3 sets lfn_2 =
+    // lfn_out); clamp_ref supplies it. A cell that the advection of this
+    // step burned may then be lifted back up to its start-of-step value, as
+    // in WRF. Without clamp_ref the reference is the advected field this
+    // call started from, which forbids raising phi anywhere.
+    // checked in every build: the clamp kernel reads clamp_ref through phi's MFIter
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(clamp_ref == nullptr || (clamp_ref->boxArray() == phi.boxArray()
+                                     && clamp_ref->DistributionMap() == phi.DistributionMap()),
+                                     "reinitialize: clamp_ref must share phi's BoxArray and DistributionMapping");
+    const MultiFab& clamp_mf = (clamp_ref != nullptr) ? *clamp_ref : phi_in;
     for (MFIter mfi(phi0); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto out = phi0.array(mfi);
-        auto pin = phi_in.const_array(mfi);
+        auto pin = clamp_mf.const_array(mfi);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             out(i, j, k) = amrex::min(out(i, j, k), pin(i, j, k));
         });

@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# eps_visc_front = 20 m on 25 m fire cells at cfl 0.4, within the WENO band
+# (weno_band_cells 4 >= visc_front_cells 2): factor 0.4 (16/15 + 8 x 0.8) =
+# 2.99 > 2.513 for a front facing a grid axis, so the run stops at start-up
+# (largest stable value for every direction 0.597 x 25 = 14.92 m).
+# Expected: The level-set substep is unstable: erf.fire.levelset.eps_visc_front = 20 m
+erf.fire.levelset.eps_visc_front = 20.0

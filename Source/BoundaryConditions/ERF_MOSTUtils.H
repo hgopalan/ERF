@@ -355,9 +355,15 @@ Compute_roughness (amrex::Real zref,
                    amrex::Real ustar)
 {
     similarity_funs sfuns;
+    constexpr amrex::Real z0_min = amrex::Real(1.0e-7);
     amrex::Real zeta  = zref / Olen;
     amrex::Real psi_m = sfuns.calc_psi_m2(zeta);
-    amrex::Real z0    = zref / std::exp(KAPPA*umm/ustar + psi_m);
-    return std::max(z0, amrex::Real(1.0e-7));
+    // z0 = zref / exp(arg) falls below z0_min once arg >= log(zref / z0_min);
+    // return the floor there instead of evaluating exp(arg), which overflows
+    // when u* -> 0 (no drag: Cd = 0, or calm air), e.g. arg = KAPPA 5 / 2e-16.
+    const amrex::Real arg = KAPPA*umm/ustar + psi_m;
+    if (arg >= std::log(zref / z0_min)) { return z0_min; }
+    amrex::Real z0    = zref / std::exp(arg);
+    return std::max(z0, z0_min);
 }
 #endif

@@ -20,6 +20,36 @@ employs Moeng's formulation for Monin-Obukhov similarity theory (MOST) and ``cus
 specify the fluxes through ``ustar; tstar; qstar``. Currently, the MOST pathway is the primary flux type employed
 in ERF simulations and will be the focus in subsequent sections.
 
+With ``bulk_coeff`` the surface stress is :math:`\rho C_d |U| (u, v)`, the heat flux
+:math:`\rho C_h |U| (\theta_s - \theta)` and the moisture flux :math:`\rho C_q |U| (q_s - q_v)`, with
+:math:`|U|` the horizontal wind speed in the first cell. The heat flux can instead be imposed: when
+``erf.most.surf_temp_flux`` (a kinematic flux :math:`F = \overline{w'\theta'}` in K m/s, positive upward, as
+for the other flux types) is given, the heat flux is :math:`\rho F` whatever the wind and the surface
+temperature, and ``erf.most.Ch`` is not needed (a warning says so if it is set). This is WRF's constant drag
+coefficient with an imposed heat flux (``isfflx = 0`` with ``tke_drag_coefficient`` and ``tke_heat_flux``),
+which WRF's idealized fire cases use. The moisture flux still uses ``erf.most.Cq``; set it to zero for no
+surface moisture flux. The imposed flux cannot be combined with anything else that supplies the surface
+temperature or flux (SST/TSK data, ``most.use_sfc_fluxes``, ``most.use_sfc_sst``, a land-surface or surface
+model, a coupled ocean) or with ``erf.most.surf_heating_rate``: the run stops at start-up, since one of the
+two would otherwise be dropped. ``erf.most.surf_temp`` and ``erf.most.surf_moist`` are still required with
+``bulk_coeff``, though the surface temperature no longer sets the heat flux. The friction velocity and
+temperature scale the PBL schemes read are derived from the applied fluxes, so they follow the imposed flux
+too. In calm air, where :math:`u_* = \sqrt{C_d}\,|U|` goes to zero while the imposed flux stays on, the
+temperature and moisture scales and the Obukhov length use :math:`u_*` floored at 0.001 m/s, as the MOST
+imposed-flux path does, so :math:`\theta_* = -F/0.001` there: finite, but not a meaningful stability scale.
+WRF uses ``isfflx = 0`` without a surface-layer-driven PBL scheme; pairing the imposed flux with a PBL scheme
+that reads :math:`\theta_*` or the Obukhov length (MYNN, YSU, MRF, MYJ) gives such a scheme these values in
+calm cells.
+
+::
+
+   erf.surface_layer.flux_type = bulk_coeff
+   erf.most.Cd                 = 0.002   # WRF tke_drag_coefficient
+   erf.most.Cq                 = 0.0
+   erf.most.surf_temp          = 300.0
+   erf.most.surf_moist         = 0.0
+   erf.most.surf_temp_flux     = 0.24    # WRF tke_heat_flux [K m/s]
+
 
 MOST Theory
 ~~~~~~~~~~~~~~~~~~~

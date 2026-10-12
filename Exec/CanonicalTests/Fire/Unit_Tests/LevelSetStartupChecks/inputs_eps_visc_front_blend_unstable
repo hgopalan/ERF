@@ -1,0 +1,18 @@
+FILE = inputs_base
+
+# A near-front viscosity larger than the background one, with a WENO band
+# (3 cells) that ends inside the blend from eps_visc_front to eps_visc
+# (visc_front_cells 2 + visc_transition_cells 10 = 12 cells). On 25 m fire
+# cells at cfl 0.4: eps_visc_front = 14.75 m (0.59 dx) is stable with WENO5
+# (limit 0.597 dx) and eps_visc = 2.5 m with first-order differences (limit
+# 0.432 dx), but just beyond the band the blend still holds 0.59 + (3 - 2)/10
+# x (0.1 - 0.59) = 0.541 dx = 13.53 m with first-order differences, above
+# their limit for every front direction (0.535 dx on an axis). The run stops
+# at start-up naming that blended value.
+# Expected: The level-set substep is unstable: the viscosity 13.53 m, blended from erf.fire.levelset.eps_visc_front = 14.75 m
+erf.fire.levelset.gradient = "weno5z_front"
+erf.fire.levelset.weno_band_cells = 3
+erf.fire.levelset.visc_front_cells = 2
+erf.fire.levelset.visc_transition_cells = 10.0
+erf.fire.levelset.eps_visc_front = 14.75
+erf.fire.levelset.eps_visc = 2.5

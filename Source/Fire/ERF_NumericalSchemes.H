@@ -3,7 +3,10 @@
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
+#include <algorithm>
 #include <cmath>
+#include <complex>
+#include <vector>
 
 /**
  * @file ERF_NumericalSchemes.H
@@ -75,9 +78,11 @@ inline constexpr int LEVELSET_GRAD_WENO5Z_FRONT = 2;   ///< HJ-WENO5-Z within `b
  *
  * WRF-Fire also carries two artificial viscosities, one within a few cells
  * of the front (fire_viscosity_bg, fire_viscosity_ngp) and one elsewhere
- * (fire_viscosity), blended over a fraction of the advection band
- * (fire_viscosity_band). `eps_visc_front` is the near-front value; the
- * coefficient is eps_visc_front for |phi| <= visc_d0, the background value
+ * (fire_viscosity), blended linearly over fire_viscosity_band times the
+ * near-front width (module_fr_fire_core.F: threshold_AV =
+ * fire_viscosity_ngp dx, so 0.5 x 2 = 1 cell with WRF's defaults; ERF's
+ * visc_transition_cells defaults to 2). `eps_visc_front` is the near-front
+ * value; the coefficient is eps_visc_front for |phi| <= visc_d0, the background value
  * for |phi| >= visc_d1, and linear in between. A negative eps_visc_front
  * keeps the single background value everywhere.
  */
@@ -103,6 +108,167 @@ struct LevelSetGradient {
         return eps_visc_front + w * (eps_bg - eps_visc_front);
     }
 };
+
+/// Real-axis stability limit of every three-stage, third-order Runge-Kutta
+/// scheme (the level-set SSP-RK3 and Wicker-Skamarock share the polynomial
+/// 1 + z + z^2/2 + z^3/6 on a linear problem): stable for -2.5127 <= z <= 0.
+inline constexpr amrex::Real LEVELSET_RK3_REAL_LIMIT = amrex::Real(2.5127453266183286);
+
+/// Gain of the HJ-WENO5 one-sided derivative on the two-cell wave
+/// (-1)^i, in units of 1/dx: 64/60 with its linear weights, which WENO-Z
+/// keeps on that wave (its three smoothness indicators are equal there).
+/// The first-order difference gives 2.
+inline constexpr amrex::Real LEVELSET_WENO5_TWO_CELL_GAIN = amrex::Real(16.0 / 15.0);
+
+/// A substep whose largest |G| (levelset_substep_gain) exceeds 1 by more
+/// than this is unstable; the margin only absorbs round-off at the limit.
+inline constexpr double LEVELSET_GAIN_TOL = 1.0e-9;
+
+/**
+ * @brief Largest amplification factor of one level-set substep
+ *
+ * A substep advances phi_t = -R (|grad phi| - eps lap phi) with three-stage
+ * RK3 at dt = cfl h / R_max, h = min(dx, dy) (FireLayer::advance). Frozen
+ * at the fastest cells (R = R_max) about a front of unit normal n
+ * (n_x, n_y >= 0; the other quadrants are mirror images), the upwind
+ * one-sided differences D^-_x, D^-_y and the five-point Laplacian act on a
+ * wave exp(i (theta_x i + theta_y j)) as multipliers, and the substep
+ * multiplies it by G(z) = 1 + z + z^2/2 + z^3/6 with
+ *
+ *   z = cfl h [ -(n_x D^-_x + n_y D^-_y) + eps (L_x + L_y) ],
+ *   L_x = (2 cos theta_x - 2)/dx^2,
+ *
+ * D^-_x = (1 - e^{-i theta_x})/dx for first-order differences and, for
+ * HJ-WENO5 with its linear weights (2, -13, 47, 27, -3)/60 on the five
+ * divided differences, the matching five-point multiplier. This returns
+ * max |G| over theta_x in [0, pi] (65 points), theta_y in [-pi, pi] (129)
+ * and 17 directions of n from the x axis to the y axis. Host only, in
+ * double whatever the build precision; about 1.4e5 evaluations.
+ *
+ * For first-order differences the largest |G| is always the two-cell wave
+ * theta = (pi, pi), whose z is real (see levelset_viscous_stability). For
+ * WENO5 the two-cell wave binds only up to cfl of about 0.55; above that a
+ * complex mode of about 2.4 cells (theta near 2.58) on a front near the
+ * diagonal is tighter.
+ */
+inline double
+levelset_substep_gain (double cfl, double eps, double dx, double dy, bool weno)
+{
+    using C = std::complex<double>;
+    constexpr int    NT = 64;
+    constexpr int    NA = 16;
+    constexpr double pi = 3.14159265358979323846;
+    const double h = std::min(dx, dy);
+    // multiplier of the backward one-sided difference along one axis, times the cell size
+    auto dminus = [weno] (double t) {
+        const C e1 = std::exp(C(0.0, t)) - 1.0;
+        if (!weno) { return C(1.0, 0.0) - std::exp(C(0.0, -t)); }
+        // v_k = D^+ phi_{i-4+k}, k = 1..5, with the linear weights
+        constexpr double w[5] = {2.0/60.0, -13.0/60.0, 47.0/60.0, 27.0/60.0, -3.0/60.0};
+        C s(0.0, 0.0);
+        for (int k = 1; k <= 5; ++k) { s += w[k-1] * std::exp(C(0.0, (k - 4) * t)) * e1; }
+        return s;
+    };
+    std::vector<C> Dx(NT + 1), Dy(2 * NT + 1);
+    std::vector<double> Lx(NT + 1), Ly(2 * NT + 1);
+    for (int a = 0; a <= NT; ++a) {
+        const double t = pi * a / NT;
+        Dx[a] = dminus(t) / dx;
+        Lx[a] = (2.0 * std::cos(t) - 2.0) / (dx * dx);
+    }
+    for (int b = 0; b <= 2 * NT; ++b) {
+        const double t = -pi + pi * b / NT;
+        Dy[b] = dminus(t) / dy;
+        Ly[b] = (2.0 * std::cos(t) - 2.0) / (dy * dy);
+    }
+    double g2 = 0.0;
+    for (int m = 0; m <= NA; ++m) {
+        const double ang = 0.5 * pi * m / NA;
+        const double nx = std::cos(ang), ny = std::sin(ang);
+        for (int a = 0; a <= NT; ++a) {
+            for (int b = 0; b <= 2 * NT; ++b) {
+                const C z = cfl * h * (-(nx * Dx[a] + ny * Dy[b]) + eps * (Lx[a] + Ly[b]));
+                const C G = 1.0 + z * (1.0 + z * (0.5 + z / 6.0));
+                g2 = std::max(g2, std::norm(G));
+            }
+        }
+    }
+    return std::sqrt(g2);
+}
+
+/// Stability of one level-set substep at a given cfl and artificial
+/// viscosity (see levelset_viscous_stability).
+struct LevelSetViscousStability {
+    amrex::Real gain;      ///< largest |G| per substep over wave numbers and front directions (> 1: unstable)
+    amrex::Real eps_max;   ///< largest stable eps [m] at this cfl (< 0: no eps is stable at this cfl)
+    amrex::Real cfl_max;   ///< largest stable cfl at this eps
+    amrex::Real eps_axis;  ///< closed form: eps [m] at which the two-cell wave on a front facing the coarser axis reaches the limit
+};
+
+/**
+ * @brief Linear stability of one level-set substep with artificial viscosity
+ *
+ * The substep is stable when levelset_substep_gain() <= 1 + LEVELSET_GAIN_TOL. For
+ * first-order differences the binding mode is the two-cell wave
+ * (-1)^(i+j), whose z is real:
+ *
+ *   z = -cfl h [ a (n_x/dx + n_y/dy) + 4 eps (1/dx^2 + 1/dy^2) ],
+ *
+ * a = 2 (16/15 for HJ-WENO5), and it must stay within
+ * LEVELSET_RK3_REAL_LIMIT. n_x/dx + n_y/dy runs from 1/max(dx, dy), a front
+ * facing the coarser axis (eps_axis), to sqrt(1/dx^2 + 1/dy^2), the normal
+ * along (1/dx, 1/dy). The scan and this closed form agree to 1e-4 in eps/dx
+ * for first-order differences at every cfl; for WENO5 they agree up to cfl
+ * of about 0.55 and the scan is tighter above (cfl 0.8, square cells:
+ * eps/h <= 0.173 against 0.204 from the two-cell wave). With cfl = 0.4 on
+ * square cells eps/h may reach 0.432 with first-order differences and
+ * 0.597 with WENO5. Without viscosity the substep needs cfl <= 0.888
+ * (first order) and 1.015 (WENO5) on square cells.
+ *
+ * eps_max and cfl_max (bisection on the scan, 50 steps each) are computed
+ * only when `limits` is set.
+ *
+ * @param[in] cfl  erf.fire.levelset.cfl (> 0)
+ * @param[in] eps  Artificial viscosity [m]
+ * @param[in] dx, dy  Fire cell size [m]
+ * @param[in] weno  HJ-WENO5 derivatives (true) or first-order (false)
+ * @param[in] limits  Also find eps_max and cfl_max
+ */
+inline LevelSetViscousStability
+levelset_viscous_stability (amrex::Real cfl, amrex::Real eps, amrex::Real dx, amrex::Real dy, bool weno,
+                            bool limits = true)
+{
+    constexpr double tol = LEVELSET_GAIN_TOL;
+    const double a  = weno ? double(LEVELSET_WENO5_TWO_CELL_GAIN) : 2.0;
+    const double ddx = dx, ddy = dy;
+    const double h  = std::min(ddx, ddy);
+    const double S  = 1.0 / (ddx * ddx) + 1.0 / (ddy * ddy);
+    const double lim = LEVELSET_RK3_REAL_LIMIT;
+    LevelSetViscousStability r;
+    r.gain     = amrex::Real(levelset_substep_gain(cfl, eps, ddx, ddy, weno));
+    r.eps_axis = amrex::Real((lim / (double(cfl) * h) - a / std::max(ddx, ddy)) / (4.0 * S));
+    r.eps_max  = amrex::Real(-1.0);
+    r.cfl_max  = amrex::Real(-1.0);
+    if (!limits) { return r; }
+    // the two-cell wave on an axis-facing front is one of the scanned modes,
+    // so the scan is unstable just above eps_axis and above cfl_axis
+    if (levelset_substep_gain(cfl, 0.0, ddx, ddy, weno) <= 1.0 + tol) {
+        double lo = 0.0, hi = 1.01 * double(r.eps_axis) + 1.0e-12 * h;
+        for (int it = 0; it < 50; ++it) {
+            const double m = 0.5 * (lo + hi);
+            if (levelset_substep_gain(cfl, m, ddx, ddy, weno) > 1.0 + tol) { hi = m; } else { lo = m; }
+        }
+        r.eps_max = amrex::Real(lo);
+    }
+    const double e = std::max(double(eps), 0.0);
+    double lo = 0.0, hi = 1.01 * lim / (h * (a / std::max(ddx, ddy) + 4.0 * e * S));
+    for (int it = 0; it < 50; ++it) {
+        const double m = 0.5 * (lo + hi);
+        if (levelset_substep_gain(m, e, ddx, ddy, weno) > 1.0 + tol) { hi = m; } else { lo = m; }
+    }
+    r.cfl_max = amrex::Real(lo);
+    return r;
+}
 
 /**
  * @brief HJ-WENO5-Z one-sided derivative from five consecutive divided differences

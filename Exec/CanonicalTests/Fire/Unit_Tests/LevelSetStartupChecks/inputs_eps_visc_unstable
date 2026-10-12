@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# eps_visc = 20 m on 25 m fire cells at cfl 0.4: with first-order differences
+# away from the front (gradient "weno5z_front") the substep's stability
+# factor is 0.4 (2 + 8 x 0.8) = 3.36 > 2.513 for a front facing a grid axis,
+# so the run stops at start-up and names the largest stable value
+# (0.432 x 25 = 10.79 m for every front direction).
+# Expected: The level-set substep is unstable: erf.fire.levelset.eps_visc = 20 m
+erf.fire.levelset.eps_visc = 20.0

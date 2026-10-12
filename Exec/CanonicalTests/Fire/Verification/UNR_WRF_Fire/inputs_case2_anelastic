@@ -1,0 +1,106 @@
+# UNR WRF-Fire case study 2 in ERF (anelastic): a 200 m north-south ridge, uniform 5 m/s wind, fire coupled to the atmosphere
+# wind 5 m/s; written by gen_unr_decks.py; run from this folder (README.md)
+# first layer 49.3 m, top layer 5.1 m (WRF eta levels: exponential 0.40)
+erf.prob_name = "ABL"
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 5200.0 5200.0 2000.0
+amr.n_cell = 52 52 100
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.blocking_factor = 4
+amr.max_grid_size = 28 28 100
+erf.terrain_z_levels = 0.000 49.287 97.549 144.803 191.067 236.358 280.693 324.090 366.565 408.135 448.817 488.626 527.579 565.692 602.980 639.458 675.143 710.050 744.192 777.586 810.245 842.183 873.416 903.956 933.818 963.015 991.560 1019.473 1046.784 1073.505 1099.647 1125.222 1150.239 1174.709 1198.643 1222.051 1244.943 1267.329 1289.220 1310.623 1331.551 1352.011 1372.013 1391.567 1410.681 1429.364 1447.626 1465.474 1482.918 1499.965 1516.624 1532.903 1548.810 1564.353 1579.540 1594.377 1608.873 1623.035 1636.869 1650.384 1663.586 1676.481 1689.076 1701.379 1713.395 1725.130 1736.591 1747.784 1758.715 1769.389 1779.812 1789.991 1799.929 1809.634 1819.109 1828.361 1837.394 1846.213 1854.823 1863.228 1871.434 1879.445 1887.266 1894.900 1902.353 1909.627 1916.728 1923.659 1930.425 1937.028 1943.474 1949.765 1955.905 1961.898 1967.746 1973.455 1979.026 1984.463 1989.769 1994.947 2000.000
+erf.terrain_type = StaticFittedMesh
+erf.terrain_file_name = "terrain_ridge.txt"
+erf.fire.terrain_file_name = "terrain_ridge.txt"
+erf.rayleigh_damp_W = true            # WRF damp_opt = 3 (default; not set in UNR cases 1/2): w damped everywhere
+erf.rayleigh_zdamp = 5000.0           # WRF zdamp default 5000 m > ztop 2000 m
+erf.rayleigh_dampcoef = 0.2           # WRF dampcoef default
+zlo.type = "surface_layer"
+erf.surface_layer.flux_type = "bulk_coeff"   # WRF isfflx = 0
+erf.most.Cd = 0.0                     # WRF tke_drag_coefficient
+erf.most.Cq = 0.0
+erf.most.surf_temp = 305.0                # = the sounding header (ERF requires a match); the heat flux is imposed
+erf.most.surf_moist = 0.0
+erf.most.surf_temp_flux = 0.0         # WRF tke_heat_flux [K m/s]
+erf.most.z0 = 0.1
+zhi.type = "SlipWall"                 # WRF rigid lid, w = 0 at ztop
+erf.les_type = "None"                 # WRF diff_opt = 0, km_opt = 0
+erf.molec_diff_type = "Constant"      # zero coefficients: no diffusion, but a surface_layer
+erf.dynamic_viscosity = 0.0          # boundary needs a diffusion closure to run
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding_case12"
+erf.sounding_type = Ideal
+erf.fixed_dt = 0.25                   # WRF time_step
+erf.anelastic = 1
+erf.use_fft = 1
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+max_step = 10000000
+stop_time = 3600.0
+erf.v = 0
+amr.v = 0
+erf.sum_interval = 400
+erf.check_int = -1
+erf.plot_file_1 = plt_case2_anelastic_
+erf.plot_per_1 = 120.0
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta
+erf.fire.enable = true
+erf.fire.grid_ratio = 4               # WRF sr_x = sr_y
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.directional_wind_coupling = "advective"   # WRF fire_advection = 1 (default): phi_w(|U|) x cos to the normal
+erf.fire.fuel_model_id = 1000           # WRF fuel category 1 exactly (namelist.fire), with its heat content
+erf.fire.custom_fuel.codes = 1000
+erf.fire.custom_fuel.1000.name = "wrf_fm1"
+erf.fire.custom_fuel.1000.w_1h_kg_m2 = 0.166
+erf.fire.custom_fuel.1000.w_10h_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.w_100h_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.w_live_herb_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.w_live_woody_kg_m2 = 0.0
+erf.fire.custom_fuel.1000.sav_1h_1_m = 11483.0   # savr 3500 /ft
+erf.fire.custom_fuel.1000.depth_m = 0.305
+erf.fire.custom_fuel.1000.moisture_ext = 0.12
+erf.fire.custom_fuel.1000.heat_content_J_kg = 17.433e6   # cmbcnst; Rothermel sees 7496 Btu/lb as WRF
+erf.fire.custom_fuel.1000.density_kg_m3 = 512.0
+erf.fire.custom_fuel.1000.burnout_time_s = 7.0   # weight(1)
+erf.fire.burnout_model = "sfire"
+erf.fire.burnout_time_to_efold = 0.85   # WRF fuel_time = weight/0.85
+erf.fire.heat_flux_alfg = 50.0          # WRF fire_ext_grnd default
+erf.fire.levelset.reinit_every = 1   # WRF fire_lsm_reinit every step
+erf.fire.moisture_1hr = 0.08            # WRF fuelmc_g
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.08
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 1050.0
+erf.fire.ignition_y = 2500.0
+erf.fire.ignition_r = 0.0
+erf.fire.ignition.polygon_file = "line_case12.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 100.0   # WRF fire_ignition_radius1
+erf.fire.ignition.polygon_time = 10.0      # WRF fire_ignition_start_time1
+erf.fire.wind_ref_ht = 6.5                # WRF fire_wind_height
+erf.fire.wind_below_first_cell = "log"     # WRF: log law from z0 below the first level
+erf.fire.wind_sample_z0 = 0.1              # WRF land roughness ZZLND
+erf.fire.use_waf = false                  # WRF master reads windrf but never applies it (module_fr_fire_phys.F)
+erf.fire.use_wind_limit = false
+erf.fire.use_terrain_wind = false
+erf.fire.ros_model = "rothermel"
+erf.fire.reaction_velocity_formula = "rothermel"   # WRF: A = 1/(4.774 s^0.1 - 7.27) (Rothermel 1972)
+erf.fire.wrf_bmst_compat = true                   # WRF: load net of its moisture share, (1 - M/(1+M)) fgi
+erf.fire.levelset.gradient = "weno5z"   # WRF fire_upwinding 7
+erf.fire.levelset.eps_visc = 10.000   # WRF fire_viscosity 0.4 is in fire cells (adds visc |R| dx lap phi); ERF eps is metres
+erf.fire.levelset.eps_visc_front = 10.000   # WRF fire_viscosity_bg default 0.4 cells
+erf.fire.coupling_type = "lagged"
+erf.fire.inject_latent = true
+erf.fire.fire_atm_feedback = 0.9259   # coupled; WRF: burnt mass x (1 - M/(1+M)) x cmbcnst
+erf.fire.write_fire_stats_csv = true
+erf.fire.fire_stats_csv_file = "fire_stats_case2_anelastic.csv"
+erf.fire_plot_file = "plt_fire_case2_anelastic_"
+erf.fire_plot_per = 60.0

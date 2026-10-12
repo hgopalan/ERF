@@ -16,7 +16,8 @@ The geometry cases use `erf.fire.ros_model = "prescribed"`, a rate set in the
 deck with no wind, slope or moisture dependence and no direction, so the level set
 solves the eikonal equation |grad T| = 1/R as posed and the arrival time is a
 shortest travel time. The atmosphere is still air under slip walls in all but
-Calm_Plume, and the fire grid is 2 m.
+Calm_Plume and UNR_WRF_Fire, and the fire grid is 2 m (25 m and 5 m in
+UNR_WRF_Fire, WRF's).
 
 | case | reference | what it checks |
 |---|---|---|
@@ -30,6 +31,7 @@ Calm_Plume, and the fire grid is 2 m.
 | `Slope_No_Wind` | Rothermel's slope factor; the Wulff shape | slope along the front normal, the ground projection, the ellipse shape of the directional rate |
 | `Moisture_Relaxation` | time-lag ODE solution; Rothermel at the moisture | dynamic dead-fuel moisture and extinction |
 | `Calm_Plume` | heat budget; Heskestad; Morton-Taylor-Turner and Briggs | the heat the coupling injects and the plume it raises |
+| `UNR_WRF_Fire` | WRF-Fire, the UNR case studies 1-3; Rothermel's head rate in case 1 | the same three cases set up as in WRF, setting by setting, for a model-to-model comparison |
 
 The coupled no-wind line fire of Coen et al. (2013) is `Exec/RegTests/FireLineFire`
 (`nowind_2way`), next to the wind decks of the same case, and the two options these

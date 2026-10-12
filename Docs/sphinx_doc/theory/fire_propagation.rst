@@ -209,8 +209,9 @@ the WENO5 front onto the theoretical one. The same option is
 0.1 by default as in the paper: it is the coefficient within
 :cpp:`erf.fire.levelset.visc_front_cells` (default 2, ``fire_viscosity_ngp``)
 fire cells of the front, blending linearly to :cpp:`eps_visc` (0.4) over
-the next :cpp:`erf.fire.levelset.visc_transition_cells` (default 2,
-WRF-Fire's ``fire_viscosity_band`` times the advection band). A negative
+the next :cpp:`erf.fire.levelset.visc_transition_cells` (default 2;
+WRF-Fire's code blends over ``fire_viscosity_band`` times
+``fire_viscosity_ngp`` cells, 0.5 x 2 = 1 cell with its defaults). A negative
 value keeps the single :cpp:`eps_visc` everywhere. On the 5 m grid of the
 WUI wildland case the near-front value of 0.1 leaves the head rate
 unchanged and widens the flanks by about 7% against the single value
@@ -223,6 +224,52 @@ in metres (the term is :math:`R\,\varepsilon\,\nabla^2\phi` with
 :math:`\varepsilon / \Delta x` and a coarser grid is smoothed less. When terrain slopes are
 available, :math:`|\nabla \phi|` is projected onto the terrain surface so that
 :math:`R` is a rate along the ground rather than in map view.
+
+The viscosity term is explicit, so it limits the subcycle. Frozen at the
+fastest cells (:math:`R = R_{max}`, the rate that sets the subcycle) about a
+front of unit normal :math:`\mathbf{n}`, each wave
+:math:`e^{i(\theta_x i + \theta_y j)}` is multiplied in one subcycle by
+:math:`G(z) = 1 + z + z^2/2 + z^3/6`, with :math:`z` the subcycle length
+times the multiplier of the upwind differences and the five-point Laplacian.
+With first-order differences the binding wave is the two-cell wave
+:math:`(-1)^{i+j}`, whose :math:`z` is real:
+
+.. math::
+
+   z = -\mathrm{cfl}\; h \left[ a \left(\frac{n_x}{\Delta x} + \frac{n_y}{\Delta y}\right)
+       + 4\,\varepsilon \left(\frac{1}{\Delta x^2} + \frac{1}{\Delta y^2}\right) \right],
+   \qquad h = \min(\Delta x, \Delta y),
+
+with :math:`a = 2`, and every three-stage, third-order Runge-Kutta step is
+stable on the negative real axis down to :math:`z = -2.513`. For WENO5
+(:math:`a = 16/15` on this wave, where its weights are the linear ones) the
+two-cell wave binds only up to cfl of about 0.55; above that a complex wave
+about 2.4 cells long on a front near the diagonal is tighter (at cfl 0.8 on
+square cells :math:`\varepsilon \le 0.173\,\Delta x` against
+:math:`0.204\,\Delta x` from the formula). Start-up therefore scans
+:math:`|G|` over all wave numbers and 17 front directions
+(``levelset_substep_gain`` in ``ERF_NumericalSchemes.H``; the scan matches
+the formula to :math:`10^{-4}\,\Delta x` for first-order differences). On
+square cells at the default cfl 0.4 the limits are
+:math:`\varepsilon \le 0.432\,\Delta x` with first-order differences
+(away from the front with the default ``"weno5z_front"``) and
+:math:`0.597\,\Delta x` with WENO5, both for a front along the diagonal.
+Every curved front, and every fire without wind, has a part facing that
+direction, so start-up stops the run, naming the input and the largest
+stable viscosity and cfl, whenever a coefficient is unstable for any front
+direction. Each coefficient is checked with the differences used where it
+acts, including the value just beyond the WENO band of ``"weno5z_front"``
+when that is larger than :cpp:`eps_visc`, and, with
+:cpp:`erf.fire.levelset.wall_extrapolate`, every WENO5 coefficient again with
+first-order differences, which the stencil falls back to next to a
+non-burnable cell. Because the coefficient is in
+metres, the default 0.4 m stops a run on fire cells finer than 0.927 m at
+cfl 0.4, and the default :cpp:`eps_visc_front` of 0.1 m below 0.168 m. On
+the split-Hamiltonian path
+(:cpp:`erf.fire.directional_split_hamiltonian`) the viscous term carries the
+no-wind rate :math:`R_0` rather than :math:`R_{max}`, so the check is
+conservative there by about :math:`R_{max}/R_0`.
+``ERF_GTestLevelSetAdvection`` checks the limit against the subcycle itself.
 
 The subcycle length is :cpp:`erf.fire.levelset.cfl` (default 0.4) times the
 cell size over the maximum rate of spread. A cell's ``fire_arrival_time`` is
@@ -458,9 +505,40 @@ correspondingly narrower in cells there. ``reinit_dtau = 0.25 dx`` with 40
 iterations restores the unit gradient (``ERF_GTestLevelSetAdvection``
 checks both settings).
 
+Both schemes end with the clamp :math:`\phi \leftarrow \min(\phi, \phi_\mathrm{ref})`
+("the burned area can only grow"). :cpp:`erf.fire.levelset.reinit_clamp`
+selects :math:`\phi_\mathrm{ref}`. ``"step_start"`` (default) is WRF-Fire's
+(``module_fr_fire_model.F`` hands ``prop_ls`` the level set before the step,
+and ``reinit_ls_rk3`` ends with ``lfn_out = min(lfn_out, lfn_in)``): the level
+set at the start of the subcycle that ends with the reinitialisation, before
+its advection, so the reinitialisation may raise :math:`\phi` by up to that
+subcycle's own advance and never above where it stood before it. Ignitions
+are stamped before the subcycles of a step, so the reference already holds
+them. WRF-Fire reinitialises every step; with ``reinit_every`` above 1 the
+reference is still the start of the last subcycle only.
+``"post_advection"``, the form until October 2026, uses the advected field
+the call starts from; it forbids raising :math:`\phi` anywhere, so a burned
+side steeper than :math:`|\nabla\phi| = 1` never relaxes and every
+correction on the unburned side moves the front forward. The difference is
+small at the default strength (0.01 dx once every 5 subcycles) and large for
+a stronger reinitialisation. In ``ERF_GTestLevelSetAdvection``, with 2
+iterations of ``reinit_dtau = 0.25 dx`` after every subcycle, a straight
+front whose level set is three times too steep runs 4.0 m ahead of
+:math:`R t` after 40 m of travel with ``"post_advection"`` and still gains
+5 % of :math:`R`, while with ``"step_start"`` it keeps a fixed 0.36 m offset
+from the first relaxation and moves at :math:`R`; the burned side of a disc
+stays at :math:`|\nabla\phi| \approx 2.5` with ``"post_advection"`` and
+returns to 1.00 with ``"step_start"``. The default changes the answer of
+every level-set run a little, through the reinitialisation every fifth
+subcycle; the ``FireReinitClamp`` regression test runs one level-set deck
+with each clamp and checks that the ``"post_advection"`` head runs ahead
+(1.16 m after 120 s there). With :cpp:`erf.fire.levelset.reinit_iters` = 0 the
+reinitialisation, and with it the clamp, is skipped, so both values give
+the same answer.
+
 Neither scheme corrects the distance in cells that straddle the front, and
-both keep :math:`\phi_{out} = \min(\phi_{out}, \phi_{in})`, so the burned area
-never shrinks; non-burnable cells are left unchanged and their neighbours are
+both end with the clamp above, so a cell burned at the start of a subcycle
+stays burned; non-burnable cells are left unchanged and their neighbours are
 read through the wall stencil. Both build the gradient from independent
 :math:`x` and :math:`y` one-sided derivatives, which leaves a small error that
 depends on the front's angle to the grid axes.

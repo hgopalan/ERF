@@ -1234,7 +1234,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             // their coefficients from each cell's own dead moistures
             const RothermelCellInputs cell_mc = rothermel_cell_inputs();
             // the level set at the start of the subcycle, for the arrival-time
-            // stamp interpolated in time
+            // stamp interpolated in time and the reinit clamp (reinit_clamp =
+            // "step_start")
             amrex::MultiFab::Copy(*m_phi_prev, *fire_phi, 0, 0, 1, 0);
             // One-sided derivatives of the level set: the front band of the
             // hybrid scheme is a number of fire cells, phi is in metres here.
@@ -1357,7 +1358,12 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             fire_fill_boundary(*fire_phi, m_fg.geom);
 
             ++m_levelset_subcycle_count;
-            if (m_levelset_subcycle_count % m_params.levelset_reinit_every == 0) {
+            // reinit_iters = 0 skips the call, and with it the final clamp,
+            // which under "step_start" would otherwise still cut back every
+            // rise of this subcycle's advection (the viscous term raises phi
+            // at a burned minimum, for one)
+            if (m_params.levelset_reinit_iters > 0 &&
+                m_levelset_subcycle_count % m_params.levelset_reinit_every == 0) {
                 const bool use_jp = (m_params.levelset_reinit_scheme == "jiang_peng");
                 // Default dtau is 0.01*dx for both schemes, matching WRF-Fire's
                 // reinit pseudo-timestep (module_fr_fire_core.F), so the two
@@ -1365,16 +1371,29 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 amrex::Real dtau = (m_params.levelset_reinit_dtau > 0.0)
                     ? m_params.levelset_reinit_dtau
                     : 0.01 * m_fg.geom.CellSize()[0];
+                // The reinit's final min() clamp: "step_start" (default)
+                // against the level set at the start of THIS subcycle, as
+                // WRF-Fire does (min(reinit(adv(phi_n)), phi_n)): m_phi_prev,
+                // copied after this step's ignitions, which are all stamped
+                // before the subcycle loop, so the clamp never undoes one.
+                // WRF reinitialises every step; with reinit_every > 1 the
+                // reference is the start of the last subcycle only, so the
+                // reinit may lift phi by at most that subcycle's advance.
+                // "post_advection": against the advected field.
+                const amrex::MultiFab* clamp_ref =
+                    (m_params.levelset_reinit_clamp == "step_start") ? m_phi_prev.get() : nullptr;
                 if (use_jp) {
                     fire_levelset::reinitialize_phi_jiang_peng(*fire_phi, m_fg.geom,
                                           m_params.levelset_reinit_iters, dtau,
                                           fire_nonburnable.get(), wall_extrap,
-                                          m_params.levelset_reinit_jp_sign_eps2, &m_ls_scratch);
+                                          m_params.levelset_reinit_jp_sign_eps2, &m_ls_scratch,
+                                          clamp_ref);
                 } else {
                     fire_levelset::reinitialize_phi(*fire_phi, m_fg.geom,
                                           m_params.levelset_reinit_iters, dtau,
                                           ls_grad.band,
-                                          fire_nonburnable.get(), wall_extrap, &m_ls_scratch);
+                                          fire_nonburnable.get(), wall_extrap, &m_ls_scratch,
+                                          clamp_ref);
                 }
                 enforce_nonburnable_phi();
                 fire_fill_boundary(*fire_phi, m_fg.geom);

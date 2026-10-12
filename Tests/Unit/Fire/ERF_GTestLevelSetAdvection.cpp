@@ -9,6 +9,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <cmath>
 #include <limits>
+#include <string>
 
 /// Round-off tolerance of the build precision: 1e-12 in double, 1e-5 in single.
 static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
@@ -736,4 +737,436 @@ TEST(LevelSetAdvection, AThresholdStampSkipsNonBurnableCells)
     EXPECT_LT(value_at(phi, 16, 16), 0.0_rt) << "the hot cell burns";
     EXPECT_NEAR(value_at(phi, 15, 16), 0.0_rt, 1.0e-6) << "its west neighbour takes the band distance (10 m - 10 m)";
     EXPECT_NEAR(value_at(phi, 17, 16), 1.0e3_rt, 1.0e-6) << "the masked east neighbour is untouched";
+}
+
+namespace {
+/// phi = s_in (r - R0) inside the disc of radius R0 about the domain centre
+/// and r - R0 outside: a front whose burned side is s_in times too steep.
+void stretched_disc (MultiFab& phi, Real R0, Real s_in)
+{
+    const Real c = Real(0.5) * LDOM;
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real x = (i + Real(0.5)) * DX - c;
+            const Real y = (j + Real(0.5)) * DX - c;
+            const Real d = std::sqrt(x * x + y * y) - R0;
+            p(i, j, k) = (d < Real(0.0)) ? s_in * d : d;
+        });
+    }
+    Gpu::streamSynchronize();
+}
+
+/// One production subcycle of FireLayer::advance with the reinitialisation
+/// in it: keep the level set at its start, advect, reinitialise with the
+/// final clamp against that start ("step_start") or against the advected
+/// field ("post_advection"), and hold the non-burnable cells at zero or
+/// above (enforce_nonburnable_phi), with the fills in between. With
+/// `reinit` false the subcycle only advects (reinit_every > 1).
+void subcycle_with_reinit (MultiFab& phi, MultiFab& phi_start, const MultiFab& R, const Geometry& geom,
+                           Real dt, int iters, Real dtau, bool step_start,
+                           const MultiFab* mask = nullptr, bool wall_extrap = false,
+                           bool jiang_peng = false, bool reinit = true)
+{
+    MultiFab vel(phi.boxArray(), phi.DistributionMap(), 2, 0);
+    vel.setVal(0.0_rt);
+    const Real h = geom.CellSize(0);
+    LevelSetGradient g;
+    g.scheme = LEVELSET_GRAD_WENO5Z_FRONT;
+    g.band = 4.0_rt * h;
+    MultiFab::Copy(phi_start, phi, 0, 0, 1, 0);
+    advect_levelset_weno5z_rk3(phi, vel, R, geom, dt, 0.0_rt, nullptr, mask, wall_extrap, g);
+    hold_phi_in_mask(phi, mask, 0.0_rt);
+    fire_fill_boundary(phi, geom);
+    if (!reinit) { return; }
+    if (jiang_peng) {
+        reinitialize_phi_jiang_peng(phi, geom, iters, dtau, mask, wall_extrap, -1.0_rt, nullptr,
+                                    step_start ? &phi_start : nullptr);
+    } else {
+        reinitialize_phi(phi, geom, iters, dtau, 4.0_rt * h, mask, wall_extrap, nullptr,
+                         step_start ? &phi_start : nullptr);
+    }
+    hold_phi_in_mask(phi, mask, 0.0_rt);
+    fire_fill_boundary(phi, geom);
+}
+
+/// Mean |grad phi| (the Godunov norm of the production scheme, which reads
+/// the burned side of an expanding front) over the valid cells whose
+/// distance from the domain centre is in (r_lo, r_hi), over ranks.
+Real mean_grad_in_ring (const MultiFab& phi, const FireGridFixture& f, Real r_lo, Real r_hi)
+{
+    MultiFab R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0);
+    R.setVal(1.0_rt);
+    LevelSetGradient g;
+    g.scheme = LEVELSET_GRAD_WENO5Z_FRONT;
+    g.band = 4.0_rt * DX;
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0_rt, nullptr, nullptr, false, g);
+    Gpu::streamSynchronize();
+    Real sum = 0.0;
+    amrex::Long n = 0;
+    for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+        auto r = rhs.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                const Real d = f.radius(i, j);
+                if (d > r_lo && d < r_hi) { sum -= r(i, j, 0); ++n; }
+            }
+        }
+    }
+    ParallelDescriptor::ReduceRealSum(sum);
+    ParallelDescriptor::ReduceLongSum(n);
+    return (n > 0) ? sum / Real(n) : Real(0.0);
+}
+
+/// mask = 1 in the cells i0..i1 x j0..j1, ghost cells included, 0 elsewhere
+/// (a free function: nvcc rejects device lambdas inside gtest's private
+/// TestBody).
+void fill_block (MultiFab& mask, int i0, int i1, int j0, int j1)
+{
+    for (MFIter mfi(mask); mfi.isValid(); ++mfi) {
+        auto m = mask.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            m(i, j, k) = (i >= i0 && i <= i1 && j >= j0 && j <= j1) ? 1.0_rt : 0.0_rt;
+        });
+    }
+    Gpu::streamSynchronize();
+}
+
+/// x of the zero crossing of phi along row j (linear between the two cells
+/// that bracket it), over ranks; -1 when the row has none.
+Real zero_crossing_x (const MultiFab& phi, int j)
+{
+    Real x = -1.0;
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        if (j < bx.smallEnd(1) || j > bx.bigEnd(1)) { continue; }
+        // the crossing between i and i + 1 is found by the box holding i
+        for (int i = bx.smallEnd(0); i <= bx.bigEnd(0) && i + 1 < NCELL; ++i) {
+            const Real a = p(i, j, 0), b = p(i + 1, j, 0);
+            if (a < Real(0.0) && b >= Real(0.0)) { x = (i + Real(0.5)) * DX + DX * a / (a - b); }
+        }
+    }
+    ParallelDescriptor::ReduceRealMax(x);
+    return x;
+}
+} // namespace
+
+/**
+ * erf.fire.levelset.reinit_clamp: the burned side of a disc stretched to
+ * |grad phi| = 3 (as a falling rate of spread leaves it behind a front).
+ * WRF-Fire clamps the reinitialisation against the level set at the start
+ * of the step ("step_start", the default), so the reinitialisation may lift
+ * phi by the step's own advance and the burned side relaxes toward
+ * |grad phi| = 1 behind the moving front. Clamping against the advected
+ * field ("post_advection", ERF's form until 2026-10) forbids any rise, and
+ * the burned side keeps |grad phi| = 3 however strong the reinitialisation.
+ * 30 subcycles at R = 0.5 m/s and dt = 2 s (cfl 0.2) move the front 30 m;
+ * each reinitialises with 2 iterations of dtau = 0.25 dx.
+ */
+TEST(LevelSetAdvection, ReinitClampStepStartRelaxesASteepBurnedSide)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi_start(f.ba, f.dm, 1, 0), R(f.ba, f.dm, 1, 0);
+    R.setVal(0.5_rt);
+    const Real R0 = 50.0, ros = 0.5, dt = 2.0;
+    const int  nsteps = 30;
+    Real grad_after[2] = {0.0, 0.0};
+    Real r_front[2]    = {0.0, 0.0};
+    for (int step_start = 0; step_start <= 1; ++step_start) {
+        stretched_disc(phi, R0, 3.0_rt);
+        fire_fill_boundary(phi, f.geom);
+        EXPECT_NEAR(mean_grad_in_ring(phi, f, R0 - 3.0 * DX, R0 - DX), 3.0, 0.1) << "the start is stretched";
+        for (int s = 0; s < nsteps; ++s) {
+            subcycle_with_reinit(phi, phi_start, R, f.geom, dt, 2, 0.25 * DX, step_start == 1);
+        }
+        EXPECT_EQ(nonfinite_cells(phi), 0);
+        r_front[step_start] = std::sqrt(Real(burned_cells(phi)) * DX * DX / PI);
+        // the band one to three cells behind the front where it now stands
+        grad_after[step_start] = mean_grad_in_ring(phi, f, r_front[step_start] - 3.0 * DX,
+                                                   r_front[step_start] - DX);
+    }
+    // post_advection: nothing on the burned side may rise, so it stays
+    // steep (2.53 measured; the slope-3 region travels with the front)
+    EXPECT_GT(grad_after[0], 2.0) << "post_advection, front at r = " << r_front[0] << " m";
+    // step_start: lifted to the signed distance (1.00002 measured)
+    EXPECT_LT(grad_after[1], 1.1) << "step_start, front at r = " << r_front[1] << " m";
+    // the step_start front is at R0 + R t = 80 m to the resolution of the
+    // burned-cell count (80.8 m measured; post_advection 83.7 m, see the
+    // next test)
+    EXPECT_NEAR(r_front[1], R0 + ros * dt * nsteps, DX);
+}
+
+/**
+ * A straight front with |grad phi| = 3 on both sides, R = 0.5 m/s, and a
+ * strong reinitialisation (2 iterations of dtau = 0.25 dx) after every
+ * subcycle, with both reinitialisation schemes. The exact front moves at
+ * R, 1 m per subcycle. With the clamp against the start of the step both
+ * sides relax to the signed distance within the first ten subcycles, which
+ * leaves the zero crossing a fixed 0.36 m ("wrf") or 0.48 m ("jiang_peng")
+ * ahead, and from then on it moves at R exactly (0.002 m and 0.000 m
+ * gained between subcycles 20 and 40). With the clamp against the advected
+ * field only the unburned side can be lowered, every correction lowers the
+ * cells just ahead of the front, and the front keeps running ahead: 4.0 m
+ * ("wrf") and 4.5 m ("jiang_peng") after 40 subcycles, 0.95 m and 1.15 m of
+ * it gained between subcycles 20 and 40 (5 % of R).
+ */
+TEST(LevelSetAdvection, ReinitClampStepStartKeepsAStraightFrontAtRos)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi_start(f.ba, f.dm, 1, 0), R(f.ba, f.dm, 1, 0);
+    R.setVal(0.5_rt);
+    const Real x0 = 200.0, ros = 0.5, dt = 2.0;
+    const int  nsteps = 40;
+    for (int jp = 0; jp <= 1; ++jp) {
+        Real err20[2] = {0.0, 0.0}, err40[2] = {0.0, 0.0};
+        for (int step_start = 0; step_start <= 1; ++step_start) {
+            f.planar(phi, x0, 3.0);
+            EXPECT_NEAR(zero_crossing_x(phi, NCELL / 2), x0, 100.0 * TOL);
+            for (int s = 1; s <= nsteps; ++s) {
+                subcycle_with_reinit(phi, phi_start, R, f.geom, dt, 2, 0.25 * DX, step_start == 1,
+                                     nullptr, false, jp == 1);
+                if (s == nsteps / 2) { err20[step_start] = zero_crossing_x(phi, NCELL / 2) - (x0 + ros * dt * s); }
+            }
+            EXPECT_EQ(nonfinite_cells(phi), 0);
+            // every row holds the same front
+            const Real xa = zero_crossing_x(phi, NCELL / 2);
+            EXPECT_NEAR(zero_crossing_x(phi, 3), xa, 100.0 * TOL * xa);
+            err40[step_start] = xa - (x0 + ros * dt * nsteps);
+        }
+        const std::string tag = (jp == 1) ? "jiang_peng" : "wrf";
+        // step_start: a fixed offset from the first relaxation, then R exactly
+        EXPECT_LT(std::abs(err40[1]), 0.15 * DX) << "step_start, " << tag << ": front " << err40[1] << " m from R t";
+        EXPECT_LT(std::abs(err40[1] - err20[1]), 0.01 * DX) << "step_start, " << tag << ": the front gained "
+            << err40[1] - err20[1] << " m on R t between subcycles 20 and 40";
+        // post_advection: ahead, and still gaining
+        EXPECT_GT(err40[0], 0.5 * DX) << "post_advection, " << tag << ": front only " << err40[0] << " m ahead of R t";
+        EXPECT_GT(err40[0] - err20[0], 0.1 * DX) << "post_advection, " << tag << ": the front gained only "
+            << err40[0] - err20[0] << " m on R t between subcycles 20 and 40";
+    }
+}
+
+/**
+ * The production default: the reinitialisation every 5th subcycle
+ * (reinit_every = 5), with the "step_start" reference the level set at the
+ * start of that 5th subcycle, as FireLayer::advance copies it (m_phi_prev,
+ * every subcycle, before the advection). The same straight front three times
+ * too steep and the same strong reinitialisation as above, 40 subcycles.
+ * "step_start" leaves the front a fixed 0.76 m ahead of R t (the first
+ * relaxations; 0.36 m when every subcycle reinitialises), "post_advection"
+ * 3.16 m. A reference copied only at the first subcycle of each 5-subcycle
+ * window, which lets the reinitialisation lift phi by up to five subcycles
+ * of advance, gives 0.78 m on this front: too close to tell apart here, so
+ * the gtest pins the production window and the FireReinitClamp regression
+ * test checks FireLayer's own copy.
+ */
+TEST(LevelSetAdvection, ReinitClampStepStartEveryFifthSubcycle)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi_start(f.ba, f.dm, 1, 0), R(f.ba, f.dm, 1, 0);
+    R.setVal(0.5_rt);
+    const Real x0 = 200.0, ros = 0.5, dt = 2.0;
+    const int  nsteps = 40, every = 5;
+    Real err[2] = {0.0, 0.0};
+    for (int step_start = 0; step_start <= 1; ++step_start) {
+        f.planar(phi, x0, 3.0);
+        for (int s = 1; s <= nsteps; ++s) {
+            subcycle_with_reinit(phi, phi_start, R, f.geom, dt, 2, 0.25 * DX, step_start == 1,
+                                 nullptr, false, false, s % every == 0);
+        }
+        EXPECT_EQ(nonfinite_cells(phi), 0);
+        err[step_start] = zero_crossing_x(phi, NCELL / 2) - (x0 + ros * dt * nsteps);
+    }
+    // 0.764 m and 3.161 m measured in double
+    EXPECT_NEAR(err[1], 0.764, 0.1) << "step_start, every 5th subcycle";
+    EXPECT_GT(err[0] - err[1], 0.4 * DX) << "post_advection runs " << err[0] << " m ahead of R t";
+}
+
+/**
+ * Non-burnable cells under either clamp: with the wall stencil the
+ * reinitialisation passes them through, the rate of spread is zero there
+ * (zero_ros_in_mask), so the advection leaves them too, and the clamp's
+ * reference holds their own value whichever field it is. A 3 x 3 block
+ * ahead of the stretched disc's front, which reaches it during the run,
+ * keeps its values to the bit.
+ */
+TEST(LevelSetAdvection, ReinitClampLeavesNonBurnableCellsUntouched)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi0(f.ba, f.dm, 1, 0), phi_start(f.ba, f.dm, 1, 0);
+    MultiFab R(f.ba, f.dm, 1, 0), mask(f.ba, f.dm, 1, 3);
+    // cells 51-53 in x and 39-41 in y: x from 255 to 270 m, 55 to 70 m from the centre
+    fill_block(mask, 51, 53, 39, 41);
+    R.setVal(0.5_rt);
+    zero_ros_in_mask(R, &mask);
+    auto masked = [] (int i, int j) { return i >= 51 && i <= 53 && j >= 39 && j <= 41; };
+    for (int step_start = 0; step_start <= 1; ++step_start) {
+        stretched_disc(phi, 50.0_rt, 3.0_rt);
+        fire_fill_boundary(phi, f.geom);
+        MultiFab::Copy(phi0, phi, 0, 0, 1, 0);
+        for (int s = 0; s < 30; ++s) {
+            subcycle_with_reinit(phi, phi_start, R, f.geom, 2.0, 2, 0.25 * DX, step_start == 1, &mask, true);
+        }
+        EXPECT_EQ(nonfinite_cells(phi), 0);
+        // to round-off: the advection's RK3 stages recombine 3/4 + 1/4 and
+        // 1/3 + 2/3 of an unchanged value (1.8e-15 m measured in double)
+        EXPECT_LT(max_abs_diff(phi, phi0, masked), 100.0 * TOL * 70.0) << "step_start " << step_start;
+        // the front got there: a neighbour of the block burned
+        EXPECT_LT(value_at(phi, 50, 40), 0.0_rt) << "step_start " << step_start;
+    }
+}
+
+namespace {
+/// Growth of a wave cos(theta (i + j)) of amplitude `seed` laid on a planar
+/// front of unit normal at angle `ang` to x, R = 1 m/s everywhere, after
+/// `nsteps` substeps of the production advection at dt = cfl h / R with
+/// viscosity eps and no near-front value: the RMS of the departure from
+/// the exact front over the central 40 x 40 cells of a 120 x 120 grid of
+/// dx x dy cells, divided by its start. theta = pi is the two-cell wave
+/// (-1)^(i+j). Far enough from the edges that their copy-out fill does not
+/// reach the measurement in that many substeps.
+Real wave_gain (int scheme, Real eps, Real cfl, Real ang, Real dx, Real dy, int nsteps,
+                Real theta = PI, Real seed = 1.0e-3)
+{
+    constexpr int N = 120;
+    Box domain(IntVect(0, 0, 0), IntVect(N - 1, N - 1, 0));
+    BoxArray ba(domain);
+    ba.maxSize(IntVect(N / 2, N / 2, 1));
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox({0.0, 0.0, 0.0}, {N * dx, N * dy, 1.0}), CoordSys::cartesian, {0, 0, 0});
+    MultiFab phi(ba, dm, 1, 3), vel(ba, dm, 2, 0), R(ba, dm, 1, 0);
+    vel.setVal(0.0_rt);
+    R.setVal(1.0_rt);
+    const Real nx = std::cos(ang), ny = std::sin(ang);
+    const Real xc = Real(0.5) * N * dx, yc = Real(0.5) * N * dy;
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real x = (i + Real(0.5)) * dx - xc, y = (j + Real(0.5)) * dy - yc;
+            p(i, j, k) = nx * x + ny * y + seed * std::cos(theta * Real(i + j));
+        });
+    }
+    LevelSetGradient g;
+    g.scheme = scheme;
+    const Real dt = cfl * amrex::min(dx, dy);
+    for (int s = 0; s < nsteps; ++s) {
+        advect_levelset_weno5z_rk3(phi, vel, R, geom, dt, eps, nullptr, nullptr, false, g);
+        fire_fill_boundary(phi, geom);
+    }
+    Gpu::streamSynchronize();
+    const Real t = nsteps * dt;
+    Real s2 = 0.0, s2_0 = 0.0;
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (i < 40 || i >= 80 || j < 40 || j >= 80) { continue; }
+                const Real x = (i + Real(0.5)) * dx - xc, y = (j + Real(0.5)) * dy - yc;
+                const Real d = p(i, j, 0) - (nx * x + ny * y - t);
+                const Real d0 = seed * std::cos(theta * Real(i + j));
+                s2 += d * d;
+                s2_0 += d0 * d0;
+            }
+        }
+    }
+    ParallelDescriptor::ReduceRealSum(s2);
+    ParallelDescriptor::ReduceRealSum(s2_0);
+    return std::isfinite(s2) ? std::sqrt(s2 / s2_0) : std::numeric_limits<Real>::max();
+}
+} // namespace
+
+/**
+ * The start-up limit on the level-set artificial viscosity
+ * (levelset_viscous_stability, checked by verify_levelset_viscous_stability)
+ * against the substep itself. At cfl 0.4 on square cells the limit is
+ * eps/dx <= 0.4317 with first-order differences and 0.5967 with WENO5, both
+ * on a front along the diagonal (the closed form of the two-cell wave gives
+ * 0.5352 and 0.6519 on a front facing an axis). The production advection at
+ * 0.95 of each limit damps a two-cell wave over 30 substeps and at 1.05 of it
+ * grows the wave, on square cells and on cells twice as long in y as in x
+ * (whose least favourable front has its normal along (1/dx, 1/dy)). Between
+ * the diagonal and the axis limits a diagonal front grows the wave and an
+ * axis-facing one damps it: start-up aborts there, since every curved front
+ * has a part facing the diagonal.
+ */
+TEST(LevelSetAdvection, ViscousStabilityLimitIsTheSubstepsLimit)
+{
+    const Real cfl = 0.4, h = 5.0;
+    const Real pi4 = Real(0.25) * PI;
+    {
+        const LevelSetViscousStability up = levelset_viscous_stability(cfl, 0.0, h, h, false);
+        const LevelSetViscousStability w5 = levelset_viscous_stability(cfl, 0.0, h, h, true);
+        EXPECT_NEAR(up.eps_axis / h, 0.5352, 1.0e-4);
+        EXPECT_NEAR(up.eps_max / h,  0.4317, 1.0e-4);
+        EXPECT_NEAR(w5.eps_axis / h, 0.6519, 1.0e-4);
+        EXPECT_NEAR(w5.eps_max / h,  0.5967, 1.0e-4);
+        // without viscosity first-order differences need cfl <= 0.888 on the diagonal
+        EXPECT_NEAR(up.cfl_max, 0.8884, 1.0e-3) << "first order, eps = 0";
+        EXPECT_LT(levelset_substep_gain(0.88, 0.0, h, h, false), 1.0 + LEVELSET_GAIN_TOL);
+        EXPECT_GT(levelset_substep_gain(0.89, 0.0, h, h, false), 1.0 + LEVELSET_GAIN_TOL);
+    }
+    struct Case { int scheme; Real dy; bool worst; };
+    for (const Case c : {Case{LEVELSET_GRAD_UPWIND1, h, false}, Case{LEVELSET_GRAD_UPWIND1, h, true},
+                         Case{LEVELSET_GRAD_WENO5Z, h, false}, Case{LEVELSET_GRAD_WENO5Z, h, true},
+                         Case{LEVELSET_GRAD_UPWIND1, Real(2.0) * h, false}, Case{LEVELSET_GRAD_UPWIND1, Real(2.0) * h, true}}) {
+        const bool weno = (c.scheme == LEVELSET_GRAD_WENO5Z);
+        const LevelSetViscousStability st = levelset_viscous_stability(cfl, 0.0, h, c.dy, weno);
+        const Real eps_lim = c.worst ? st.eps_max : st.eps_axis;
+        // best: a front facing the coarser axis (y when dy > dx); worst:
+        // the normal along (1/dx, 1/dy)
+        const Real ang = c.worst ? std::atan2(Real(1.0) / c.dy, Real(1.0) / h)
+                                 : ((c.dy > h) ? Real(2.0) * pi4 : Real(0.0));
+        const std::string tag = std::string(weno ? "weno5z" : "upwind") + (c.worst ? " worst" : " best")
+                              + ((c.dy > h) ? ", dy = 2 dx" : ", square cells");
+        const Real below = wave_gain(c.scheme, 0.95 * eps_lim, cfl, ang, h, c.dy, 30);
+        const Real above = wave_gain(c.scheme, 1.05 * eps_lim, cfl, ang, h, c.dy, 30);
+        EXPECT_LT(below, 1.0) << tag << ": eps = 0.95 x " << eps_lim << " m";
+        EXPECT_GT(above, 10.0) << tag << ": eps = 1.05 x " << eps_lim << " m";
+    }
+    // between the two limits a front along the diagonal grows the wave and
+    // one facing an axis damps it
+    for (const int scheme : {LEVELSET_GRAD_UPWIND1, LEVELSET_GRAD_WENO5Z}) {
+        const LevelSetViscousStability st = levelset_viscous_stability(cfl, 0.0, h, h, scheme == LEVELSET_GRAD_WENO5Z);
+        const Real eps_mid = Real(0.5) * (st.eps_axis + st.eps_max);
+        const Real diag = wave_gain(scheme, eps_mid, cfl, pi4, h, h, 30);
+        const Real axis = wave_gain(scheme, eps_mid, cfl, Real(0.0), h, h, 30);
+        EXPECT_GT(diag, 10.0) << "scheme " << scheme << ", diagonal front at eps " << eps_mid << " m";
+        EXPECT_LT(axis, 1.0) << "scheme " << scheme << ", axis front at eps " << eps_mid << " m";
+        EXPECT_GT(levelset_substep_gain(cfl, eps_mid, h, h, scheme == LEVELSET_GRAD_WENO5Z), 1.0 + LEVELSET_GAIN_TOL)
+            << "start-up aborts there";
+    }
+}
+
+/**
+ * Above cfl of about 0.55 the WENO5 substep is limited by a complex wave
+ * about 2.4 cells long (theta near 2.58) on a front near the diagonal, not by
+ * the two-cell wave. At cfl 0.8 on square cells the scan gives eps/dx <=
+ * 0.1732, the two-cell formula 0.2041 (which the check used before). The
+ * production advection with that wave seeded: at the formula's value it
+ * grows (|G| = 1.20 per substep from the scan), at 0.95 of the scan's limit
+ * it does not. Without viscosity WENO5 needs cfl <= 1.015 on square cells,
+ * where the formula allowed 1.666 on the diagonal.
+ */
+TEST(LevelSetAdvection, ViscousStabilityLimitWenoAboveTheTwoCellRegime)
+{
+    const Real h = 5.0, cfl = 0.8;
+    const Real pi4 = Real(0.25) * PI;
+    const LevelSetViscousStability st = levelset_viscous_stability(cfl, 0.0, h, h, true);
+    EXPECT_NEAR(st.eps_max / h, 0.1732, 1.0e-3);
+    // the two-cell wave alone, the old formula: eps = (2.513/(cfl h) - (16/15) sqrt(2)/h) / (8/h^2)
+    const Real eps_two_cell = (Real(LEVELSET_RK3_REAL_LIMIT) / (cfl * h) - LEVELSET_WENO5_TWO_CELL_GAIN * std::sqrt(Real(2.0)) / h)
+                            / (Real(8.0) / (h * h));
+    EXPECT_NEAR(eps_two_cell / h, 0.2041, 1.0e-3);
+    EXPECT_GT(levelset_substep_gain(cfl, eps_two_cell, h, h, true), 1.15) << "the formula's eps is unstable";
+    EXPECT_NEAR(levelset_viscous_stability(cfl, 0.0, h, h, true).cfl_max, 1.0149, 2.0e-3);
+    EXPECT_NEAR(levelset_viscous_stability(Real(0.4), 0.0, h, h, true).cfl_max, 1.0149, 2.0e-3);
+    // the production substep on that wave, a front along the diagonal
+    const Real theta = 2.58;
+    const Real seed  = (sizeof(Real) == 8) ? 1.0e-5 : 1.0e-3;
+    const Real at_formula = wave_gain(LEVELSET_GRAD_WENO5Z, eps_two_cell, cfl, pi4, h, h, 30, theta, seed);
+    const Real below      = wave_gain(LEVELSET_GRAD_WENO5Z, 0.95 * st.eps_max, cfl, pi4, h, h, 30, theta, seed);
+    EXPECT_GT(at_formula, 10.0) << "eps = " << eps_two_cell << " m, the two-cell formula's limit";
+    EXPECT_LT(below, 1.0) << "eps = 0.95 x " << st.eps_max << " m";
 }
