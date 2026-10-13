@@ -70,7 +70,7 @@ at startup, aborting with a message that names the input to change:
   the number of vertical cells), so every rank owns full columns;
 - :cpp:`erf.dust.grid_ratio` of at least 1, with every atmosphere box length in
   x and y divisible by it (the inputs to change are those of the fire grid
-  ratio, :ref:`sec:Fire`: a blocking factor that is a multiple of a power-of-2
+  ratio, :ref:`sec:FireGrid`: a blocking factor that is a multiple of a power-of-2
   ratio, or a :cpp:`amr.max_grid_size` that is a multiple of any other ratio
   and divides the domain's cell count);
 - a distribution mapping the same size as the box array, a domain whose

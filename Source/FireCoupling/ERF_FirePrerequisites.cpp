@@ -17,22 +17,34 @@ namespace {
 // AMReX accepts only power-of-2 blocking factors, so the advice depends on C. With
 // blocking factor 1 AMReX cuts a length of n cells into the fewest near-equal
 // pieces no longer than max_grid_size (20 cells with max_grid_size 8 become
-// 7 + 7 + 6), and splits further when there are more ranks than boxes.
-std::string box_ratio_advice (int C)
+// 7 + 7 + 6), and cuts further when there are more ranks than boxes. On level 0,
+// when max_grid_size covers the domain in x and y on more than one rank, ERF
+// replaces those boxes with one per rank (ERF::MakeNewLevelFromScratch), whatever
+// the blocking factor. On a refined level n is the refinement region's extent.
+std::string box_ratio_advice (int C, int lev)
 {
     const std::string c = std::to_string(C);
+    std::string advice = (lev > 0)
+        ? "On a refined level n is the refinement region's x,y extent in that level's "
+          "cells, and that level's amr.max_grid_size and amr.blocking_factor apply. "
+        : "";
     if ((C & (C - 1)) == 0) {
-        return "Set amr.blocking_factor_x and amr.blocking_factor_y to a multiple of " + c
-             + ", with amr.max_grid_size_x, amr.max_grid_size_y and the domain's x,y cell "
-               "counts multiples of it too.";
+        advice += "Set amr.blocking_factor_x and amr.blocking_factor_y to a multiple of " + c
+                + ", with amr.max_grid_size_x, amr.max_grid_size_y and the x,y cell counts n "
+                  "multiples of it too.";
+    } else {
+        advice += "AMReX blocking factors must be powers of 2, which " + c + " is not, so set "
+                  "the blocking factor to 1, make the x,y cell counts n multiples of " + c
+                + ", and set amr.max_grid_size_x and amr.max_grid_size_y to a multiple of " + c
+                + " that divides n: AMReX cuts a length of n cells into the fewest near-equal "
+                  "pieces no longer than max_grid_size (n = 40 and max_grid_size = 20 give "
+                  "20 + 20). Use at least as many boxes as ranks, since AMReX cuts the boxes "
+                  "further otherwise; one box works on one rank.";
     }
-    return "AMReX blocking factors must be powers of 2, which " + c + " is not, so keep "
-           "the blocking factor at 1 and choose amr.max_grid_size_x and amr.max_grid_size_y "
-           "so the boxes come out as multiples of " + c + ": AMReX cuts a length of n cells "
-           "into the fewest near-equal pieces no longer than max_grid_size, so a max_grid_size "
-           "that is a multiple of " + c + " and divides n works (n = 40 and max_grid_size = 20 "
-           "give 20 + 20), and one box in x,y always does. With more ranks than boxes AMReX "
-           "cuts the boxes further, so use at least as many boxes as ranks.";
+    advice += " With more than one rank keep max_grid_size below n in x or y: when it covers "
+              "the whole domain in both, ERF cuts level 0 into one box per rank itself, "
+              "whatever the blocking factor.";
+    return advice;
 }
 
 } // namespace
@@ -164,7 +176,7 @@ void verify_fire_prerequisites(const ERF& erf,
                   + " of level " + std::to_string(lev) + " is " + std::to_string(nx) + " x "
                   + std::to_string(ny) + " cells, and every x,y box length on that level must "
                   "be divisible by erf.fire.grid_ratio = " + std::to_string(C) + ". "
-                  + box_ratio_advice(C));
+                  + box_ratio_advice(C, lev));
         }
     }
 

@@ -2617,7 +2617,7 @@ add_test_fire_abort(FireBoxRatio_abort        FireRestart           inputs_level
     "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*Set amr.blocking_factor_x"
     "amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 add_test_fire_abort(FireBoxRatio5_abort       FireRestart           inputs_levelset_straight
-    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*which 5 is not, so keep the blocking factor at 1"
+    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*which 5 is not, so set the blocking factor to 1"
     "erf.fire.grid_ratio=5 amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 # a restart that re-makes the level-0 grids stops before the fire grid is built or
 # any checkpoint field is read; the fire used to trip its grid-ratio check or VisMF's

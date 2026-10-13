@@ -64,6 +64,8 @@ with a comment as a reference deck.
    fire_spotting_crown
    fire_output
 
+.. _sec:FireGrid:
+
 Fire grid
 ---------
 
@@ -82,18 +84,28 @@ atmospheric column :math:`(\lfloor i/C \rfloor + i_0, \lfloor j/C \rfloor + j_0)
 The constraints on the fire grid's level:
 
 - the x and y lengths of every box on that level must be divisible by the
-  ratio; the run stops at start-up naming the first box that is not. AMReX
-  accepts only power-of-2 blocking factors. For a ratio that is a power of 2,
-  set ``amr.blocking_factor_x`` and ``amr.blocking_factor_y`` to a multiple of
-  it, with ``amr.max_grid_size`` and the domain's cell counts in x and y
-  multiples of it too. For any other ratio (the default 5, or 3 or 10), keep
-  the blocking factor at 1 and choose ``amr.max_grid_size``: with blocking
-  factor 1 AMReX cuts a length of :math:`n` cells into the fewest near-equal
-  pieces no longer than ``max_grid_size`` (20 cells with
-  ``amr.max_grid_size = 8`` become 7 + 7 + 6), so a ``max_grid_size`` that is
-  a multiple of the ratio and divides :math:`n` works, and one box in x and y
-  always does. AMReX cuts the boxes further when there are more ranks than
-  boxes;
+  ratio; the run stops at start-up naming the first box that is not. Let
+  :math:`n` be the level's cell count in x or y (on a refined level, the
+  refinement region's extent in that level's cells, with that level's
+  ``amr.max_grid_size`` and ``amr.blocking_factor``), and make it a multiple
+  of the ratio. AMReX accepts only power-of-2 blocking factors:
+
+  - for a ratio that is a power of 2, set ``amr.blocking_factor_x`` and
+    ``amr.blocking_factor_y`` to a multiple of it, with ``amr.max_grid_size``
+    a multiple of it too;
+  - for any other ratio (the default 5, or 3 or 10), set the blocking factor
+    to 1 and ``amr.max_grid_size`` to a multiple of the ratio that divides
+    :math:`n`. With blocking factor 1 AMReX cuts a length of :math:`n` cells
+    into the fewest near-equal pieces no longer than ``max_grid_size`` (20
+    cells with ``amr.max_grid_size = 8`` become 7 + 7 + 6; 40 cells with
+    ``amr.max_grid_size = 20`` become 20 + 20), and cuts them further when
+    there are more ranks than boxes, so use at least as many boxes as ranks.
+    One box works on one rank.
+
+  With more than one rank, keep ``amr.max_grid_size`` below :math:`n` in x
+  or y on level 0: when it covers the whole domain in both, ERF replaces
+  AMReX's boxes with one box per rank, cut whatever the blocking factor (20
+  cells on 2 ranks become two boxes of 10);
 - no box on that level may be split in z (``amr.max_grid_size_z`` at least
   the number of vertical cells), and a refinement box must reach the domain
   top, since the fire model interpolates through whole columns;

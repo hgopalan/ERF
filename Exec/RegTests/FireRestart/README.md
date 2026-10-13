@@ -31,6 +31,11 @@ water vapour, so the comparison can see both fluxes.
 MPIRUN="mpirun -np 2" sh run_coupled_restart.sh /path/to/erf_exec
 ```
 
+It runs on 2 to 9 ranks: with more ranks than its nine boxes AMReX cuts the
+boxes further and the box-count check fails. The column stays far from
+saturation (relative humidity near 2%), so Kessler makes no cloud water or
+rain here, and their state across a restart is not exercised.
+
 ## The scenario
 
 The FireRosComparison grass fire: 2 x 2 km, 20 x 20 x 30 cells, FM1 at 6%
