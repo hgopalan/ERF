@@ -154,7 +154,8 @@ atmospheric state. In order the engine:
 
 With lagged or synchronous coupling, or with the smoke tracer, the coupling
 layer then averages the step's heat flux onto the atmospheric columns and
-holds it for injection into the atmosphere at the next step.
+holds it for the next step's heat injection (lagged and synchronous coupling)
+and smoke source.
 
 The level set ``fire_phi`` is normalised: it is :math:`-1` well inside the
 burned region, :math:`+1` well outside, zero on the front, and varies

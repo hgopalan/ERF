@@ -2392,10 +2392,12 @@ ERF::ReadCheckpointFile ()
     }
 #endif
 
-    // The fire state is restored by ReadCheckpointFileFire(), which runs after
-    // FireLayer::initialize() has allocated the fire fields. At this point the
-    // FireLayer object exists (it is created in the constructor) but its
-    // MultiFabs do not, so nothing fire-related can be read here.
+    // The fire state is restored by ReadCheckpointFileFire() (the native
+    // engine's) and ReadCheckpointFileFireCoupling() (the lagged fluxes), which
+    // run after FireCoupler::initialize() has allocated the fire fields. At this
+    // point the FireCoupler and its engine exist (they are created in the
+    // constructor) but their MultiFabs do not, so nothing fire-related can be
+    // read here.
 }
 
 /**
@@ -2584,18 +2586,24 @@ ERF::ReadCheckpointFileSurfaceLayer ()
 
 #ifdef ERF_ENABLE_FIRE
 /**
- * ERF function for reading fire state from a checkpoint file during restart.
- *
- * This is called after FireLayer::initialize() to restore the fire simulation
- * state (level-set, arrival time, and fuel load).
+ * Restore the fire coupling's lagged fluxes (FireQAtmPrev, FireQLatAtmPrev)
+ * during restart, whatever the engine. Called after ReadCheckpointFileFire(),
+ * which for the native engine has already aborted on a checkpoint whose fire
+ * grid sits on another level or region.
  */
 void
 ERF::ReadCheckpointFileFireCoupling ()
 {
     if (!m_fire_coupler) { return; }
-    // The lagged fluxes of the coupling, on the level of the fire grid (the
-    // engine's restore has checked that the checkpoint holds it on that level)
+    // The lagged fluxes of the coupling, on the level of the fire grid
     const int fire_lev = m_fire_coupler->level();
+    // A checkpoint without them (no fire state at all, or written before the
+    // fluxes were checkpointed): the buffers keep their zero, said once
+    const std::string dir = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/";
+    if (!amrex::FileExists(dir + "FireQAtmPrev_H") && !amrex::FileExists(dir + "FireQLatAtmPrev_H")) {
+        amrex::Print() << "[FIRE] Checkpoint has no lagged fire fluxes; the first restarted step injects none.\n";
+        return;
+    }
     for (const auto& [mf, name] : {std::pair<amrex::MultiFab*, const char*>{m_fire_coupler->get_Q_atm_prev_mut(), "FireQAtmPrev"},
                                    std::pair<amrex::MultiFab*, const char*>{m_fire_coupler->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev"}}) {
         if (mf == nullptr) { continue; }
@@ -2613,6 +2621,12 @@ ERF::ReadCheckpointFileFireCoupling ()
     }
 }
 
+/**
+ * ERF function for reading fire state from a checkpoint file during restart.
+ *
+ * This is called after FireCoupler::initialize() to restore the native fire
+ * engine's state (level-set, arrival time, fuel load and the rest).
+ */
 void
 ERF::ReadCheckpointFileFire ()
 {

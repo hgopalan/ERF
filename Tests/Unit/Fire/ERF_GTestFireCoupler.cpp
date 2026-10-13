@@ -8,6 +8,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParmParse.H>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -122,7 +123,7 @@ public:
     void fill_fluxes (FireFluxes& fluxes) override
     {
         ++n_fill;
-        fluxes.sensible = sensible.get();
+        fluxes.sensible = report_sensible ? sensible.get() : nullptr;
         fluxes.latent   = report_latent ? latent.get() : nullptr;
     }
     Real smoke_heat_per_kg () const override { return HEAT_PER_KG; }
@@ -130,6 +131,7 @@ public:
 
     std::unique_ptr<MultiFab> sensible, latent;
     bool report_latent = true;
+    bool report_sensible = true;
     bool wants_precip  = false;
     int n_advance = 0, n_fill = 0;
     const MultiFab* last_xvel = nullptr;
@@ -215,11 +217,11 @@ void step (FireCoupler& cpl, Level& lev)
                 lev.ba2d, lev.geom, SurfacePrecipAccumulationSources{});
 }
 
-/// The cell sources after add_sources on a background of BACKGROUND everywhere
-std::unique_ptr<MultiFab> sources (FireCoupler& cpl, Level& lev)
+/// The cell sources after add_sources on a uniform background
+std::unique_ptr<MultiFab> sources (FireCoupler& cpl, Level& lev, Real background = BACKGROUND)
 {
     auto src = std::make_unique<MultiFab>(lev.ba, lev.dm, NVAR_max, 0);
-    src->setVal(BACKGROUND);
+    src->setVal(background);
     cpl.add_sources(*src, lev.S, lev.zcc, nullptr, lev.geom, true, 1);
     return src;
 }
@@ -296,6 +298,13 @@ void SynchronousCouplingHandsOverTheNewWindAndDropsAVanishedLatentFlux ()
     step(*cpl, *lev);
     EXPECT_EQ(cpl->get_Q_lat_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt);
     EXPECT_GT(cpl->get_Q_atm_prev()->min(0), 0.0_rt) << "the sensible flux still arrives";
+    // and a step with no flux at all clears both
+    eng->report_latent = true;
+    step(*cpl, *lev);
+    eng->report_sensible = false;
+    step(*cpl, *lev);
+    EXPECT_EQ(cpl->get_Q_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt) << "no sensible flux this step";
+    EXPECT_EQ(cpl->get_Q_lat_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt);
 }
 
 void TheInjectedHeatIsTheSurfaceFlux ()
@@ -304,35 +313,58 @@ void TheInjectedHeatIsTheSurfaceFlux ()
     StandInEngine* eng = nullptr;
     auto cpl = make_coupler(*lev, coupling("lagged", true), eng);
     step(*cpl, *lev);
-    auto src = sources(*cpl, *lev);
 
+    // The magnitudes on a zero background: the tendencies (1e-6 for the vapour
+    // and the smoke) would round away on a background of 7 in single precision
+    auto src = sources(*cpl, *lev, 0.0_rt);
     const Real frac = 1.0_rt - std::exp(-Real(NZ) * DZ / ALFG);
-    // add mode: the background stays, the tendency comes on top
-    for_each_column(*src, RhoTheta_comp, BACKGROUND, [&] (int i, int, Real sum, const auto& s) {
+    for_each_column(*src, RhoTheta_comp, 0.0_rt, [&] (int i, int j, Real sum, const auto& s) {
         const Real q = flux_at_column(i);
         EXPECT_NEAR(Cp_fire * sum, RHO * FEEDBACK * q * frac, REL * q) << "sensible, column " << i;
         // the smoke: e Q / h in the lowest cell (not scaled by the feedback), spread over its thickness
         const Real smoke = EMISSION * q / HEAT_PER_KG;
-        EXPECT_NEAR((s(i, 0, 0, RhoSmoke_comp) - BACKGROUND) * DZ, smoke, REL * smoke) << "smoke, column " << i;
-        EXPECT_EQ(s(i, 0, 1, RhoSmoke_comp), BACKGROUND);
-        EXPECT_EQ(s(i, 0, 0, Rho_comp), BACKGROUND) << "no other source is touched";
+        EXPECT_NEAR(s(i, j, 0, RhoSmoke_comp) * DZ, smoke, REL * smoke) << "smoke, column " << i;
+        EXPECT_EQ(s(i, j, 1, RhoSmoke_comp), 0.0_rt);
     });
-    for_each_column(*src, RhoQ1_comp, BACKGROUND, [&] (int i, int, Real sum, const auto&) {
+    for_each_column(*src, RhoQ1_comp, 0.0_rt, [&] (int i, int, Real sum, const auto&) {
         EXPECT_NEAR(L_V * sum, RHO * FEEDBACK * QLAT * frac, REL * QLAT) << "latent, column " << i;
     });
 
-    // overwrite mode: the theta and vapour sources are replaced, the others kept
+    // add mode keeps every other source: on a background B the theta source is
+    // B more than on a zero background, and the sources the fire does not own are B
+    auto srcB = sources(*cpl, *lev);
+    const Real tol_b = 4.0_rt * std::numeric_limits<Real>::epsilon() * BACKGROUND;
+    for (MFIter mfi(*srcB); mfi.isValid(); ++mfi) {
+        const auto b = srcB->const_array(mfi);
+        const auto z = src->const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int k = 0; k < NZ; k += 7) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                EXPECT_NEAR(b(i, 0, k, RhoTheta_comp) - z(i, 0, k, RhoTheta_comp), BACKGROUND, tol_b) << "add mode, theta";
+                EXPECT_NEAR(b(i, 0, k, RhoQ1_comp)    - z(i, 0, k, RhoQ1_comp),    BACKGROUND, tol_b) << "add mode, vapour";
+                EXPECT_EQ(b(i, 0, k, Rho_comp), BACKGROUND) << "no other source is touched";
+            }
+        }
+    }
+
+    // overwrite mode, with the density factor off (the default): the theta and
+    // vapour sources are replaced by f Q (1 - e^{-z_top/alfg}) without rho, the
+    // others kept
     FireCouplingParams p = coupling("lagged", false);
     p.source_mode = "overwrite";
+    p.heat_tendency_density = false;
     StandInEngine* eng2 = nullptr;
     auto cpl2 = make_coupler(*lev, p, eng2);
     step(*cpl2, *lev);
     auto src2 = sources(*cpl2, *lev);
-    for_each_column(*src2, RhoTheta_comp, 0.0_rt, [&] (int i, int, Real sum, const auto& s) {
+    for_each_column(*src2, RhoTheta_comp, 0.0_rt, [&] (int i, int j, Real sum, const auto& s) {
         const Real q = flux_at_column(i);
-        EXPECT_NEAR(Cp_fire * sum, RHO * FEEDBACK * q * frac, REL * q) << "overwritten theta source, column " << i;
-        EXPECT_EQ(s(i, 0, 0, Rho_comp), BACKGROUND);
-        EXPECT_EQ(s(i, 0, 0, RhoSmoke_comp), BACKGROUND) << "no smoke without smoke_enable";
+        EXPECT_NEAR(Cp_fire * sum, FEEDBACK * q * frac, REL * q) << "overwritten theta source, column " << i;
+        EXPECT_EQ(s(i, j, 0, Rho_comp), BACKGROUND);
+        EXPECT_EQ(s(i, j, 0, RhoSmoke_comp), BACKGROUND) << "no smoke without smoke_enable";
+    });
+    for_each_column(*src2, RhoQ1_comp, 0.0_rt, [&] (int i, int, Real sum, const auto&) {
+        EXPECT_NEAR(L_V * sum, FEEDBACK * QLAT * frac, REL * QLAT) << "overwritten vapour source, column " << i;
     });
 }
 
@@ -389,6 +421,8 @@ void TheRainIsHandedOverOnlyWhenAsked ()
     auto lev = make_level(true);
     StandInEngine* eng = nullptr;
     auto cpl = make_coupler(*lev, coupling("lagged", false), eng);
+    step(*cpl, *lev);
+    EXPECT_FALSE(eng->got_precip) << "not asked, not given";
     eng->wants_precip = true;
     step(*cpl, *lev);
     ASSERT_TRUE(eng->got_precip);
@@ -439,15 +473,15 @@ void TheFireInputsReachTheCoupling ()
         EXPECT_EQ(c.coupling_type, "synchronous");
         EXPECT_TRUE(c.is_synchronous());
         EXPECT_TRUE(c.injects_flux());
-        EXPECT_NEAR(c.heat_flux_alfg, 30.0, 1.0e-12);
-        EXPECT_NEAR(c.fire_atm_feedback, 0.25, 1.0e-12);
+        EXPECT_NEAR(c.heat_flux_alfg, Real(30.0), REL * Real(30.0));
+        EXPECT_NEAR(c.fire_atm_feedback, Real(0.25), REL * Real(0.25));
         EXPECT_FALSE(c.inject_latent);
         EXPECT_EQ(c.source_mode, "add");
         EXPECT_FALSE(c.heat_open_fraction);
         EXPECT_EQ(c.heat_tendency_density, density);
         EXPECT_EQ(c.heat_tendency_exner, !density);
         EXPECT_TRUE(c.smoke_enable);
-        EXPECT_NEAR(c.smoke_emission_factor, 0.05, 1.0e-12);
+        EXPECT_NEAR(c.smoke_emission_factor, Real(0.05), REL * Real(0.05));
         EXPECT_TRUE(c.fire_debug);
     }
 }
@@ -455,7 +489,7 @@ void TheFireInputsReachTheCoupling ()
 } // namespace
 
 TEST(FireCoupler, FluxesAverageOntoTheColumnsTheyCameFrom)        { FluxesAverageOntoTheColumnsTheyCameFrom(); }
-TEST(FireCoupler, SynchronousCouplingHandsOverTheNewWindAndDropsAVanishedLatentFlux)
+TEST(FireCoupler, SynchronousCouplingHandsOverTheNewWindAndDropsVanishedFluxes)
 {
     SynchronousCouplingHandsOverTheNewWindAndDropsAVanishedLatentFlux();
 }

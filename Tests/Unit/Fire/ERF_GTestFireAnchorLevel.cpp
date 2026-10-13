@@ -166,14 +166,20 @@ void fill_sheared_wind (MultiFab& xvel, MultiFab& yvel, MultiFab& zcc)
     }
 }
 
-/// Per-cell sampling height: 20 m for fire cells west of x = 400 m, 50 m east
-void fill_split_height (MultiFab& h, const Geometry& g)
+/// Per-cell sampling height h = 15 + (x - 200) / 10 + (y - 100) / 20 m: a
+/// different height in every fire cell, 15 to 55 m over the region, all
+/// between the first and the third cell centre
+AMREX_GPU_HOST_DEVICE inline Real cell_height (Real x, Real y) noexcept
 {
-    const Real x0 = g.ProbLo(0), dxf = g.CellSize(0);
+    return 15.0_rt + 0.1_rt * (x - 200.0_rt) + 0.05_rt * (y - 100.0_rt);
+}
+void fill_cell_height (MultiFab& h, const Geometry& g)
+{
+    const Real x0 = g.ProbLo(0), y0 = g.ProbLo(1), dxf = g.CellSize(0), dyf = g.CellSize(1);
     for (MFIter mfi(h); mfi.isValid(); ++mfi) {
         auto a = h.array(mfi);
         ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            a(i, j, k) = (x0 + (Real(i) + 0.5_rt) * dxf < 400.0_rt) ? 20.0_rt : 50.0_rt;
+            a(i, j, k) = cell_height(x0 + (Real(i) + 0.5_rt) * dxf, y0 + (Real(j) + 0.5_rt) * dyf);
         });
     }
 }
@@ -387,10 +393,10 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
 /**
  * Each fire cell sampled at its own height (the per-cell field an engine hands
  * the sampler, the native engine's per-fuel wind height): with u = z and
- * v = 2 z in every column the cell sampled at 20 m reads (20, 40) and the
- * one at 50 m (50, 100), both between cell centres, and the sampling height
- * recorded is the cell's own; the global height (10 m, below the first centre)
- * is not used.
+ * v = 2 z in every column a cell sampled at h reads (h, 2 h), the height
+ * differing from cell to cell (cell_height, 15 to 55 m, between cell centres),
+ * and the sampling height recorded is the cell's own; the global height (10 m,
+ * below the first centre) is not used.
  */
 TEST(FireAnchorLevel, EachFireCellIsSampledAtItsOwnHeight)
 {
@@ -409,9 +415,9 @@ TEST(FireAnchorLevel, EachFireCellIsSampledAtItsOwnHeight)
     MultiFab wind(fg.ba, fg.dm, 2, 0);
     MultiFab ez(fg.ba, fg.dm, 1, 0);
     MultiFab hcell(fg.ba, fg.dm, 1, 0);
-    fill_split_height(hcell, fg.geom);
+    fill_cell_height(hcell, fg.geom);
 
-    auto height = [] (Real x, Real) { return (x < 400.0_rt) ? 20.0_rt : 50.0_rt; };
+    auto height = [] (Real x, Real y) { return cell_height(x, y); };
     for (int interp : {1, 0}) {
         fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
                                           &hcell, interp, nullptr, nullptr, 0.0, 0.1, false);

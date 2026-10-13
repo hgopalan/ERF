@@ -76,6 +76,15 @@ FireCoupler::initialize (const ERF& erf,
                   erf.Geom(lev).Domain().length(2));
 
     m_engine->initialize(erf, lev, m_fg, surface_layer, z_phys_nd_atm);
+
+    // erf.fire.heat_open_fraction places the heat by the open fraction the
+    // engine reports; without one the heat is placed as if every column were open
+    if (m_params.heat_open_fraction && m_params.injects_flux() &&
+        (!m_engine->heat_open_fraction_atm() || !m_engine->roof_height_atm())) {
+        amrex::Print() << "[FIRE] WARNING: erf.fire.heat_open_fraction = true, but the fire engine ("
+                       << m_engine->name() << ") reports no open fraction (for the native engine, a"
+                       << " structure height map); the heat is placed as if every column were open\n";
+    }
 }
 
 void
@@ -170,9 +179,15 @@ FireCoupler::update_flux_buffer (const Geometry& geom_atm)
         return;
     }
 
+    if (!m_Q_atm_prev) { return; }
     FireFluxes fluxes;
     m_engine->fill_fluxes(fluxes);
-    if (!fluxes.sensible || !m_Q_atm_prev) { return; }
+    if (!fluxes.sensible) {
+        // No flux this step: last step's must not be injected again
+        m_Q_atm_prev->setVal(0.0_rt);
+        m_Q_lat_atm_prev->setVal(0.0_rt);
+        return;
+    }
 
     coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fluxes.sensible, geom_atm, m_fg);
     if (m_params.fire_debug) {
@@ -183,7 +198,7 @@ FireCoupler::update_flux_buffer (const Geometry& geom_atm)
     if (m_params.inject_latent && fluxes.latent) {
         coarsen_fire_flux_to_atm(*m_Q_lat_atm_prev, *fluxes.latent, geom_atm, m_fg);
     } else {
-        if (m_params.fire_debug) {
+        if (m_params.fire_debug && m_params.injects_flux()) {
             amrex::Print() << "[FIRE DEBUG] Skipping latent heat injection (inject_latent=false or the engine reports no latent flux)" << std::endl;
         }
         m_Q_lat_atm_prev->setVal(0.0_rt);

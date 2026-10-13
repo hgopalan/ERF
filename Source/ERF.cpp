@@ -2156,7 +2156,8 @@ ERF::InitData_post ()
     // single-level run).
     // This runs on a clean start and on a restart alike: on a restart the
     // fields are allocated and set up from the inputs here, then overwritten
-    // from the checkpoint by ReadCheckpointFileFire().
+    // from the checkpoint by ReadCheckpointFileFire() and
+    // ReadCheckpointFileFireCoupling().
 #ifdef ERF_ENABLE_FIRE
     // z_phys_nd[fire_lev] is null on flat terrain; the fire
     // engine handles that case itself, so it must not gate initialization.
