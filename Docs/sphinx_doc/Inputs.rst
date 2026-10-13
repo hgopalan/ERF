@@ -2960,8 +2960,10 @@ Lateral Boundary Nudging
 |                               | boundary conditions are used with ``init_type`` =        |                    |                            |
 |                               | ``WRFInput``                                             |                    |                            |
 +-------------------------------+----------------------------------------------------------+--------------------+----------------------------+
-| **erf.use_wrf_bdy_qc_qi**     | ingest cloud water and cloud ice from ``wrfinput`` and   | Boolean            | false                      |
-|                               | ``wrfbdy``; requires an active moisture model and real   |                    |                            |
+| **erf.use_wrf_bdy_qc_qi**     | fill the lateral ghost cells of the hydrometeors from    | Boolean            | false                      |
+|                               | ``wrfbdy`` (cloud water and ice; also rain, snow and     |                    |                            |
+|                               | graupel, see Real Domain BCs) and require them in        |                    |                            |
+|                               | ``wrfinput``; requires an active moisture model and real |                    |                            |
 |                               | boundary conditions with ``init_type`` = ``WRFInput``    |                    |                            |
 +-------------------------------+----------------------------------------------------------+--------------------+----------------------------+
 
@@ -2969,8 +2971,9 @@ For WRF real boundaries, moisture nudging type 0 relaxes only ``qv`` toward
 ``QVAPOR``. Type 1 applies a ``qv`` tendency based on ERF ``qv+qc+qi`` versus
 WRF ``QVAPOR``. Type 2 relaxes ``qv`` toward ``QVAPOR`` and active ``qc``/``qi``
 toward zero with the existing latent-heat terms. Type 3 directly relaxes active
-``qv``, ``qc``, and ``qi`` toward ``QVAPOR``, ``QCLOUD``, and ``QICE`` without
-an added latent-heat term. Type 3 requires ``erf.use_wrf_bdy_qc_qi = true``.
+``qv``, ``qc``, and ``qi`` toward ``QVAPOR``, ``QCLOUD``, and ``QICE`` (and
+``qr``, ``qs`` and ``qg`` toward their own fields for a model that carries all
+five species) without an added latent-heat term. Type 3 requires ``erf.use_wrf_bdy_qc_qi = true``.
 
 .. _sec:CustomForcingInputs:
 
@@ -3193,7 +3196,10 @@ List of Parameters
 +---------------------------------------+----------------------------------------------------------+--------------------+------------------+
 | **erf.bndry_input_var_names**         | Variables to read; any of velocity, density,             | List of strings    | None (no         |
 |                                       | temperature, theta, scalar, qv, qc and ke. An unknown    |                    | variables)       |
-|                                       | name aborts at start-up                                  |                    |                  |
+|                                       | name aborts at start-up. The passive scalars share one   |                    |                  |
+|                                       | boundary condition, so with more than one (dust, the     |                    |                  |
+|                                       | fire coupling's smoke) ``scalar`` fills all of them from |                    |                  |
+|                                       | the base scalar's plane                                  |                    |                  |
 +---------------------------------------+----------------------------------------------------------+--------------------+------------------+
 | **erf.in_rad**                        | width, in cells, of the region inside the domain         | Integer >= 0       | 1                |
 |                                       | boundary from which the boundary planes are written and  |                    |                  |
