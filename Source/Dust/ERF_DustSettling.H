@@ -31,9 +31,9 @@
  * settled the 50 um third of the default bins at the 7 um velocity (residence
  * 5850 s in a 23 m cell instead of 117 s).
  *
- * Pattern reference: ERF_FireAtmCoupling.H in Source/Fire/:
+ * Pattern reference: ERF_FireAtmCoupling.H in Source/FireCoupling/:
  *   https://github.com/hgopalan/ERF/blob/7856affedd8bb3c878b62c308f39c36bf2228791/
- *   Source/Fire/ERF_FireAtmCoupling.H
+ *   Source/FireCoupling/ERF_FireAtmCoupling.H
  *
  * References:
  *   Stokes, G.G. (1851). Trans. Cambridge Phil. Soc., 9, 8-106.

@@ -20,6 +20,7 @@
 #include <ERF_DustMSHA.H>
 #include <ERF_DustMSHAOutput.H>
 #include <ERF_FireWindExtract.H>
+#include <ERF_FireWindAdjust.H>
 #include <ERF.H>
 #include <ERF_SurfaceLayer.H>
 #include <AMReX_Print.H>

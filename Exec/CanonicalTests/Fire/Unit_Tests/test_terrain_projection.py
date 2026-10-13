@@ -12,7 +12,7 @@ extraction.
 Reference implementations extracted from:
   - ERF_NumericalSchemes.H: godunov_norm_grad_phi()
   - ERF_FarsiteEllipse.H:   advance_farsite_one_step()
-  - ERF_TerrainSlope.cpp:   compute_fire_surface_height()
+  - ERF_FireSurfaceHeight.cpp: compute_fire_surface_height()
 
 Run: python3 test_terrain_projection.py
 """
@@ -69,7 +69,7 @@ def atm_ground_elevation(z_nodes):
     """
     Ground elevation of an atmospheric cell.
 
-    Formula from ERF_TerrainSlope.cpp, compute_fire_surface_height(): the mean
+    Formula from ERF_FireSurfaceHeight.cpp, compute_fire_surface_height(): the mean
     of the four k = 0 nodes of the cell.
 
     Args:

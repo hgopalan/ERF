@@ -130,8 +130,10 @@ aborts at start-up with a message saying so.
 One fire step
 -------------
 
-``FireLayer::advance`` is called once per time step of the fire grid's level,
-after that level's dynamical core. In order it:
+The coupling layer (``FireCoupler::advance``, :ref:`sec:FireCoupling`)
+calls the native engine's ``FireLayer::advance`` once per time step of the
+fire grid's level, after that level's dynamical core, and hands it the
+atmospheric state. In order the engine:
 
 1. samples the near-surface temperature and relative humidity and, when
    ``erf.fire.moisture_dynamic`` is on, advances the dead-fuel moisture
@@ -148,8 +150,10 @@ after that level's dynamical core. In order it:
    ember spotting when enabled;
 6. updates the arrival-time field, consumes fuel and computes the surface
    heat flux and the flame diagnostics;
-7. reports probes, appends the statistics CSV, and stores the coarsened heat
-   flux for injection into the atmosphere at the next step.
+7. reports probes and appends the statistics CSV.
+
+The coupling layer then averages the step's heat flux onto the atmospheric
+columns and holds it for injection into the atmosphere at the next step.
 
 The level set ``fire_phi`` is normalised: it is :math:`-1` well inside the
 burned region, :math:`+1` well outside, zero on the front, and varies
@@ -227,23 +231,35 @@ Which of these reach the fire plotfile, and under what names, is listed in
 Source layout
 -------------
 
-All fire sources are in ``Source/Fire``. The entry points are
+The fire sources are in two folders (:ref:`sec:FireCoupling`).
+``Source/FireCoupling`` holds the atmosphere side, shared by every fire
+engine: ``ERF_FireCoupler`` (the coupling and its call order),
+``ERF_FireEngine.H`` (the interface an engine implements),
+``ERF_FireCouplingParams.H`` (the coupling inputs), ``ERF_FireGrid``,
+``ERF_FirePrerequisites`` (the start-up checks of the mesh),
+``ERF_FireWindExtract`` and ``ERF_FireSurfaceHeight`` (the wind sampler and
+the ground of each column), ``ERF_FireUtils`` and ``ERF_FirePrecip`` (the
+near-surface temperature, humidity and rain), ``ERF_FireAtmCoupling`` (the
+area average and the heat injection) and ``ERF_FireSmokeEmission``.
+
+``Source/Fire`` holds the native engine. Its entry points are
 ``ERF_FireLayer.H`` and ``ERF_FireLayer.cpp`` (the ``FireLayer`` class that
 owns the fields and runs a step) and ``ERF_FireParams.H`` (every
-``erf.fire.*`` input, read once from ParmParse). The remaining headers each
+``erf.fire.*`` input, read once from ParmParse, including the coupling
+inputs it hands to the coupling layer). The remaining headers each
 hold one model or one stage of the step and are named for it:
 ``ERF_Rothermel``, ``ERF_BalbiModel``, ``ERF_BehaveModel``,
 ``ERF_MacArthurModel``, ``ERF_CheneyGouldModel``, ``ERF_DirectionalRos`` and
 ``ERF_HybridRos`` for the rate of spread; ``ERF_FarsiteEllipse``,
 ``ERF_LevelSetAdvection``, ``ERF_NumericalSchemes`` and ``ERF_Reinitialize``
-for propagation; ``ERF_FireWindExtract``, ``ERF_FuelWindHeight`` and
+for propagation; ``ERF_FireWindAdjust``, ``ERF_FuelWindHeight`` and
 ``ERF_TerrainSlope`` for the wind and terrain; ``ERF_FuelMoisture``,
 ``ERF_MoistureExtinction``, ``ERF_FuelMap``, ``ERF_LcpReader``,
 ``ERF_FuelBlending`` and ``ERF_FireBreak`` for fuel; ``ERF_FireIgnition``,
 ``ERF_IgnitionSchedule`` and ``ERF_PolygonIgnition`` for ignition;
-``ERF_FireHeatFlux``, ``ERF_FireAtmCoupling`` and ``ERF_FireSmokeEmission``
-for coupling; ``ERF_AlbiniSpotting``, ``ERF_ScottSpottingTable``,
+``ERF_FireHeatFlux`` for the heat release; ``ERF_AlbiniSpotting``, ``ERF_ScottSpottingTable``,
 ``ERF_CrownFire`` and ``ERF_FireAcceleration`` for the behaviour extensions;
+``ERF_FireEnginePrerequisites`` for its start-up checks;
 and ``ERF_FireDiagnostics``, ``ERF_FireStatsOutput``, ``ERF_FirePlotfile``
 and ``ERF_FirePlotfileCatalog`` for output. The fire module is compiled when
 ``ERF_ENABLE_FIRE`` is on, which is the CMake default.

@@ -19,9 +19,9 @@
  *   dust_field(i,j,0) = atm_field(i/C, j/C, klo)
  *
  * Pattern references:
- *   ERF_FireWindExtract.H, Source/Fire/:
+ *   ERF_FireWindExtract.H, Source/FireCoupling/:
  *     https://github.com/hgopalan/ERF/blob/ecb9b7656bbb98fcc5d4f781e486825ee9478a73/
- *     Source/Fire/ERF_FireWindExtract.H
+ *     Source/FireCoupling/ERF_FireWindExtract.H
  *   fill_dust_scalar_from_atm in ERF_DustWindExtract.H (Phase 9).
  *
  * References:

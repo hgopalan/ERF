@@ -12,6 +12,44 @@ how the wind reaches the fire grid and is adjusted to the flame zone, how fuel
 is consumed and the heat flux formed, how that flux is injected into the
 energy equation, and the smoke tracer.
 
+Coupling layer and fire engines
+-------------------------------
+
+The code is split into two parts, so that more than one fire model can be
+coupled to ERF the same way.
+
+* **The coupling layer** (``Source/FireCoupling``, the ``FireCoupler`` class)
+  is everything on the atmosphere side. It checks that the mesh can carry a
+  fire grid, builds that grid on the level :cpp:`erf.fire.anchor_level`
+  selects, hands the fire the atmospheric state at the start of each of its
+  steps, averages the heat the fire reports onto the atmospheric columns,
+  holds it for one step, and injects it at every Runge-Kutta stage of the
+  next step together with the smoke tracer. It also provides the shared
+  helpers a fire model may use: the wind sampler and the ground of each
+  column described below.
+* **The fire engine** (``FireEngine`` in ``ERF_FireEngine.H``) is the fire
+  model itself: it advances the front on the fire grid and reports, after
+  each step, the sensible and latent heat flux into the air on the fire grid
+  [W/m²], averaged over its step. :cpp:`erf.fire.engine` selects it; the only
+  engine so far is ``"native"``, ERF's own model (``Source/Fire``, the
+  ``FireLayer`` class), which every other section of the fire pages
+  describes.
+
+The engine reads, at the start of each step, the face velocities of the fire
+grid's level (before the dynamical core with ``"passive"`` and ``"lagged"``
+coupling, after it with ``"synchronous"``), the cell-centre heights, the air
+temperature and relative humidity of the lowest cell before the dynamical
+core, and, when it asks for it, the surface precipitation of every column.
+What it does with them, including the height it samples the wind at and the
+corrections it applies to that wind, is the engine's choice. The coupling
+inputs (:cpp:`erf.fire.grid_ratio`, :cpp:`erf.fire.anchor_level`,
+:cpp:`erf.fire.coupling_type`, :cpp:`erf.fire.heat_flux_alfg`,
+:cpp:`erf.fire.fire_atm_feedback`, :cpp:`erf.fire.inject_latent`,
+:cpp:`erf.fire.source_mode`, :cpp:`erf.fire.heat_open_fraction`,
+:cpp:`erf.fire.heat_tendency_density`, :cpp:`erf.fire.heat_tendency_exner`,
+:cpp:`erf.fire.smoke_enable` and :cpp:`erf.fire.smoke_emission_factor`) mean
+the same for every engine.
+
 Wind extraction
 ---------------
 

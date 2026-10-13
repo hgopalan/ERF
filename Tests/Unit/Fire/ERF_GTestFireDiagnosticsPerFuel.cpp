@@ -7,6 +7,7 @@
 
 #include "ERF_FireDiagnostics.H"
 #include "ERF_FireWindExtract.H"
+#include "ERF_FireWindAdjust.H"
 #include "ERF_FuelMap.H"
 
 /**

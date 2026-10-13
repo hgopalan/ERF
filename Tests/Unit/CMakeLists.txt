@@ -322,6 +322,7 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFbpSlopeVector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireBoxParity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireAtmInjection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireCoupler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestRothermelCellMoisture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestEmberDrift.cpp
   )

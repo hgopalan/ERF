@@ -3,7 +3,7 @@
  * @brief One-way dust-to-atmosphere coupling: inject dust emission flux
  *        into the ERF 3D conserved state at k=0.
  *
- * Structural analog of ERF_FireAtmCoupling.H from Source/Fire/:
+ * Structural analog of ERF_FireAtmCoupling.H from Source/FireCoupling/:
  *   (the coarsening lives in DustLayer::coarsen_to_atm_columns)
  *   apply_fire_tendency_to_cc_source  ->  apply_dust_tendency_to_cc_source
  *

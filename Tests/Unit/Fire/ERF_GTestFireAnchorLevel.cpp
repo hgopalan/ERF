@@ -13,6 +13,7 @@
 #include "ERF_FireGrid.H"
 #include "ERF_FireAtmCoupling.H"
 #include "ERF_TerrainSlope.H"
+#include "ERF_FireSurfaceHeight.H"
 #include "ERF_FireWindExtract.H"
 
 /**
@@ -334,13 +335,13 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
 
     // Bilinear: a field linear in position is reproduced at the fire cell centre
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, 0.1, below_first_log);
+                                      nullptr, 1, nullptr, nullptr, 0.0, 0.1, below_first_log);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) { return x + 0.5_rt * y; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) { return y + 0.25_rt * x; }), 1.0e3 * TOL);
 
     // Nearest: the value at the centre of the column holding the fire cell
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 0, nullptr, nullptr, 0.0, 0.1, below_first_log);
+                                      nullptr, 0, nullptr, nullptr, 0.0, 0.1, below_first_log);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) {
         return (column_of(x) + 0.5_rt) * DX + 0.5_rt * (column_of(y) + 0.5_rt) * DX; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) {
@@ -378,14 +379,14 @@ TEST(FireAnchorLevel, WindBelowTheFirstCentreFollowsTheLogProfile)
     const Real f10 = std::log(10.0_rt / z0) / std::log(z1 / z0);   // 0.95379
 
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+                                      nullptr, 1, nullptr, nullptr, 0.0, z0, true);
     EXPECT_LT(max_rel_error(wind, fg, 0, [=](Real x, Real y) { return f10 * (x + 0.5_rt * y); }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [=](Real x, Real y) { return f10 * (y + 0.25_rt * x); }), 1.0e3 * TOL);
     EXPECT_NEAR(f10, 0.95379_rt, 1.0e-5) << "the factor itself";
 
     // at the first centre the profile factor is 1
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, z1, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+                                      nullptr, 1, nullptr, nullptr, 0.0, z0, true);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) { return x + 0.5_rt * y; }), 1.0e3 * TOL);
 
     // a ground 2.5 m up: the first centre is 10 m above it and the 5 m target
@@ -394,7 +395,7 @@ TEST(FireAnchorLevel, WindBelowTheFirstCentreFollowsTheLogProfile)
     grounds.setVal(2.5_rt);
     const Real f5 = std::log(5.0_rt / z0) / std::log(10.0_rt / z0);
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 5.0, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+                                      nullptr, 1, nullptr, nullptr, 0.0, z0, true);
     EXPECT_LT(max_rel_error(wind, fg, 0, [=](Real x, Real y) { return f5 * (x + 0.5_rt * y); }), 1.0e3 * TOL);
     EXPECT_NEAR(f5, 0.84949_rt, 1.0e-5);
 }

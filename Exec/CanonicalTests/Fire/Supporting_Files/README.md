@@ -380,7 +380,7 @@ For both lagged and synchronous modes, the injection mechanism is identical:
    d(RhoQ1)/dt = -rho * d(qfx)/dz
    ```
 
-5. **One-Step Lag**: Fire flux from timestep n is stored in `m_Q_atm_prev` and injected at timestep n+1. This lag is necessary because the fire is advanced AFTER the dycore has already run for the current step.
+5. **One-Step Lag**: Fire flux from timestep n is stored in the coupler's lagged buffer (`FireCoupler`, `Source/FireCoupling`) and injected at timestep n+1. This lag is necessary because the fire is advanced AFTER the dycore has already run for the current step.
 
 ### Key Parameters (Phases 6-7)
 

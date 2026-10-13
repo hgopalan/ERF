@@ -13,8 +13,8 @@
  *                                       and y_c in [y_lo_s, y_hi_s]
  *   site_id(i,j) = 0 if no site matches.
  *
- * Spatial pattern reference: ERF_FireGrid.H (Source/Fire/):
- *   https://github.com/hgopalan/ERF/blob/ERF-Fire/Source/Fire/ERF_FireGrid.H
+ * Spatial pattern reference: ERF_FireGrid.H (Source/FireCoupling/):
+ *   https://github.com/hgopalan/ERF/blob/ERF-Fire/Source/FireCoupling/ERF_FireGrid.H
  *
  * PHREEQC reference:
  *   Parkhurst & Appelo (2013). PHREEQC Version 3.
