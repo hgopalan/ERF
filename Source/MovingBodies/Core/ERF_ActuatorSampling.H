@@ -32,7 +32,8 @@ namespace erf_actuator {
  * node, on the velocities' boxes and distribution. In a periodic direction a point is moved by
  * whole periods into the domain; a point on the domain's upper x or y face belongs to the last
  * cell. A point outside the domain otherwise, or one found by no rank or by more than one, aborts
- * with its coordinates: the caller owns the points and must keep them inside the domain.
+ * with its coordinates: the caller owns the points and must keep them inside the domain. Every
+ * rank must pass the same points (BodyExchange samples the points of bodies each rank owns alone).
  *
  * @param[in] U,V,W face-centred velocities on one level, ghost cells filled (m/s)
  * @param[in] z_phys_nd nodal physical heights (m), or nullptr on a uniform-dz mesh
@@ -47,6 +48,24 @@ void sample_velocity (const amrex::MultiFab& U,
                       const amrex::Geometry& geom,
                       const std::vector<amrex::Real>& pos,
                       std::vector<amrex::Real>& vel);
+
+/**
+ * The part of sample_velocity() that a rank does on its own: the velocity at each of the points that
+ * one of this rank's boxes holds (cnt 1), zero with cnt 0 at the others. No reduction and no check:
+ * the caller combines the ranks' answers. The points must already be moved into the domain across
+ * its periodic seams (wrap_periodic).
+ * @param[in] wpos 3*n point coordinates inside the domain (m)
+ * @param[out] vel 3*n velocities (m/s), zero at the points no box of this rank holds
+ * @param[out] cnt n counts: how many of this rank's boxes hold each point (0 or 1)
+ */
+void sample_velocity_local (const amrex::MultiFab& U,
+                            const amrex::MultiFab& V,
+                            const amrex::MultiFab& W,
+                            const amrex::MultiFab* z_phys_nd,
+                            const amrex::Geometry& geom,
+                            const std::vector<amrex::Real>& wpos,
+                            std::vector<amrex::Real>& vel,
+                            std::vector<int>& cnt);
 
 /**
  * The points (3 coordinates each, m) with their coordinates in every periodic direction moved by
@@ -129,10 +148,11 @@ struct ZBounds {
 
 /**
  * The bounds of a terrain-following or stretched level's heights, from its z_phys_nd (nodal, one
- * component, on every rank alike): a height Z lies in a cell k with floor((Z - ground_hi) / dz_hi)
- * <= k <= floor((Z - ground_lo) / dz_lo).
+ * component): a height Z lies in a cell k with floor((Z - ground_hi) / dz_hi) <= k <= floor((Z -
+ * ground_lo) / dz_lo). Over every rank's boxes, the same on every rank (a collective), or with
+ * over_all_ranks false over this rank's boxes only, which bounds the cells of those boxes alone.
  */
-ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& geom);
+ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& geom, bool over_all_ranks = true);
 
 bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
                         const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,

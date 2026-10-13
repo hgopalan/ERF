@@ -29,7 +29,9 @@ namespace erf_actuator {
  * each named scalar quantity over every sample added since the caller's averaging start (for
  * example erf.moving_bodies.avg_start). write() rewrites <output_root>_stats.csv with the current
  * values; the sums are part of the checkpoint, so the statistics continue across a restart.
- * A non-finite sample aborts, naming the statistics and the quantity.
+ * A non-finite sample aborts, naming the statistics and the quantity. The files are written by one
+ * rank, the I/O rank unless set_writer() names another (a turbine's owner, which alone accumulates
+ * its statistics).
  */
 class RunningStats
 {
@@ -41,6 +43,9 @@ public:
           m_max(m_names.size(), std::numeric_limits<amrex::Real>::lowest()) {}
 
     const std::string& name () const { return m_name; }
+    /** The rank that writes the statistics and their checkpoint state (the I/O rank by default). */
+    void set_writer (int rank) { m_writer = rank; }
+    int writer () const { return m_writer; }
     const std::vector<std::string>& quantities () const { return m_names; }
 
     /**
@@ -89,7 +94,7 @@ public:
     /** Rewrite <output_root>_stats.csv: one row per quantity with the current statistics. */
     void write () const
     {
-        if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
+        if (amrex::ParallelDescriptor::MyProc() != m_writer) { return; }
         std::ofstream out;
         open_log(out, m_output_root + "_stats.csv", true);
         out << "samples,t_first,t_last,quantity,mean,rms,min,max\n" << std::setprecision(10);
@@ -102,7 +107,7 @@ public:
     /** The state for a checkpoint: <dir>/<name>_stats.dat. */
     void write_state (const std::string& dir) const
     {
-        if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
+        if (amrex::ParallelDescriptor::MyProc() != m_writer) { return; }
         std::ofstream out(dir + "/" + m_name + "_stats.dat", std::ios::trunc);
         if (!out) { amrex::Abort("cannot write the statistics checkpoint for " + m_name + " in '" + dir + "'"); }
         out << std::setprecision(17) << "count = " << m_count << "\nsize = " << m_names.size()
@@ -173,6 +178,7 @@ public:
 
 private:
     std::string m_name, m_output_root;
+    int m_writer{amrex::ParallelDescriptor::IOProcessorNumber()};
     std::vector<std::string> m_names;
     std::vector<double> m_sum, m_sum2;          //!< in double: a float sum over many steps would lose the samples
     std::vector<amrex::Real> m_min, m_max;

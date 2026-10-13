@@ -3,11 +3,14 @@
 
 /** Spreading of point forces onto the face-centred momentum sources with a normalised Gaussian kernel, and the integral check. */
 
+#include <string>
 #include <vector>
 
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
+
+#include "ERF_ActuatorSampling.H"
 
 namespace erf_actuator {
 
@@ -25,7 +28,7 @@ namespace erf_actuator {
  *
  * Every rank accumulates the faces its boxes own (each physical face once, however the boxes
  * share their boundary faces) and the normalisations are summed across ranks, so the result
- * does not depend on the domain decomposition. Every periodic image of a point within
+ * does not depend on the domain decomposition; every rank must pass the same points. Every periodic image of a point within
  * 3 epsilon_p of the domain (in x and y; z is not imaged) adds its kernel, so a kernel wraps across
  * a periodic boundary, and overlaps itself when the period is under 6 epsilon_p. The sources are
  * set (not added to) on every valid face, both copies of a shared face alike; the faces on a
@@ -52,6 +55,21 @@ void spread_forces (const std::vector<amrex::Real>& pos,
                     amrex::MultiFab& src_y,
                     amrex::MultiFab& src_z);
 
+/**
+ * The same, but added to what the sources hold (spread_forces() sets them): for several sets of
+ * points spread one after the other, as MovingBodies spreads the prescribed-Ct disks after the
+ * turbines (BodyExchange::spread_forces). Collective: every rank must pass the same points.
+ */
+void add_spread_forces (const std::vector<amrex::Real>& pos,
+                        const std::vector<amrex::Real>& force,
+                        const std::vector<amrex::Real>& epsilon,
+                        const amrex::MultiFab* z_phys_nd,
+                        const amrex::MultiFab* detJ_cc,
+                        const amrex::Geometry& geom,
+                        amrex::MultiFab& src_x,
+                        amrex::MultiFab& src_y,
+                        amrex::MultiFab& src_z);
+
 /** The same with one kernel width epsilon (m, > 0 and finite) for every point. */
 void spread_forces (const std::vector<amrex::Real>& pos,
                     const std::vector<amrex::Real>& force,
@@ -62,6 +80,52 @@ void spread_forces (const std::vector<amrex::Real>& pos,
                     amrex::MultiFab& src_x,
                     amrex::MultiFab& src_y,
                     amrex::MultiFab& src_z);
+
+/**
+ * The first of spread_forces()'s two passes, on this rank's boxes only: for each point and each
+ * component, this rank's part of the normalisation S_p (the sum of w_p dV over the faces its boxes
+ * own). No reduction: the caller sums the ranks' parts (BodyExchange sums those of the ranks a
+ * point reaches, in rank order). The boxes are src_x's, which z_phys_nd and detJ_cc must share.
+ * zb_local, when given, is this rank's mesh_z_bounds(z_phys_nd, geom, false), which the call then
+ * need not compute; the same for add_scaled_kernels.
+ * @param[out] norm 3*n partial normalisations (m^3), component fastest
+ */
+void spread_partial_norms (const std::vector<amrex::Real>& pos,
+                           const std::vector<amrex::Real>& epsilon,
+                           const amrex::MultiFab* z_phys_nd,
+                           const amrex::MultiFab* detJ_cc,
+                           const amrex::Geometry& geom,
+                           const amrex::MultiFab& src_x,
+                           std::vector<amrex::Real>& norm,
+                           const ZBounds* zb_local = nullptr);
+
+/**
+ * The second pass, on this rank's boxes only: add (F_p / S_p) w_p to every face of every box (both
+ * copies of a shared face alike), each point with its own width.
+ * @param[in] f_over_s 3*n forces over their whole normalisations (N/m^3), component fastest; a zero skips the point's component
+ */
+void add_scaled_kernels (const std::vector<amrex::Real>& pos,
+                         const std::vector<amrex::Real>& f_over_s,
+                         const std::vector<amrex::Real>& epsilon,
+                         const amrex::MultiFab* z_phys_nd,
+                         const amrex::MultiFab* detJ_cc,
+                         const amrex::Geometry& geom,
+                         amrex::MultiFab& src_x,
+                         amrex::MultiFab& src_y,
+                         amrex::MultiFab& src_z,
+                         const ZBounds* zb_local = nullptr);
+
+/** What is wrong with the points, forces and widths for spread_forces (an empty string when nothing is). */
+std::string spread_points_problem (const std::vector<amrex::Real>& pos, const std::vector<amrex::Real>& force,
+                                   const std::vector<amrex::Real>& epsilon);
+
+/** Abort unless the points, forces and widths match in number and are finite, and the widths positive (spread_forces' checks). */
+void check_spread_points (const std::vector<amrex::Real>& pos, const std::vector<amrex::Real>& force,
+                          const std::vector<amrex::Real>& epsilon);
+
+/** Abort unless the sources are face-centred in x, y and z and share boxes and distribution with z_phys_nd and detJ_cc (one ghost cell). */
+void check_spread_layout (const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc, const amrex::MultiFab& src_x,
+                          const amrex::MultiFab& src_y, const amrex::MultiFab& src_z);
 
 /**
  * Return the integral of a face-centred source over the mesh, sum of src dV (the total force, N).

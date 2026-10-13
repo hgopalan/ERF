@@ -28,12 +28,13 @@ terrain file of `../Real_Terrain/Askervein`, both copied next to the deck by the
 | `OpenFAST_ADM_Uniform` | stub turbine, disk | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
 | `OpenFAST_ADM_Upstream` | stub turbine, disk, velocities sampled 1 D upstream | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
 | `OpenFAST_ADM_Terrain` | stub turbine, disk, on a Witch-of-Agnesi ridge (fitted mesh) | `RunOpenFASTADM.cmake` | ground heights log, plotfile, `fx == -thrust_x` |
+| `OpenFAST_ADM_UpstreamNacelle` | stub turbine, disk, sampled one diameter upstream, nacelle drag | `RunOpenFASTADM.cmake` | plotfile and the nacelle column of the turbine log against golds made before the turbines' points were exchanged point to point; `fx == -load_x` |
 | `OpenFAST_ADM_DiskCorrected` | stub turbine, disk, free stream recovered with the filtered-disk factor | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | plotfile, flow log, `fx == -thrust_x`; restart parity of every log; with `correction_relax = 1` (`OpenFAST_ADM_DiskCorrected_OldUpdate`) the gold of the unrelaxed update |
 | `OpenFAST_ADM_Wake` | stub turbine, disk, wake lines | `RunOpenFASTADM.cmake` | wake running average |
 | `OpenFAST_ADM_Restart` | stub turbine, disk | `RunRestartParity.cmake` | restart parity of the plotfile and every log, with rows written past the checkpoint dropped; the restart aborts (changed body key, step, later stop time, added body) |
 | `OpenFAST_ADM_LES` | stub turbine, disk, precursor planes | `RunPrecursorInflow.cmake` | turbulent inflow from a precursor; body statistics |
 | `OpenFAST_ADM_CPM` | stub turbine, disk, cell perturbations | `RunOpenFASTADM.cmake` | turbulent inflow from the perturbation method; statistics |
-| `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity; restart parity on two ranks, with T2's logs written by rank 1 |
+| `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity (one rank against two, with T2 owned by rank 1); restart parity on two ranks, with T1's logs and checkpoint files written by rank 1; restart on one rank from a two-rank checkpoint |
 | `OpenFAST_ADM_TwoWidths` | two stub turbines, disks, a kernel width each | `RunOpenFASTADM.cmake` | plotfile, T2's flow log, `fx == -load_x` |
 | `OpenFAST_ADM_DiskAndTurbine` | stub turbine (disk, 2 cells) and a prescribed-Ct disk (1 cell) | `RunOpenFASTADM.cmake` | the disk's log, `fx == -load_x` of both bodies |
 | `OpenFAST_ADM_TwoLevel` | stub turbine, disk, on level 1 of two | `RunOpenFASTADM.cmake` | the anchor level: sampled and forced on the fine patch, stepped with its step |
@@ -58,7 +59,12 @@ prescribed-Ct disk's `air_density` off ERF's density, a finer level over the
 bodies, floating-point traps with a turbine, an out-of-range
 `correction_relax`, an actuator-line tip that sweeps more cells per step
 than `alm_max_tip_cells` allows, a nacelle kernel too narrow for its drag area (correction factor under 0.5),
-and a tower width given without a tower. `MovingBodies_StopDatetime` runs `OpenFAST_ADM_Restart` to
+a tower width given without a tower, and two turbines of different OpenFAST time steps on one rank
+(`MovingBodies_MixedTimeSteps_OneRank`). `MovingBodies_Owners_*` and `MovingBodies_MixedTimeSteps_TwoRanks`
+run a deck for one step on two ranks and require it to end normally with the turbines on the ranks the
+restart and box-parity tests rely on, and turbines of different OpenFAST time steps on different ranks
+(`Tests/RunExpectExit.cmake`). `OpenFAST_ADM_TwoTurbines/stub_turbine_dt002.fst` is the stub deck with
+`dt = 0.02` those tests give the second turbine. `MovingBodies_StopDatetime` runs `OpenFAST_ADM_Restart` to
 a `stop_datetime` past the deck's `stop_time` and requires it to get there.
 
 The decks that do not set `sampling` run the default `disk_corrected`; on the

@@ -5,9 +5,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 
 #include <AMReX.H>
@@ -201,6 +203,14 @@ void
 MovingBodies::write_checkpoint (const std::string& chkdir) const
 {
     const std::string dir = chkdir + "/moving_bodies";
+#ifdef ERF_USE_OPENFAST
+    // every turbine's OpenFAST time index and corrected free stream, which its owner alone knows, at the I/O rank
+    const int nturb = static_cast<int>(m_driver->turbines().size());
+    std::vector<Long> time_index(nturb, 0);
+    for (int i = 0; i < nturb; ++i) { if (m_driver->is_owner(i)) { time_index[i] = m_driver->turbines()[i].time_index; } }
+    if (nturb > 0) { ParallelDescriptor::ReduceLongSum(time_index.data(), nturb, ParallelDescriptor::IOProcessorNumber()); }
+    const std::vector<Real> corr_uinf = turbine_table(1, true, [this] (int i, Real* row) { row[0] = m_corr_uinf[i]; });
+#endif
     if (ParallelDescriptor::IOProcessor()) {
         UtilCreateDirectory(dir, 0755);
         std::ofstream out(dir + "/state", std::ios::trunc);
@@ -222,10 +232,10 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
 #ifdef ERF_USE_OPENFAST
         const auto& turbs = m_driver->turbines();
         for (std::size_t i = 0; i < turbs.size(); ++i) {
-            out << "time_index " << turbs[i].name << " = " << turbs[i].time_index << "\n";
+            out << "time_index " << turbs[i].name << " = " << time_index[i] << "\n";
             if (m_turbine_in[i].sampling == "disk_corrected") {
                 out << "corr_uinf " << turbs[i].name << " = "
-                    << std::setprecision(std::numeric_limits<Real>::max_digits10) << m_corr_uinf[i] << "\n";
+                    << std::setprecision(std::numeric_limits<Real>::max_digits10) << corr_uinf[i] << "\n";
             }
         }
 #endif
@@ -235,11 +245,13 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
     for (const auto& st : m_turbine_stats) { st.write_state(dir); }
     for (const auto& st : m_disk_stats) { st.write_state(dir); }
 #ifdef ERF_USE_OPENFAST
-    if (ParallelDescriptor::IOProcessor()) {
+    {
         const auto& turbs = m_driver->turbines();
-        // every turbine's node loads and velocities at the checkpoint: what depends on the
-        // loads of the step before a restart (the lifting-line correction) continues from them
-        for (const auto& t : turbs) {
+        // every turbine's node loads and velocities at the checkpoint, written by its owner: what
+        // depends on the loads of the step before a restart (the lifting-line correction) continues from them
+        for (int i = 0; i < nturb; ++i) {
+            if (!m_driver->is_owner(i)) { continue; }
+            const auto& t = turbs[i];
             std::ofstream out(dir + "/" + t.name + "_nodes.dat", std::ios::trunc);
             if (!out) { Abort("cannot write the node-load checkpoint for " + t.name + " in '" + dir + "'"); }
             out << std::setprecision(17) << "nodes " << t.name << " " << t.num_force_nodes << " " << t.num_vel_nodes << "\n";
@@ -247,7 +259,7 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
             for (Real v : t.node_vel) { out << v << "\n"; }
         }
         for (std::size_t i = 0; i < m_fllc.size(); ++i) {
-            if (m_fllc[i].empty()) { continue; }
+            if (m_fllc[i].empty()) { continue; }   // off, or not owned here
             std::ofstream out(dir + "/" + turbs[i].name + "_fllc.dat", std::ios::trunc);
             if (!out) { Abort("cannot write the lifting-line correction checkpoint for " + turbs[i].name + " in '" + dir + "'"); }
             for (const auto& f : m_fllc[i]) { f->write_state(out); }
@@ -258,7 +270,8 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
 }
 
 void
-MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, double time, int finest_level)
+MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const BoxArray& grids, const DistributionMapping& dmap,
+                          double time, int finest_level)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_ground_set, "MovingBodies::set_ground: called twice");
     if (m_anchor > finest_level) {
@@ -293,16 +306,22 @@ MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, doubl
     // a fresh start: the bodies start now (a restart learns when they started from read_checkpoint())
     if (!m_restarting) { start_bodies(time); }
 #ifdef ERF_USE_OPENFAST
+    // each turbine's owner: a rank whose boxes it stands on where that keeps the balance (a restart chooses again, from its own boxes)
+    choose_turbine_owners(geom, grids, dmap);
     // a fresh start: OpenFAST sees the bases on the terrain; a restart is restored by read_checkpoint()
     if (!m_restarting && !m_driver->initialized()) {
         m_driver->init(m_dt, m_openfast_tmax);
-        for (const auto& t : m_driver->turbines()) {
-            Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
-                    << " substeps per ERF step, " << t.num_blades << " blades, "
-                    << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes, on rank "
-                    << t.owner_rank << "\n";
+        for (int i = 0; i < static_cast<int>(m_driver->turbines().size()); ++i) {
+            if (!m_driver->is_owner(i)) { continue; }
+            const auto& t = m_driver->turbines()[i];
+            AllPrint() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
+                       << " substeps per ERF step, " << t.num_blades << " blades, "
+                       << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes, on rank "
+                       << t.owner_rank << "\n";
         }
     }
+#else
+    amrex::ignore_unused(grids, dmap);
 #endif
     if (ParallelDescriptor::IOProcessor()) {
         UtilCreateDirectory(m_in.diagnostics_dir, 0755);
@@ -314,6 +333,143 @@ MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, doubl
         }
     }
 }
+
+#ifdef ERF_USE_OPENFAST
+void
+MovingBodies::choose_turbine_owners (const Geometry& geom, const BoxArray& grids, const DistributionMapping& dmap)
+{
+    const auto& turbs = m_driver->turbines();
+    const int n = static_cast<int>(turbs.size());
+    if (n == 0) {
+        // prescribed-Ct disks only: no turbine to own
+        m_driver->set_owners({});
+        m_exchange = erf_actuator::BodyExchange(std::vector<int>{});
+        return;
+    }
+    // the rotor radius (zero when unknown: the base column alone) and the time step each model's files
+    // give, read once on the I/O rank
+    std::vector<Real> radius(n, Real(0.0)), dt(n, Real(-1.0));
+    if (ParallelDescriptor::IOProcessor()) {
+        for (int i = 0; i < n; ++i) {
+            radius[i] = std::max(erf_openfast::model_rotor_radius(turbs[i].fst_file), Real(0.0));
+            dt[i] = erf_openfast::model_time_step(turbs[i].fst_file);
+        }
+    }
+    ParallelDescriptor::Bcast(radius.data(), n, ParallelDescriptor::IOProcessorNumber());
+    ParallelDescriptor::Bcast(dt.data(), n, ParallelDescriptor::IOProcessorNumber());
+    // each turbine's footprint: the column of cells under its base, widened by its radius and two cells
+    std::vector<Box> footprints;
+    for (int i = 0; i < n; ++i) {
+        const auto& b = turbs[i].base_pos;
+        const Real w = radius[i] + Real(2.0) * static_cast<Real>(std::max(geom.CellSize(0), geom.CellSize(1)));
+        footprints.push_back(erf_actuator::cells_within({{b[0] - w, b[1] - w, b[2]}}, {{b[0] + w, b[1] + w, b[2]}}, geom, 0, true));
+    }
+    const std::vector<int> owners = erf_actuator::choose_owners(footprints, dt, amrex::convert(grids, IntVect::TheZeroVector()), dmap,
+                                                                geom, ParallelDescriptor::NProcs());
+    m_driver->set_owners(owners);
+    m_exchange = erf_actuator::BodyExchange(owners);
+    m_turbine_vel.assign(n, std::vector<Real>());
+    for (int i = 0; i < n; ++i) {
+        // the owner alone accumulates the statistics, so it writes them
+        m_turbine_stats[i].set_writer(owners[i]);
+        std::ostringstream step;
+        if (dt[i] > Real(0.0)) { step << dt[i] << " s"; } else { step << "unknown"; }
+        Print() << "  " << turbs[i].name << ": owned by rank " << owners[i] << " (footprint radius " << radius[i] << " m, OpenFAST dt "
+                << step.str() << ")\n";
+    }
+}
+
+std::vector<Real>
+MovingBodies::turbine_table (int k, bool io_only, const std::function<void(int, Real*)>& fill) const
+{
+    const int n = static_cast<int>(m_driver->turbines().size());
+    std::vector<Real> table(static_cast<std::size_t>(n) * k, Real(0.0));
+    for (int i = 0; i < n; ++i) {
+        if (m_driver->is_owner(i)) { fill(i, &table[static_cast<std::size_t>(i) * k]); }
+    }
+    // one row from one rank each, zeros from the others: the sum is every row exactly
+    if (!table.empty()) {
+        if (io_only) {
+            ParallelDescriptor::ReduceRealSum(table.data(), static_cast<int>(table.size()), ParallelDescriptor::IOProcessorNumber());
+        } else {
+            ParallelDescriptor::ReduceRealSum(table.data(), static_cast<int>(table.size()));
+        }
+    }
+    return table;
+}
+
+bool
+MovingBodies::print_turbine_texts (const std::vector<std::string>& text, const std::vector<int>& fatal) const
+{
+    const int n = static_cast<int>(m_driver->turbines().size());
+    const int io = ParallelDescriptor::IOProcessorNumber();
+    // two tags of the sequence every rank draws from alike
+    const int tag_len = ParallelDescriptor::SeqNum();
+    const int tag_text = ParallelDescriptor::SeqNum();
+    std::vector<std::string> all(text);
+    // each owner sends its turbines' texts to the I/O rank, one message per owner (a start-up audit, once)
+    std::set<int> owners;
+    for (int i = 0; i < n; ++i) { owners.insert(m_driver->turbines()[i].owner_rank); }
+    for (int r : owners) {
+        if (r == io) { continue; }
+        if (ParallelDescriptor::MyProc() == r) {
+            std::string msg;
+            for (int i = 0; i < n; ++i) {
+                if (m_driver->is_owner(i)) { msg += std::to_string(text[i].size()) + " " + text[i]; }
+            }
+            Vector<char> chars(msg.begin(), msg.end());
+            int len = static_cast<int>(chars.size());
+            ParallelDescriptor::Send(&len, 1, io, tag_len);
+            if (len > 0) { ParallelDescriptor::Send(chars.data(), static_cast<std::size_t>(len), io, tag_text); }
+        } else if (ParallelDescriptor::IOProcessor()) {
+            int len = 0;
+            ParallelDescriptor::Recv(&len, 1, r, tag_len);
+            Vector<char> chars(len);
+            if (len > 0) { ParallelDescriptor::Recv(chars.data(), static_cast<std::size_t>(len), r, tag_text); }
+            std::istringstream in(std::string(chars.begin(), chars.end()));
+            for (int i = 0; i < n; ++i) {
+                if (m_driver->turbines()[i].owner_rank != r) { continue; }
+                std::size_t m = 0;
+                in >> m;
+                in.get();   // the space after the length
+                std::string t(m, '\0');
+                in.read(&t[0], static_cast<std::streamsize>(m));
+                all[i] = t;
+            }
+        }
+    }
+    for (int i = 0; i < n; ++i) { Print() << all[i]; }
+    int any = 0;
+    for (int i = 0; i < n; ++i) { if (m_driver->is_owner(i) && fatal[i] != 0) { any = 1; } }
+    ParallelDescriptor::ReduceIntMax(any);
+    return any != 0;
+}
+
+void
+MovingBodies::report_participants ()
+{
+    const auto& turbs = m_driver->turbines();
+    m_reported_participants.resize(turbs.size());
+    for (std::size_t i = 0; i < turbs.size(); ++i) {
+        const std::vector<int>& part = m_exchange.participants(static_cast<int>(i));
+        if (part.empty() || part == m_reported_participants[i]) { continue; }
+        m_reported_participants[i] = part;
+        std::ostringstream line;
+        line << "  " << turbs[i].name << ": owner rank " << turbs[i].owner_rank << " exchanges its points with "
+             << part.size() << " of " << ParallelDescriptor::NProcs() << " ranks (";
+        for (std::size_t k = 0; k < part.size(); ++k) { line << (k > 0 ? " " : "") << part[k]; }
+        line << ")\n";
+        Print() << line.str();
+    }
+}
+
+Real
+MovingBodies::envelope_margin (int i, const Geometry& geom) const
+{
+    const Real dx = static_cast<Real>(std::max(geom.CellSize(0), std::max(geom.CellSize(1), geom.CellSize(2))));
+    return erf_actuator::tip_radius(m_driver->turbines()[i]) + Real(2.0) * dx;
+}
+#endif
 
 void
 MovingBodies::start_bodies (double time)
@@ -514,22 +670,24 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
             Abort("the moving-bodies checkpoint '" + dir + "' has no turbine " + t.name +
                   "; the erf.moving_bodies block must match the run being restarted");
         }
+        // the owner restored the turbine and knows its time index
+        if (t.owner_rank != ParallelDescriptor::MyProc()) { continue; }
         if (it->second != t.time_index) {
             Abort("erf.moving_bodies." + t.name + ": the OpenFAST checkpoint is at time index " +
                   std::to_string(t.time_index) + " but ERF's checkpoint expects " + std::to_string(it->second));
         }
-        Print() << "  " << t.name << ": restored from " << dir << "/" << t.name << ".chkp at OpenFAST time index "
-                << t.time_index << ", " << t.num_substeps << " substeps per ERF step\n";
+        AllPrint() << "  " << t.name << ": restored from " << dir << "/" << t.name << ".chkp at OpenFAST time index "
+                   << t.time_index << ", " << t.num_substeps << " substeps per ERF step, on rank " << t.owner_rank << "\n";
     }
-    // the node loads and velocities ERF checkpointed (a checkpoint from before they were written has none)
+    // the node loads and velocities ERF checkpointed, read by each turbine's owner (a checkpoint from
+    // before they were written has none)
     {
         const auto& turbs = m_driver->turbines();
         for (std::size_t i = 0; i < turbs.size(); ++i) {
+            if (!m_driver->is_owner(static_cast<int>(i))) { continue; }
             const std::string fname = dir + "/" + turbs[i].name + "_nodes.dat";
-            if (!erf_actuator::file_exists_everywhere(fname)) { continue; }
-            Vector<char> chars;
-            ParallelDescriptor::ReadAndBcastFile(fname, chars);
-            std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+            std::ifstream in(fname);
+            if (!in) { continue; }
             std::string key, name;
             int nf = 0, nv = 0;
             if (!(in >> key >> name >> nf >> nv) || key != "nodes" || name != turbs[i].name ||
@@ -665,6 +823,8 @@ MovingBodies::accumulate_statistics (double time)
 #ifdef ERF_USE_OPENFAST
     const auto& turbs = m_driver->turbines();
     for (std::size_t i = 0; i < turbs.size(); ++i) {
+        // the owner alone holds the turbine's loads, so it alone keeps (and writes) its statistics
+        if (!m_driver->is_owner(static_cast<int>(i))) { continue; }
         const auto& t = turbs[i];
         const std::array<Real,3> f = m_driver->thrust(t);
         std::array<Real,3> hub, blade;
@@ -710,17 +870,27 @@ MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_p
                                                                     w.lines_xD, w.half_width, w.num_points, ground));
     };
 #ifdef ERF_USE_OPENFAST
-    for (const auto& t : m_driver->turbines()) {
-        // the rotor diameter from the outermost blade force node
-        Real r2max = 0.0;
-        const int nfb = t.num_blades * t.num_force_pts_blade;
-        for (int nd = 1; nd <= nfb && nd < t.num_force_nodes; ++nd) {
-            Real r2 = 0.0;
-            for (int d = 0; d < 3; ++d) { const Real dd = t.force_pos[3*nd+d] - t.hub_pos[d]; r2 += dd * dd; }
-            r2max = std::max(r2max, r2);
+    {
+        // every rotor's hub, axis and diameter, from its owner (the lines are sampled by every rank, once built)
+        const std::vector<Real> rotor = turbine_table(7, false, [this] (int i, Real* row) {
+            const auto& t = m_driver->turbines()[i];
+            // the rotor diameter from the outermost blade force node
+            Real r2max = 0.0;
+            const int nfb = t.num_blades * t.num_force_pts_blade;
+            for (int nd = 1; nd <= nfb && nd < t.num_force_nodes; ++nd) {
+                Real r2 = 0.0;
+                for (int d = 0; d < 3; ++d) { const Real dd = t.force_pos[3*nd+d] - t.hub_pos[d]; r2 += dd * dd; }
+                r2max = std::max(r2max, r2);
+            }
+            if (!(r2max > 0.0)) { Abort("erf.moving_bodies.wake: " + t.name + " has no blade force nodes to size the wake lines from"); }
+            for (int d = 0; d < 3; ++d) { row[d] = t.hub_pos[d]; row[3+d] = t.hub_axis[d]; }
+            row[6] = Real(2.0) * std::sqrt(r2max);
+        });
+        const auto& turbs = m_driver->turbines();
+        for (std::size_t i = 0; i < turbs.size(); ++i) {
+            const Real* row = &rotor[7*i];
+            add(turbs[i].name, turbs[i].output_root, {{row[0], row[1], row[2]}}, {{row[3], row[4], row[5]}}, row[6]);
         }
-        if (!(r2max > 0.0)) { Abort("erf.moving_bodies.wake: " + t.name + " has no blade force nodes to size the wake lines from"); }
-        add(t.name, t.output_root, t.hub_pos, t.hub_axis, Real(2.0) * std::sqrt(r2max));
     }
 #endif
     for (const auto& d : m_disks) {
@@ -783,22 +953,28 @@ MovingBodies::any_forcing () const
 void
 MovingBodies::write_total_load (double time, bool first)
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
     std::array<Real,3> load{{0.0, 0.0, 0.0}};
     Real power = 0.0;
 #ifdef ERF_USE_OPENFAST
     {
-        const auto& turbs = m_driver->turbines();
-        for (std::size_t i = 0; i < turbs.size(); ++i) {
-            if (m_turbine_mode[i] == "none") { continue; }   // no force in the flow
-            const auto& t = turbs[i];
+        // every turbine's load and power from its owner, summed on the I/O rank in turbine order
+        // (the torque and the rotor speed apart, so that the power is formed as the turbine's own log forms it)
+        const std::vector<Real> rows = turbine_table(5, true, [this] (int i, Real* row) {
+            const auto& t = m_driver->turbines()[i];
             const auto f = m_driver->thrust(t);
             const auto ft = m_driver->tower_force(t);
-            for (int d = 0; d < 3; ++d) { load[d] += f[d] + ft[d] + t.nacelle_force[d]; }
-            power += m_driver->torque(t) * t.rotor_speed;
+            for (int d = 0; d < 3; ++d) { row[d] = f[d] + ft[d] + t.nacelle_force[d]; }
+            row[3] = m_driver->torque(t);
+            row[4] = t.rotor_speed;
+        });
+        for (std::size_t i = 0; i < m_turbine_mode.size(); ++i) {
+            if (m_turbine_mode[i] == "none") { continue; }   // no force in the flow
+            for (int d = 0; d < 3; ++d) { load[d] += rows[5*i+d]; }
+            power += rows[5*i+3] * rows[5*i+4];
         }
     }
 #endif
+    if (!ParallelDescriptor::IOProcessor()) { return; }
     for (const auto& d : m_disks) {
         const auto n = d->normal();
         for (int c = 0; c < 3; ++c) { load[c] += d->thrust() * n[c]; }
@@ -838,25 +1014,30 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                               const MultiFab* detJ_cc, const Geometry& geom)
 {
     const BoxArray ba = amrex::convert(U.boxArray(), IntVect(0,0,0));
-    if (!m_src_defined || m_src_x.boxArray() != amrex::convert(ba, IntVect(1,0,0))) {
+    if (!m_src_defined || m_src_x.boxArray() != amrex::convert(ba, IntVect(1,0,0)) || m_src_x.DistributionMap() != U.DistributionMap()) {
         const DistributionMapping& dm = U.DistributionMap();
         m_src_x.define(amrex::convert(ba, IntVect(1,0,0)), dm, 1, 0);
         m_src_y.define(amrex::convert(ba, IntVect(0,1,0)), dm, 1, 0);
         m_src_z.define(amrex::convert(ba, IntVect(0,0,1)), dm, 1, 0);
         m_src_defined = true;
     }
-    // every point with its own kernel width (m): the points appended since the last call get eps
-    std::vector<Real> pos, force, widths;
-    auto widen = [&pos, &widths] (Real eps) { widths.resize(pos.size() / 3, eps); };
+    m_src_x.setVal(0.0);
+    m_src_y.setVal(0.0);
+    m_src_z.setVal(0.0);
     const Real dx0 = static_cast<Real>(geom.CellSize(0));
 #ifdef ERF_USE_OPENFAST
     // each turbine's loads as actuator-disk rings (mode = adm) or as an actuator line on its
-    // blade nodes (mode = alm); none puts no force in the flow
-    {
+    // blade nodes (mode = alm), built by its owner; none puts no force in the flow
+    const int nturb = static_cast<int>(m_driver->turbines().size());
+    bool any_turbine_force = false;
+    for (const std::string& m : m_turbine_mode) { any_turbine_force = any_turbine_force || (m != "none"); }
+    if (any_turbine_force) {
         const auto& turbs = m_driver->turbines();
         const Real dx_min = std::min(geom.CellSize(0), std::min(geom.CellSize(1), geom.CellSize(2)));
-        for (std::size_t i = 0; i < turbs.size(); ++i) {
-            if (m_turbine_mode[i] == "none") { continue; }
+        std::vector<std::vector<Real>> pos(nturb), force(nturb), widths(nturb);
+        std::vector<Real> margin(nturb, Real(0.0));
+        for (int i = 0; i < nturb; ++i) {
+            if (m_turbine_mode[i] == "none" || !m_driver->is_owner(i)) { continue; }
             if (!m_axis_checked) {
                 const Real s = erf_actuator::max_out_of_plane_sine(turbs[i]);
                 const double deg = std::asin(std::min(s, Real(1.0))) * 180.0 / 3.14159265358979323846;
@@ -866,14 +1047,16 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                           " degrees out of the plane normal to the hub axis; the hub orientation convention does not match this OpenFAST");
                 }
                 const auto& n = turbs[i].hub_axis;
-                Print() << "erf.moving_bodies." << turbs[i].name << ": hub axis (" << n[0] << ", " << n[1] << ", " << n[2]
-                        << "), blade force nodes within " << deg << " degrees of the rotor plane, ";
+                std::ostringstream line;
+                line << "erf.moving_bodies." << turbs[i].name << ": hub axis (" << n[0] << ", " << n[1] << ", " << n[2]
+                     << "), blade force nodes within " << deg << " degrees of the rotor plane, ";
                 if (m_turbine_mode[i] == "adm") {
-                    Print() << m_turbine_points_t[i] << " points per ring\n";
+                    line << m_turbine_points_t[i] << " points per ring\n";
                 } else {
-                    Print() << "actuator line of " << turbs[i].num_blades * turbs[i].num_force_pts_blade
-                            << " blade points, tip radius " << erf_actuator::tip_radius(turbs[i]) << " m\n";
+                    line << "actuator line of " << turbs[i].num_blades * turbs[i].num_force_pts_blade
+                         << " blade points, tip radius " << erf_actuator::tip_radius(turbs[i]) << " m\n";
                 }
+                AllPrint() << line.str();
             }
             if (m_turbine_mode[i] == "alm") {
                 // the line's force must not jump over cells between two steps: the tip, the
@@ -895,19 +1078,27 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
             // them and the user asked for them) and the nacelle drag point at the hub, in either
             // mode, each with its own kernel
             erf_actuator::turbine_points(turbs[i], m_turbine_mode[i], m_turbine_points_t[i], m_turbine_in[i].nacelle_cd > 0.0,
-                                         m_turbine_in[i].kernel_widths(dx0), pos, force, widths);
+                                         m_turbine_in[i].kernel_widths(dx0), pos[i], force[i], widths[i]);
+            margin[i] = envelope_margin(i, geom);
         }
         m_axis_checked = true;
+        // each point onto the faces of the ranks its kernel reaches, normalised over all of them
+        m_exchange.spread_forces(pos, force, widths, margin, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
+        report_participants();
     }
 #endif
-    for (std::size_t k = 0; k < m_disks.size(); ++k) {
-        const auto& p = m_disks[k]->disk_points();
-        const auto& f = m_disks[k]->forces();
-        pos.insert(pos.end(), p.begin(), p.end());
-        force.insert(force.end(), f.begin(), f.end());
-        widen(m_disk_epsilon[k] * dx0);
+    // the prescribed-Ct disks, known on every rank, after the turbines (each with its own width)
+    if (!m_disks.empty()) {
+        std::vector<Real> pos, force, widths;
+        for (std::size_t k = 0; k < m_disks.size(); ++k) {
+            const auto& p = m_disks[k]->disk_points();
+            const auto& f = m_disks[k]->forces();
+            pos.insert(pos.end(), p.begin(), p.end());
+            force.insert(force.end(), f.begin(), f.end());
+            widths.resize(pos.size() / 3, m_disk_epsilon[k] * dx0);
+        }
+        erf_actuator::add_spread_forces(pos, force, widths, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
     }
-    erf_actuator::spread_forces(pos, force, widths, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
 }
 
 void
@@ -956,13 +1147,69 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
                                  const MultiFab* z_phys_nd, const Geometry& geom)
 {
     amrex::ignore_unused(time);
-    // one flattened list: the OpenFAST turbines' velocity nodes, then each disk's upstream
-    // sampling points and disk points
-    m_points.clear();
-    int nturb = 0;
 #ifdef ERF_USE_OPENFAST
-    for (int i = 0; i < static_cast<int>(m_driver->turbines().size()); ++i) { m_points.add_body(sampling_positions(i)); ++nturb; }
+    // the turbines: each owner's points, sampled on the ranks whose boxes hold them
+    const int nturb = static_cast<int>(m_driver->turbines().size());
+    if (nturb > 0) {
+        std::vector<std::vector<Real>> pts(nturb), vel(nturb);
+        std::vector<Real> margin(nturb, Real(0.0));
+        std::vector<int> n_nodes(nturb, 0);
+        for (int i = 0; i < nturb; ++i) {
+            if (!m_driver->is_owner(i)) { continue; }
+            pts[i] = sampling_positions(i);
+            n_nodes[i] = static_cast<int>(pts[i].size() / 3);
+            // with sampling = upstream the nodes are sampled ahead of the rotor, so the nacelle drag needs
+            // the hub itself (the first velocity node), where its drag point is
+            const MovingBodyInputs& b = m_turbine_in[i];
+            if (m_turbine_mode[i] != "none" && b.nacelle_cd > 0.0 && b.sampling == "upstream") {
+                const auto& t = m_driver->turbines()[i];
+                pts[i].insert(pts[i].end(), {t.vel_pos[0], t.vel_pos[1], t.vel_pos[2]});
+            }
+            margin[i] = envelope_margin(i, geom);
+        }
+        if (m_in.has_prescribed_velocity) {
+            for (int i = 0; i < nturb; ++i) {
+                if (!m_driver->is_owner(i)) { continue; }
+                vel[i].resize(pts[i].size());
+                for (std::size_t p = 0; p < vel[i].size() / 3; ++p) {
+                    for (int c = 0; c < 3; ++c) { vel[i][3*p+c] = m_in.prescribed_velocity[c]; }
+                }
+            }
+            amrex::ignore_unused(U, V, W, z_phys_nd);
+        } else {
+            m_exchange.sample_velocity(U, V, W, z_phys_nd, geom, pts, margin, vel);
+            report_participants();
+        }
+        if (!m_fllc_built) { build_fllc(geom); }
+        for (int i = 0; i < nturb; ++i) {
+            if (!m_driver->is_owner(i)) { continue; }
+            m_turbine_vel[i].assign(vel[i].begin(), vel[i].begin() + 3 * n_nodes[i]);
+            {
+                std::vector<Real> uvw = m_turbine_vel[i];
+                if (m_turbine_in[i].sampling == "disk_corrected") { apply_disk_correction(i, uvw, geom); }
+                if (!m_fllc[i].empty()) { apply_fllc(i, time, uvw); }
+                m_driver->set_node_velocities(i, uvw);
+            }
+            // the nacelle drag from the velocity at the hub (the first velocity node, or the point added for
+            // it), corrected for the drag point's own kernel; recorded on the structure for the diagnostics
+            const MovingBodyInputs& b = m_turbine_in[i];
+            std::array<Real,3> f_nac{{0.0, 0.0, 0.0}};
+            if (m_turbine_mode[i] != "none" && b.nacelle_cd > 0.0) {
+                const std::size_t h = (b.sampling == "upstream") ? 3 * static_cast<std::size_t>(n_nodes[i]) : 0;
+                if (vel[i].size() >= h + 3) {
+                    const std::array<Real,3> u_hub{{vel[i][h], vel[i][h+1], vel[i][h+2]}};
+                    const Real eps = b.kernel_widths(static_cast<Real>(geom.CellSize(0))).nacelle;
+                    const auto u_free = erf_actuator::nacelle_corrected_velocity(u_hub, b.nacelle_cd, b.nacelle_area, eps);
+                    const auto f_fluid = erf_actuator::nacelle_drag_force(u_free, b.air_density, b.nacelle_cd, b.nacelle_area);
+                    for (int d = 0; d < 3; ++d) { f_nac[d] = -f_fluid[d]; }
+                }
+            }
+            m_driver->set_nacelle_force(i, f_nac);
+        }
+    }
 #endif
+    // the prescribed-Ct disks, known on every rank: each disk's upstream sampling points and disk points
+    m_points.clear();
     for (const auto& d : m_disks) {
         m_points.add_body(d->sample_points());
         m_points.add_body(d->disk_points());
@@ -976,44 +1223,8 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
     } else if (m_points.num_points() > 0) {
         erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, m_points.positions(), m_points.velocities());
     }
-#ifdef ERF_USE_OPENFAST
-    if (!m_fllc_built) { build_fllc(geom); }
-    for (int i = 0; i < nturb; ++i) {
-        {
-            std::vector<Real> uvw = m_points.body_velocities(i);
-            if (m_turbine_in[i].sampling == "disk_corrected") { apply_disk_correction(i, uvw, geom); }
-            if (!m_fllc[i].empty()) { apply_fllc(i, time, uvw); }
-            m_driver->set_node_velocities(i, uvw);
-        }
-        // the nacelle drag from the velocity at the hub (the first velocity node), corrected for the
-        // drag point's own kernel; recorded on the structure for the diagnostics. With sampling = upstream
-        // the nodes were sampled ahead of the rotor, so the hub is sampled where the drag point is.
-        const MovingBodyInputs& b = m_turbine_in[i];
-        std::array<Real,3> f_nac{{0.0, 0.0, 0.0}};
-        if (m_turbine_mode[i] != "none" && b.nacelle_cd > 0.0) {
-            std::vector<Real> uvw = m_points.body_velocities(i);
-            if (b.sampling == "upstream") {
-                const auto& t = m_driver->turbines()[i];
-                const std::vector<Real> hub{t.vel_pos[0], t.vel_pos[1], t.vel_pos[2]};
-                if (m_in.has_prescribed_velocity) {
-                    uvw = {m_in.prescribed_velocity[0], m_in.prescribed_velocity[1], m_in.prescribed_velocity[2]};
-                } else {
-                    erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, hub, uvw);
-                }
-            }
-            if (uvw.size() >= 3) {
-                const std::array<Real,3> u_hub{{uvw[0], uvw[1], uvw[2]}};
-                const Real eps = b.kernel_widths(static_cast<Real>(geom.CellSize(0))).nacelle;
-                const auto u_free = erf_actuator::nacelle_corrected_velocity(u_hub, b.nacelle_cd, b.nacelle_area, eps);
-                const auto f_fluid = erf_actuator::nacelle_drag_force(u_free, b.air_density, b.nacelle_cd, b.nacelle_area);
-                for (int d = 0; d < 3; ++d) { f_nac[d] = -f_fluid[d]; }
-            }
-        }
-        m_driver->set_nacelle_force(i, f_nac);
-    }
-#endif
     for (std::size_t k = 0; k < m_disks.size(); ++k) {
-        const int b = nturb + 2 * static_cast<int>(k);
+        const int b = 2 * static_cast<int>(k);
         m_disks[k]->update(m_points.body_velocities(b), m_points.body_velocities(b + 1));
     }
 }
@@ -1034,6 +1245,8 @@ MovingBodies::check_levels (int finest_level, const Vector<BoxArray>& grids, con
     std::vector<std::pair<std::string, std::array<Real,4>>> extents;
 #ifdef ERF_USE_OPENFAST
     for (int i = 0; i < static_cast<int>(m_driver->turbines().size()); ++i) {
+        // a turbine's points are known to its owner alone, which checks them
+        if (!m_driver->is_owner(i)) { continue; }
         const auto& t = m_driver->turbines()[i];
         // the widths in cells, so each reach is (3 eps) dx + dx as for one shared width
         const Real reach = Real(3.0) * m_turbine_in[i].kernel_widths(1.0).rotor * dxa + dxa;
@@ -1104,6 +1317,8 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
     // the sampler and spreader read only the level's own cells
     const auto& turbs = m_driver->turbines();
     for (int i = 0; i < static_cast<int>(turbs.size()); ++i) {
+        // a turbine's points are known to its owner alone, which checks them
+        if (!m_driver->is_owner(i)) { continue; }
         const auto& t = turbs[i];
         const Real reach = Real(3.0) * m_turbine_in[i].kernel_widths(dx0).rotor + dx0;
         // the swept disk: rings at half and the full tip radius in the plane normal to the shaft
@@ -1206,7 +1421,7 @@ MovingBodies::apply_disk_correction (int i, std::vector<Real>& uvw, const Geomet
     }
     if (c.clamped && !m_corr_clamp_warned[i]) {
         m_corr_clamp_warned[i] = true;
-        Print() << "Warning: erf.moving_bodies." << t.name << ": the thrust coefficient on the corrected free stream reached the "
+        AllPrint() << "Warning: erf.moving_bodies." << t.name << ": the thrust coefficient on the corrected free stream reached the "
                 << "0.96 clamp (the rotor's own Ct, at fixed speed below rated, waked or at high tip-speed ratio, or an update "
                 << "that has not settled); the free stream recovered there is biased low\n";
     }
@@ -1222,12 +1437,13 @@ MovingBodies::apply_disk_correction (int i, std::vector<Real>& uvw, const Geomet
 void
 MovingBodies::write_correction_diagnostics (double time, bool first)
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
     const auto& turbs = m_driver->turbines();
     bool any = false;
     for (std::size_t i = 0; i < turbs.size(); ++i) {
         if (m_turbine_in[i].sampling != "disk_corrected") { continue; }
         any = true;
+        // the owner made the correction and writes its log
+        if (!m_driver->is_owner(static_cast<int>(i))) { continue; }
         const erf_actuator::DiskCorrection& c = m_corr_last[i];
         std::ofstream out;
         const bool truncate = first && !m_resumed && !m_corr_written;
@@ -1243,8 +1459,11 @@ MovingBodies::write_correction_diagnostics (double time, bool first)
 std::vector<Real>
 MovingBodies::hub_ground (const MultiFab* z_phys_nd, const Geometry& geom) const
 {
-    std::vector<Real> pos, ground;
-    for (const auto& t : m_driver->turbines()) { pos.insert(pos.end(), {t.hub_pos[0], t.hub_pos[1], t.hub_pos[2]}); }
+    // every hub from its owner, then the terrain under them all (a collective)
+    const std::vector<Real> pos = turbine_table(3, false, [this] (int i, Real* row) {
+        for (int d = 0; d < 3; ++d) { row[d] = m_driver->turbines()[i].hub_pos[d]; }
+    });
+    std::vector<Real> ground;
     erf_actuator::terrain_heights(z_phys_nd, geom, pos, ground);
     return ground;
 }
@@ -1254,7 +1473,8 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
 {
     m_audited_setup = true;
     const auto& turbs = m_driver->turbines();
-    if (turbs.empty()) { return; }
+    const int nturb = static_cast<int>(turbs.size());
+    if (nturb == 0) { return; }
     std::array<Real,3> plo, phi, dx;
     std::array<int,3> per;
     for (int d = 0; d < 3; ++d) {
@@ -1262,17 +1482,22 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
         dx[d] = static_cast<Real>(geom.CellSize(d)); per[d] = geom.isPeriodic(d) ? 1 : 0;
     }
     const std::vector<Real> ground = hub_ground(z_phys_nd, geom);
-    bool any_fatal = false;
-    for (std::size_t i = 0; i < turbs.size(); ++i) {
+    // each owner audits its turbines; the I/O rank prints the reports in turbine order
+    std::vector<std::string> text(nturb);
+    std::vector<int> fatal(nturb, 0);
+    for (int i = 0; i < nturb; ++i) {
+        if (!m_driver->is_owner(i)) { continue; }
         const MovingBodyInputs& b = m_turbine_in[i];
         const KernelWidths w = b.kernel_widths(static_cast<Real>(geom.CellSize(0)));
         const Real eps = w.rotor;
         if (b.sampling == "disk_corrected") {
             // the filtered-disk factor was derived for filter widths up to about 1.25 rotor radii
             const Real ratio = erf_actuator::filter_width_from_eps(eps) / erf_actuator::tip_radius(turbs[i]);
-            Print() << "erf.moving_bodies." << turbs[i].name << ": disk_corrected sampling, filter width sqrt(6) eps = "
-                    << erf_actuator::filter_width_from_eps(eps) << " m, " << ratio << " rotor radii\n";
-            if (ratio > Real(1.25) && ParallelDescriptor::IOProcessor()) {
+            std::ostringstream line;
+            line << "erf.moving_bodies." << turbs[i].name << ": disk_corrected sampling, filter width sqrt(6) eps = "
+                 << erf_actuator::filter_width_from_eps(eps) << " m, " << ratio << " rotor radii\n";
+            text[i] += line.str();
+            if (ratio > Real(1.25)) {
                 Warning("erf.moving_bodies." + turbs[i].name + ": the filter width is " + std::to_string(ratio) +
                         " rotor radii; the filtered-disk correction was derived for widths up to about 1.25 radii");
             }
@@ -1280,10 +1505,31 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
         std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(b, CONST_GRAV);
         const auto fg = erf_openfast::audit_geometry(turbs[i], b, w, plo, phi, dx, per, ground[i]);
         f.insert(f.end(), fg.begin(), fg.end());
-        erf_openfast::report_audit(turbs[i].name + " (model and geometry)", f, any_fatal);
+        bool bad = false;
+        text[i] += erf_openfast::format_audit(turbs[i].name + " (model and geometry)", f, bad);
+        fatal[i] = bad ? 1 : 0;
     }
-    const auto overlap = erf_openfast::audit_overlap(turbs);
-    if (!overlap.empty()) { erf_openfast::report_audit("the farm", overlap, any_fatal); }
+    bool any_fatal = print_turbine_texts(text, fatal);
+    // the swept discs of every pair: each rotor's hub, axis and tip radius from its owner, audited on the I/O rank
+    const std::vector<Real> disc = turbine_table(7, true, [this] (int i, Real* row) {
+        const auto& t = m_driver->turbines()[i];
+        for (int d = 0; d < 3; ++d) { row[d] = t.hub_pos[d]; row[3+d] = t.hub_axis[d]; }
+        row[6] = erf_actuator::tip_radius(t);
+    });
+    int overlap_fatal = 0;
+    if (ParallelDescriptor::IOProcessor()) {
+        std::vector<erf_openfast::RotorDisc> discs;
+        for (int i = 0; i < nturb; ++i) {
+            const Real* r = &disc[7 * static_cast<std::size_t>(i)];
+            discs.push_back({turbs[i].name, {{r[0], r[1], r[2]}}, {{r[3], r[4], r[5]}}, r[6]});
+        }
+        const auto overlap = erf_openfast::audit_overlap(discs);
+        bool bad = false;
+        if (!overlap.empty()) { erf_openfast::report_audit("the farm", overlap, bad); }
+        overlap_fatal = bad ? 1 : 0;
+    }
+    ParallelDescriptor::ReduceIntMax(overlap_fatal);
+    any_fatal = any_fatal || (overlap_fatal != 0);
     if (any_fatal) {
         Abort("erf.moving_bodies: the OpenFAST input audit found errors (listed above); fix them (mode = none clears only "
               "the CompAero finding: a turbine whose loads are not wanted in the flow)");
@@ -1295,13 +1541,18 @@ MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_
 {
     m_audited_flow = true;
     const auto& turbs = m_driver->turbines();
-    if (turbs.empty()) { return; }
-    // ERF's density at every hub
-    std::vector<Real> hubs, rho_hub;
-    for (const auto& t : turbs) { for (int d = 0; d < 3; ++d) { hubs.push_back(t.hub_pos[d]); } }
+    const int nturb = static_cast<int>(turbs.size());
+    if (nturb == 0) { return; }
+    // ERF's density at every hub (each hub from its owner, sampled by every rank alike: once, at start-up)
+    const std::vector<Real> hubs = turbine_table(3, false, [this] (int i, Real* row) {
+        for (int d = 0; d < 3; ++d) { row[d] = m_driver->turbines()[i].hub_pos[d]; }
+    });
+    std::vector<Real> rho_hub;
     erf_actuator::sample_cell_scalar(cons, Rho_comp, z_phys_nd, geom, hubs, rho_hub);
-    bool any_fatal = false;
-    for (std::size_t i = 0; i < turbs.size(); ++i) {
+    std::vector<std::string> text(nturb);
+    std::vector<int> fatal(nturb, 0);
+    for (int i = 0; i < nturb; ++i) {
+        if (!m_driver->is_owner(i)) { continue; }
         const MovingBodyInputs& b = m_turbine_in[i];
         std::vector<erf_openfast::AuditFinding> f;
         Real rho_model = 0.0;
@@ -1314,14 +1565,17 @@ MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_
         } else {
             f.push_back({false, "ERF's density at the hub is " + std::to_string(rho_hub[i]) + " kg/m^3; the model gives none to compare with"});
         }
-        const std::vector<Real>& uvw = m_points.body_velocities(static_cast<int>(i));
+        // the velocity sampled at the hub (the first point) before any correction
+        const std::vector<Real>& uvw = m_turbine_vel[i];
         if (uvw.size() >= 3) {
             const auto ff = erf_openfast::audit_facing(turbs[i], {{uvw[0], uvw[1], uvw[2]}});
             f.insert(f.end(), ff.begin(), ff.end());
         }
-        erf_openfast::report_audit(turbs[i].name + " (density and wind)", f, any_fatal);
+        bool bad = false;
+        text[i] = erf_openfast::format_audit(turbs[i].name + " (density and wind)", f, bad);
+        fatal[i] = bad ? 1 : 0;
     }
-    if (any_fatal) {
+    if (print_turbine_texts(text, fatal)) {
         Abort("erf.moving_bodies: the OpenFAST input audit found errors (listed above); fix them (mode = none clears only "
               "the CompAero finding: a turbine whose loads are not wanted in the flow)");
     }
@@ -1345,7 +1599,8 @@ MovingBodies::build_fllc (const Geometry& geom)
     m_fllc.resize(turbs.size());
     for (std::size_t i = 0; i < turbs.size(); ++i) {
         const MovingBodyInputs& b = m_turbine_in[i];
-        if (!b.fllc) { continue; }
+        // the owner corrects the velocities it hands OpenFAST; the other ranks keep no correction
+        if (!b.fllc || !m_driver->is_owner(static_cast<int>(i))) { continue; }
         // the blades' own kernel: the correction is for the width the line is spread with
         const Real eps = b.kernel_widths(static_cast<Real>(geom.CellSize(0))).rotor;
         const auto& t = turbs[i];
@@ -1367,20 +1622,19 @@ MovingBodies::build_fllc (const Geometry& geom)
                                                                       b.fllc_eps_chord, b.fllc_eps_dr, b.fllc_relax));
         }
         if (!m_fllc_state_dir.empty()) {
+            // read by the owner alone (the file is the turbine's own)
             const std::string fname = m_fllc_state_dir + "/" + t.name + "_fllc.dat";
-            if (erf_actuator::file_exists_everywhere(fname)) {
-                Vector<char> chars;
-                ParallelDescriptor::ReadAndBcastFile(fname, chars);
-                std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+            std::ifstream in(fname);
+            if (in) {
                 for (auto& f : m_fllc[i]) {
                     if (!f->read_state(in)) { Abort("the lifting-line correction checkpoint '" + fname + "' lacks " + f->name()); }
                 }
-                Print() << "  " << t.name << ": lifting-line correction restored from " << fname << "\n";
+                AllPrint() << "  " << t.name << ": lifting-line correction restored from " << fname << "\n";
             }
         }
-        Print() << "erf.moving_bodies." << t.name << ": lifting-line correction on " << t.num_blades << " blades, kernel "
-                << eps << " m, optimal kernel " << b.fllc_eps_chord * t.chord[1 + nfb - 1] << " m at the tip, "
-                << m_fllc[i].front()->num_fine_points() << " fine points per blade\n";
+        AllPrint() << "erf.moving_bodies." << t.name << ": lifting-line correction on " << t.num_blades << " blades, kernel "
+                   << eps << " m, optimal kernel " << b.fllc_eps_chord * t.chord[1 + nfb - 1] << " m at the tip, "
+                   << m_fllc[i].front()->num_fine_points() << " fine points per blade\n";
     }
     m_fllc_built = true;
 }
@@ -1430,9 +1684,9 @@ MovingBodies::apply_fllc (int i, double time, std::vector<Real>& uvw)
 void
 MovingBodies::write_fllc_diagnostics (double time, bool first)
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
     const auto& turbs = m_driver->turbines();
     for (std::size_t i = 0; i < m_fllc.size(); ++i) {
+        // built on the owner alone, which writes the log
         if (m_fllc[i].empty()) { continue; }
         Real du_max = 0.0, sum2 = 0.0;
         for (const auto& f : m_fllc[i]) {

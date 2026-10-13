@@ -384,6 +384,7 @@ function(build_erf_lib erf_lib_name)
       ${SRC_DIR}/MovingBodies/ERF_MovingBodiesInputs.cpp
       ${SRC_DIR}/MovingBodies/Core/ERF_ActuatorSampling.cpp
       ${SRC_DIR}/MovingBodies/Core/ERF_ActuatorSpreading.cpp
+      ${SRC_DIR}/MovingBodies/Core/ERF_BodyExchange.cpp
       ${SRC_DIR}/MovingBodies/Core/ERF_WakeLines.cpp
       ${SRC_DIR}/MovingBodies/ForceModels/ERF_PrescribedCtDisk.cpp
       ${SRC_DIR}/MovingBodies/ForceModels/ERF_FLLC.cpp

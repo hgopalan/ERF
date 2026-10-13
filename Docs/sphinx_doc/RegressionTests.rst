@@ -655,10 +655,16 @@ induction sets the loads (with OpenFAST this mode requires ``Wake_Mod = 1``).
 The shifted sampling points are covered like the nodes; the rings and the
 spreading are unchanged, so the same three checks apply, and
 ``OpenFASTADM_Upstream_BoxParity`` is its one-box-versus-split twin.
+``OpenFAST_ADM_UpstreamNacelle`` adds a nacelle drag point, whose drag needs the
+velocity at the hub rather than ahead of it: the turbine's owner samples the hub
+as one more point. The plotfile and the nacelle column of ``T1_erf.csv`` match
+golds made by the code that sampled the hub separately on every rank, and the
+integrated source equals minus the load with the nacelle's drag.
 
-Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_UpstreamNacelle`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_UpstreamNacelle`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_UpstreamNacelle
 
 ``OpenFAST_ADM_DiskCorrected`` runs the same deck with ``sampling = disk_corrected``:
 the velocities are sampled at the disk, and the free stream handed to the stub is
@@ -670,7 +676,10 @@ the range the factor was derived for. The same three checks apply;
 ``OpenFASTADM_DiskCorrected_BoxParity`` is the one-box-versus-split twin, and
 ``OpenFAST_ADM_DiskCorrected_Restart`` runs it straight to step 10 and again
 through a checkpoint at step 5, requiring the plotfiles and every log to agree:
-the recovered free stream is part of the moving-bodies checkpoint. Since the
+the recovered free stream is part of the moving-bodies checkpoint. Its boxes are
+20 cells long in x (``amr.max_grid_size_x = 24``), so the turbine is owned by
+rank 1 and the free stream reaches
+the checkpoint's state file, which the I/O rank writes, from another rank. Since the
 relaxation of the update became the default, this deck's golds (and those of
 the other decks that run ``disk_corrected``) hold the relaxed update;
 ``OpenFAST_ADM_DiskCorrected_OldUpdate`` runs the deck with
@@ -741,7 +750,10 @@ source still equals minus the thrust in every row (the correction changes the
 velocities the blades see, not the force identity).
 ``OpenFAST_ALM_FLLC_Restart`` checkpoints that case at step 5 and restarts to
 step 10: the relaxed correction comes back from the checkpoint, so the
-plotfile and the correction log must equal the straight run's exactly.
+plotfile and the correction log must equal the straight run's exactly. With
+three 20-cell boxes in x (``amr.max_grid_size_x = 24``) the turbine is owned by
+rank 1, which writes the correction's and
+the node loads' checkpoint files and reads them back.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_ComponentWidths`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`_
 
@@ -778,9 +790,27 @@ integrated momentum source must equal minus the farm's total load
 (``load_x`` in ``moving_bodies/total_load.csv``) in every row; the downstream
 turbine's sampled flow log ``T2_flow.csv`` and the plotfile are the golds.
 ``OpenFASTADM_TwoTurbines_BoxParity`` runs the farm on one rank (both turbines
-on rank 0) against two ranks with the domain split (one turbine per rank) and
-requires the plotfiles and ``T2_flow.csv`` to agree, so the ownership does
-not change the answer.
+on rank 0) against two ranks with the domain cut into three 20-cell boxes in x
+(``amr.max_grid_size_x = 24``; the first turbine on rank 0, the second on
+rank 1) and requires the plotfiles and the
+second turbine's flow, turbine, statistics and correction logs, and the farm's
+``total_load.csv``, to agree, so the ownership changes neither the answer nor
+what the owners write and the I/O rank gathers.
+
+Which rank owns which turbine is checked by ``MovingBodies_Owners_*``: each runs
+a deck for one step on two ranks and requires it to end normally with the
+owners the tests above rely on. With three 20-cell boxes in x
+(``amr.max_grid_size_x = 24``) rank 1 owns the first turbine (``_TwoTurbines``,
+``_FLLC``, ``_DiskCorrected``) and, with the box-parity test's split, the second
+(``_BoxParity``); with the default two 30-cell boxes both bases stand on rank
+0's box, and the second turbine still goes to rank 1, which owns none
+(``_Balanced``), as dealing them out would.
+``MovingBodies_MixedTimeSteps_TwoRanks`` adds a third turbine behind the two
+and gives the second a model that steps with ``dt = 0.02`` instead of 0.01: on
+two ranks the second gets a rank of its own and the third joins the first,
+where balance alone would have put it with the second; the run proceeds. On
+one rank (``MovingBodies_MixedTimeSteps_OneRank``) two time steps cannot be
+kept apart and the run stops, naming the two substep counts.
 
 ``OpenFAST_ADM_TwoWidths`` is that farm with a kernel width per turbine (T1
 2 cells, T2 1 cell, which also sets T2's filtered-disk correction): the same
@@ -894,8 +924,14 @@ same restart-parity check (with ``OVERRUN``) for the prescribed-Ct disk, asking
 for a later stop time on restart, which a run without turbines may do, and
 ``MovingBodies_Restart_ChangedDiskDensity`` requires a changed ``air_density`` to
 stop the restart. ``OpenFAST_ADM_TwoTurbines_Restart`` restarts the two-turbine
-farm on two ranks, so the second turbine's logs are written by rank 1 while the
-I/O rank trims them, and requires every turbine's logs to match.
+farm on two ranks with three 20-cell boxes in x (``amr.max_grid_size_x = 24``),
+so the first turbine's logs and checkpoint
+files are written by rank 1 while the I/O rank trims the logs, and requires every
+turbine's logs to match. ``OpenFAST_ADM_TwoTurbines_RestartOnOneRank``
+checkpoints the same farm on two ranks and restarts it on one, which then owns
+both turbines and reads the files rank 1 wrote; plotfile and logs must agree
+with the straight run to the roundoff of the FFT solution on another rank count
+(the plotfile to the default tolerances, the logs to 8 digits).
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart`_
 

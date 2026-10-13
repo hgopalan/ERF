@@ -2162,7 +2162,7 @@ ERF::ReadCheckpointFile ()
     if (moving_bodies) {
         const int lev = moving_bodies->anchor_level();
         moving_bodies->set_ground((lev <= finest_level) ? z_phys_nd[lev].get() : nullptr, Geom(std::min(lev, finest_level)),
-                                  t_new[0], finest_level);
+                                  grids[std::min(lev, finest_level)], dmap[std::min(lev, finest_level)], t_new[0], finest_level);
         moving_bodies->read_checkpoint(restart_chkfile, t_new[0]);
     }
 #endif
