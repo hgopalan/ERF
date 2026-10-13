@@ -1,4 +1,5 @@
 #include <ERF_FireCoupler.H>
+#include <ERF_FireEngineTemplate.H>
 #include <ERF_FireAtmCoupling.H>
 #include <ERF_FirePrerequisites.H>
 #include <ERF_FirePrecip.H>
@@ -11,9 +12,16 @@
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_Utility.H>
 #include <sstream>
+#include <type_traits>
 #include <utility>
 
 using namespace amrex;
+
+// The template for new engines declares every method FireEngine requires: a
+// method added to the interface and missing there makes the template abstract.
+// Compile time only; no FireEngineTemplate is ever created.
+static_assert(!std::is_abstract_v<FireEngineTemplate>,
+              "ERF_FireEngineTemplate.H must declare every pure virtual method of FireEngine");
 
 namespace {
 

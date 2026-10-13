@@ -56,6 +56,34 @@ the same for every engine, except that :cpp:`erf.fire.heat_open_fraction`
 needs the engine to report which part of each column its structures block;
 the native engine does, from its structure map.
 
+Adding a fire engine
+~~~~~~~~~~~~~~~~~~~~
+
+``Source/FireCoupling/ERF_FireEngineTemplate.H`` is the starting point for a
+new fire model. It declares every method a fire engine provides, each with a
+comment on what ERF hands it, what ERF expects back and when it is called. It
+holds declarations only: nothing in it has a body, no input selects it and
+nothing creates one, so it adds no code to a run. ``ERF_FireCoupler.cpp``
+checks at compile time that it still declares every method ``FireEngine``
+requires, so the template follows the interface as the interface changes.
+
+To add an engine:
+
+#. Copy the template into the new model's own folder, rename the class, and
+   write the method bodies in a ``.cpp`` file there.
+#. Read the model's inputs under its own prefix (``erf.fire.<engine>.*``),
+   so they never mix with another engine's keys.
+#. Add the engine's name to the names :cpp:`erf.fire.engine` accepts, and a
+   branch that creates the engine to the selector in ``ERF::initializeFire``.
+#. Run the ``FireCoupler`` unit tests (``Tests/Unit/Fire/ERF_GTestFireCoupler.cpp``,
+   whose stand-in engine is the smallest engine that works) and the coupled
+   restart check ``Exec/RegTests/FireRestart/run_coupled_restart.sh`` with
+   the new engine.
+
+The engine owns its fire physics and its own state, including its checkpoint
+and plotfile; the coupling layer does the rest, as described above. The
+native engine (``Source/Fire``, ``FireLayer``) is the complete example.
+
 Wind extraction
 ---------------
 

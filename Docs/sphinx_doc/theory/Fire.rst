@@ -242,6 +242,7 @@ The fire sources are in two folders (:ref:`sec:FireCoupling`).
 ``Source/FireCoupling`` holds the atmosphere side, shared by every fire
 engine: ``ERF_FireCoupler`` (the coupling and its call order),
 ``ERF_FireEngine.H`` (the interface an engine implements),
+``ERF_FireEngineTemplate.H`` (declarations only: the starting point for a new engine),
 ``ERF_FireCouplingParams.H`` (the coupling inputs), ``ERF_FireGrid``,
 ``ERF_FirePrerequisites`` (the start-up checks of the mesh),
 ``ERF_FireWindExtract`` and ``ERF_FireSurfaceHeight`` (the wind sampler and
