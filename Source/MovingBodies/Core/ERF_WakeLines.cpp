@@ -111,7 +111,7 @@ WakeLines::write_rows (std::ofstream& out, const std::vector<Real>& vel, const s
 void
 WakeLines::write_instantaneous (double time, const std::vector<Real>& vel, bool truncate) const
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
+    if (ParallelDescriptor::MyProc() != m_writer) { return; }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(vel.size() == m_pos.size(), "WakeLines::write_instantaneous: one velocity per point");
     std::ofstream out;
     if (open_log(out, m_output_root + "_wake.csv", truncate)) {
@@ -126,7 +126,7 @@ WakeLines::write_instantaneous (double time, const std::vector<Real>& vel, bool 
 void
 WakeLines::write_average () const
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
+    if (ParallelDescriptor::MyProc() != m_writer) { return; }
     std::ofstream out;
     open_log(out, m_output_root + "_wake_avg.csv", true);
     out << "samples,xD,line,s,x,y,z,u,v,w\n" << std::setprecision(10);
@@ -136,7 +136,7 @@ WakeLines::write_average () const
 void
 WakeLines::write_state (const std::string& dir) const
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
+    if (ParallelDescriptor::MyProc() != m_writer) { return; }
     std::ofstream out(dir + "/" + m_name + "_wake_avg.dat", std::ios::trunc);
     if (!out) { Abort("cannot write the wake-average checkpoint for " + m_name + " in '" + dir + "'"); }
     out << std::setprecision(17) << "count = " << m_count << "\nsize = " << m_sum.size() << "\n"

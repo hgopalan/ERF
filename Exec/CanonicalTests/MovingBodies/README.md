@@ -24,7 +24,7 @@ terrain file of `../Real_Terrain/Askervein`, both copied next to the deck by the
 | --- | --- | --- | --- |
 | `OpenFAST_DriverOnly` | stub turbine, `mode = none` | `RunOpenFASTADM.cmake` | the flow is unchanged (the gold is the deck run without bodies); the turbine log matches its gold; no momentum source is written |
 | `Actuator_Sampling` | stub turbine, `mode = none` | `RunActuatorSampling.cmake` | sampled velocities at the nodes against the analytic shear |
-| `Actuator_UniformCtDisk` | prescribed-Ct disk | `RunCtDisk.cmake`, `RunRestartParity.cmake` | plotfile and disk log against their golds; the disk's force integrates back exactly; restart parity with a later stop time; a changed `air_density` stops a restart |
+| `Actuator_UniformCtDisk` | prescribed-Ct disk | `RunCtDisk.cmake`, `RunRestartParity.cmake` | plotfile and disk log against their golds; the disk's force integrates back exactly; restart parity with a later stop time; a changed `air_density` stops a restart; with wake lines, ownership parity (one box against the disk owned by rank 1) and restart parity with the disk on rank 1, on two ranks and from two ranks to one |
 | `OpenFAST_ADM_Uniform` | stub turbine, disk | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
 | `OpenFAST_ADM_Upstream` | stub turbine, disk, velocities sampled 1 D upstream | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
 | `OpenFAST_ADM_Terrain` | stub turbine, disk, on a Witch-of-Agnesi ridge (fitted mesh) | `RunOpenFASTADM.cmake` | ground heights log, plotfile, `fx == -thrust_x` |
@@ -36,7 +36,7 @@ terrain file of `../Real_Terrain/Askervein`, both copied next to the deck by the
 | `OpenFAST_ADM_CPM` | stub turbine, disk, cell perturbations | `RunOpenFASTADM.cmake` | turbulent inflow from the perturbation method; statistics |
 | `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity (one rank against two, with T2 owned by rank 1); restart parity on two ranks, with T1's logs and checkpoint files written by rank 1; restart on one rank from a two-rank checkpoint |
 | `OpenFAST_ADM_TwoWidths` | two stub turbines, disks, a kernel width each | `RunOpenFASTADM.cmake` | plotfile, T2's flow log, `fx == -load_x` |
-| `OpenFAST_ADM_DiskAndTurbine` | stub turbine (disk, 2 cells) and a prescribed-Ct disk (1 cell) | `RunOpenFASTADM.cmake` | the disk's log, `fx == -load_x` of both bodies |
+| `OpenFAST_ADM_DiskAndTurbine` | stub turbine (disk, 2 cells) and a prescribed-Ct disk (1 cell) | `RunOpenFASTADM.cmake` | the disk's log, `fx == -load_x` of both bodies; with the two swapped, ownership parity with the disk on rank 1 (`total_load.csv` gathered from it) |
 | `OpenFAST_ADM_TwoLevel` | stub turbine, disk, on level 1 of two | `RunOpenFASTADM.cmake` | the anchor level: sampled and forced on the fine patch, stepped with its step |
 | `OpenFAST_ADM_TwoLevel_Restart` | as above | `RunRestartParity.cmake` | restart parity with the fine level, every log |
 | `OpenFAST_ALM_Uniform` | stub turbine, line | `RunOpenFASTADM.cmake` | the rotating line; tip-travel limit |
@@ -61,8 +61,8 @@ bodies, floating-point traps with a turbine, an out-of-range
 than `alm_max_tip_cells` allows, a nacelle kernel too narrow for its drag area (correction factor under 0.5),
 a tower width given without a tower, and two turbines of different OpenFAST time steps on one rank
 (`MovingBodies_MixedTimeSteps_OneRank`). `MovingBodies_Owners_*` and `MovingBodies_MixedTimeSteps_TwoRanks`
-run a deck for one step on two ranks and require it to end normally with the turbines on the ranks the
-restart and box-parity tests rely on, and turbines of different OpenFAST time steps on different ranks
+run a deck for one step on two ranks and require it to end normally with the turbines and disks on the ranks the
+restart and box-parity tests rely on (and the ranks their points and wake lines reach), and turbines of different OpenFAST time steps on different ranks
 (`Tests/RunExpectExit.cmake`). `OpenFAST_ADM_TwoTurbines/stub_turbine_dt002.fst` is the stub deck with
 `dt = 0.02` those tests give the second turbine. `MovingBodies_StopDatetime` runs `OpenFAST_ADM_Restart` to
 a `stop_datetime` past the deck's `stop_time` and requires it to get there.

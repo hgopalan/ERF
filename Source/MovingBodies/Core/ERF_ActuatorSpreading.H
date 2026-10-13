@@ -57,8 +57,8 @@ void spread_forces (const std::vector<amrex::Real>& pos,
 
 /**
  * The same, but added to what the sources hold (spread_forces() sets them): for several sets of
- * points spread one after the other, as MovingBodies spreads the prescribed-Ct disks after the
- * turbines (BodyExchange::spread_forces). Collective: every rank must pass the same points.
+ * points spread one after the other. Collective: every rank must pass the same points. (MovingBodies
+ * spreads its turbines and disks through BodyExchange::spread_forces, which adds to the sources too.)
  */
 void add_spread_forces (const std::vector<amrex::Real>& pos,
                         const std::vector<amrex::Real>& force,

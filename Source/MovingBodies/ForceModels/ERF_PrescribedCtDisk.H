@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_REAL.H>
 
 #include "ERF_MovingBodiesInputs.H"
@@ -19,6 +20,8 @@ namespace erf_actuator {
  * upstream, the thrust is T = 1/2 rho Ct U^2 pi R^2, and each disk point carries the share
  * of -T n (the force on the fluid) proportional to its area. The disk-averaged normal
  * velocity U_d is sampled too, for the diagnostics (time, U, U_d, thrust, power = T U_d).
+ * The diagnostics file is written by one rank, the I/O rank unless set_writer() names another
+ * (the disk's owner, which alone samples the flow and updates the thrust).
  */
 class PrescribedCtDisk
 {
@@ -28,7 +31,6 @@ public:
     const std::string& name () const { return m_name; }
 
     /** The prefix of this disk's diagnostics files (erf.moving_bodies.<name>.output_root). */
-
     const std::string& output_root () const { return m_output_root; }
     int num_points () const { return static_cast<int>(m_area.size()); }
 
@@ -58,6 +60,10 @@ public:
     /** Raise the disk and its sampling points by dz (m): the terrain height under the base, at start-up. */
     void shift_z (amrex::Real dz);
 
+    /** The rank that writes <output_root>_disk.csv (the I/O rank by default). */
+    void set_writer (int rank) { m_writer = rank; }
+    int writer () const { return m_writer; }
+
     /** Open <output_root>_disk.csv: truncated for a fresh run, appended to after a restart. */
     void open_diagnostics (bool truncate) const;
     /** Append one row: time, u_inf, u_disk, thrust, power, plus the integrated source total. */
@@ -74,6 +80,7 @@ private:
     amrex::Real m_area_total{0.0};
     std::vector<amrex::Real> m_disk_pos, m_sample_pos, m_area, m_force;
     amrex::Real m_u_inf{0.0}, m_u_disk{0.0}, m_thrust{0.0};
+    int m_writer{amrex::ParallelDescriptor::IOProcessorNumber()};
 };
 
 } // namespace erf_actuator
