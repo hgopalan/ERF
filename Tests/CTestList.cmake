@@ -1215,6 +1215,29 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT)
   endif()
 endif()
 
+# Run a moving-bodies deck in test_files/<CASE> for one step on NRANKS ranks with OPTIONS and require it to end
+# normally (exit code 0) with output matching REGEX (Tests/RunExpectExit.cmake): the owner ranks of the turbines
+# and disks, and the ranks their points reach, that other tests rely on.
+function(add_test_moving_bodies_owners TEST_NAME CASE NRANKS OPTIONS REGEX)
+    set(_dir ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${_dir})
+    file(GLOB _files "${TEST_SOURCE_ROOT}/${CASE}/*")
+    file(COPY ${_files} DESTINATION "${_dir}/")
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    separate_arguments(_opts UNIX_COMMAND "${OPTIONS}")
+    separate_arguments(_pre UNIX_COMMAND "${MPIEXEC_PREFLAGS}")
+    set(_cmd ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NRANKS} ${_pre} ${TEST_EXE} ${_dir}/${CASE}.i
+             max_step=1 erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 amrex.call_addr2line=0 ${_opts})
+    add_test(NAME ${TEST_NAME}
+        COMMAND ${CMAKE_COMMAND}
+            "-DCHECK_COMMAND=${_cmd}"
+            "-DEXPECTED_RESULT=0"
+            "-DEXPECTED_REGEX=${REGEX}"
+            -P ${PROJECT_SOURCE_DIR}/Tests/RunExpectExit.cmake)
+    set_tests_properties(${TEST_NAME} PROPERTIES
+        LABELS "regression;moving-bodies" TIMEOUT 600 PROCESSORS ${NRANKS} WORKING_DIRECTORY "${_dir}/")
+endfunction()
+
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # The velocity at the stub turbine's nodes is sampled from a linear shear profile, which
   # the sampler reproduces exactly: the diagnostics log must match its gold and the analytic
@@ -1526,25 +1549,6 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # stand on rank 0's box, and T2 goes to rank 1, which owns no turbine yet. A second turbine whose OpenFAST
   # model steps with another dt (stub_turbine_dt002.fst) goes to the rank without a turbine; on one rank the
   # two cannot be kept apart and the lockstep check stops the run.
-  function(add_test_moving_bodies_owners TEST_NAME CASE NRANKS OPTIONS REGEX)
-      set(_dir ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
-      file(MAKE_DIRECTORY ${_dir})
-      file(GLOB _files "${TEST_SOURCE_ROOT}/${CASE}/*")
-      file(COPY ${_files} DESTINATION "${_dir}/")
-      resolve_test_exe("" "erf_exec" TEST_EXE)
-      separate_arguments(_opts UNIX_COMMAND "${OPTIONS}")
-      separate_arguments(_pre UNIX_COMMAND "${MPIEXEC_PREFLAGS}")
-      set(_cmd ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NRANKS} ${_pre} ${TEST_EXE} ${_dir}/${CASE}.i
-               max_step=1 erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 amrex.call_addr2line=0 ${_opts})
-      add_test(NAME ${TEST_NAME}
-          COMMAND ${CMAKE_COMMAND}
-              "-DCHECK_COMMAND=${_cmd}"
-              "-DEXPECTED_RESULT=0"
-              "-DEXPECTED_REGEX=${REGEX}"
-              -P ${PROJECT_SOURCE_DIR}/Tests/RunExpectExit.cmake)
-      set_tests_properties(${TEST_NAME} PROPERTIES
-          LABELS "regression;moving-bodies" TIMEOUT 600 PROCESSORS ${NRANKS} WORKING_DIRECTORY "${_dir}/")
-  endfunction()
   add_test_moving_bodies_owners(MovingBodies_Owners_TwoTurbines OpenFAST_ADM_TwoTurbines 2 "amr.max_grid_size_x=24"
       "T1: owned by rank 1 .*T2: owned by rank 0 .*STEP 1 ends")
   add_test_moving_bodies_owners(MovingBodies_Owners_FLLC OpenFAST_ALM_FLLC_Restart 2 "amr.max_grid_size_x=24"
@@ -1562,6 +1566,10 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   add_test_moving_bodies_owners(MovingBodies_Owners_BoxParity OpenFAST_ADM_TwoTurbines 2
       "amr.max_grid_size_x=24 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
       "T1: owned by rank 0 .*T2: owned by rank 1 .*STEP 1 ends")
+  # the wake lines go with their rotor: with three 20-cell boxes in x, T1's owner, rank 1, samples them, and the
+  # lines, 2 and 4 diameters downstream, lie on rank 0's boxes alone (the layout of OpenFAST_ADM_Restart_WakeOwnerRank1 below)
+  add_test_moving_bodies_owners(MovingBodies_Owners_Wake OpenFAST_ADM_Restart 2 "amr.max_grid_size_x=24"
+      "T1: owned by rank 1 .*T1 wake lines: owner rank 1 exchanges its points with 1 of 2 ranks [(]0[)].*STEP 1 ends")
 
   # The farm on one rank (both turbines owned by rank 0, one box) against two ranks with the
   # domain cut into three 20-cell boxes in x (amr.max_grid_size_x = 24) (T1 owned by rank 0, T2 by rank 1): the ownership must not change
@@ -1580,6 +1588,19 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # A turbine and a prescribed-Ct disk behind it, each with its own width: the disk's log against its
   # gold and the source against minus the total load of both.
   add_test_openfast_adm(OpenFAST_ADM_DiskAndTurbine OpenFAST_ADM_DiskAndTurbine "plt00010" "D2_disk.csv" "load_x" "moving_bodies/total_load.csv")
+  # The disk and the turbine swapped (the disk upstream) and the domain cut into three 20-cell boxes in x, so the
+  # disk is owned by rank 1 and the turbine by rank 0: the I/O rank's total_load.csv must gather the disk's thrust
+  # from rank 1, and every file must agree with the one-box run, where rank 0 owns both (the source's y and z
+  # totals are roundoff, so values below 1e-5 count as zero).
+  set(_disk_upstream "\"erf.moving_bodies.T1.base_pos=1230. 600. 0.\" \"erf.moving_bodies.D2.base_pos=750. 600. 0.\"")
+  add_test_moving_bodies_owners(MovingBodies_Owners_DiskAndTurbine OpenFAST_ADM_DiskAndTurbine 2 "amr.max_grid_size_x=24 ${_disk_upstream}"
+      "T1: owned by rank 0 .*D2: owned by rank 1 .*STEP 1 ends")
+  add_test_box_parity(OpenFASTADM_DiskAndTurbine_OwnerParity OpenFAST_ADM_DiskAndTurbine "plt00010"
+      COMMON_OPTIONS "${_disk_upstream}"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=24"
+      DATALOG "D2_disk.csv D2_stats.csv T1_erf.csv moving_bodies/total_load.csv moving_bodies/momentum_source.csv"
+      DATALOG_SIGDIGITS 8 DATALOG_ZERO_EXPONENT "-5")
   add_test_box_parity(OpenFASTADM_TwoWidths_BoxParity OpenFAST_ADM_TwoWidths "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
       SPLIT_OPTIONS "amr.max_grid_size_x=24 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
@@ -1652,6 +1673,15 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   add_test_restart_parity(OpenFAST_ADM_Restart OpenFAST_ADM_Restart 5 10
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
       DATALOG "T1_wake_avg.csv T1_wake.csv T1_correction.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+  # The same restart on two ranks with three 20-cell boxes in x, so that the turbine and its wake lines are owned by
+  # rank 1 (MovingBodies_Owners_Wake): rank 1 alone samples the lines, so it must write their files and the running
+  # sums into the checkpoint, which the restart takes over.
+  add_test_restart_parity(OpenFAST_ADM_Restart_WakeOwnerRank1 OpenFAST_ADM_Restart 5 10
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
+      DATALOG "T1_wake_avg.csv T1_wake.csv T1_stats.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
 
   # A restart continues the same bodies with the same inputs, step and OpenFAST stop time: each
@@ -1729,6 +1759,41 @@ if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   add_test_restart_abort(MovingBodies_Restart_ChangedDiskDensity Actuator_UniformCtDisk 5
       "D1[.]air_density changed on restart"
       RESTART_OPTIONS "erf.moving_bodies.D1.air_density=1.02")
+
+  # The disk has an owner rank, which alone samples the flow for it and writes its log, statistics and wake lines.
+  # With three 20-cell boxes in x (amr.max_grid_size_x = 24) the disk stands on rank 1's box; its points
+  # sampled at the first step reach that rank alone, its kernels reach rank 0's box too, and its wake lines
+  # lie on rank 0's boxes alone.
+  set(_ct_disk_wake "\"erf.moving_bodies.wake.lines_xD=2 4\" erf.moving_bodies.wake.num_points=21 erf.moving_bodies.wake.int=2 erf.moving_bodies.avg_start=2.0")
+  add_test_moving_bodies_owners(MovingBodies_Owners_CtDisk Actuator_UniformCtDisk 2 "amr.max_grid_size_x=24 ${_ct_disk_wake}"
+      "D1: owned by rank 1 [(]footprint radius 120 m[)].*D1: owner rank 1 exchanges its points with 1 of 2 ranks [(]1[)].*D1: owner rank 1 exchanges its points with 2 of 2 ranks [(]0 1[)].*D1 wake lines: owner rank 1 exchanges its points with 1 of 2 ranks [(]0[)].*STEP 1 ends")
+  # The disk with wake lines in one box (owned by rank 0, the I/O rank) and in three 20-cell boxes in x (owned
+  # by rank 1): the answer and every file the owner writes must agree (the logs to 8 digits, as the FFT solution
+  # differs at roundoff between the two layouts).
+  add_test_box_parity(ActuatorCtDisk_OwnerParity Actuator_UniformCtDisk "plt00010"
+      COMMON_OPTIONS "${_ct_disk_wake}"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=24"
+      DATALOG "D1_disk.csv D1_stats.csv D1_wake.csv D1_wake_avg.csv moving_bodies/momentum_source.csv"
+      DATALOG_SIGDIGITS 8)
+  # The disk owned by rank 1 checkpointed at step 5 and restarted to step 10 on two ranks, after a first run that
+  # went on past the checkpoint: the I/O rank trims the logs rank 1 writes, and the restart takes over the statistics
+  # and wake sums rank 1 wrote into the checkpoint. The lines are sampled every step and averaged from 1 s, so the
+  # checkpoint holds three wake samples (and two of the statistics).
+  set(_ct_disk_wake_restart "amr.max_grid_size_x=24 \"erf.moving_bodies.wake.lines_xD=2 4\" erf.moving_bodies.wake.num_points=21 erf.moving_bodies.wake.int=1 erf.moving_bodies.avg_start=1.0")
+  add_test_restart_parity(MovingBodies_CtDisk_Restart_OwnerRank1 Actuator_UniformCtDisk 5 10
+      COMMON_OPTIONS "${_ct_disk_wake_restart}"
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
+      DATALOG "D1_disk.csv D1_stats.csv D1_wake.csv D1_wake_avg.csv moving_bodies/momentum_source.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+  # The same checkpoint restarted on one rank, which then owns the disk and reads the sums rank 1 wrote. The FFT
+  # solution differs at roundoff between the rank counts, hence the default plotfile tolerances and 8 digits.
+  add_test_restart_parity(MovingBodies_CtDisk_RestartOnOneRank Actuator_UniformCtDisk 5 10
+      COMMON_OPTIONS "${_ct_disk_wake_restart}"
+      CHK_NRANKS 2 RESTART_NRANKS 1
+      DATALOG "D1_disk.csv D1_stats.csv D1_wake.csv D1_wake_avg.csv moving_bodies/momentum_source.csv"
+      DATALOG_SIGDIGITS 8 DATALOG_ZERO_EXPONENT "-5" OVERRUN)
 endif()
 if(ERF_ENABLE_OPENFAST AND NOT ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # The IEA 15 MW reference turbine run by the real OpenFAST library (built with ERF_OPENFAST_USE_STUB=OFF),

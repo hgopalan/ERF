@@ -621,6 +621,26 @@ source equals the disk's thrust, since the spreading is normalised exactly.
 ``ActuatorCtDisk_BoxParity`` runs the same deck in one box and split unevenly
 in x and y and requires the plotfiles and the disk logs to agree.
 
+The disk has an owner rank, which alone samples the flow for it and writes its
+log, statistics and wake lines. ``MovingBodies_Owners_CtDisk`` runs the deck
+with wake lines 2 and 4 diameters behind the disk for one step on two ranks
+with three 20-cell boxes in x (``amr.max_grid_size_x = 24``) and requires the
+disk to be owned by rank 1, its sampled points to reach rank 1 alone, its
+kernels both ranks, and its wake lines rank 0 alone (they lie on rank 0's boxes,
+so rank 1 samples them through rank 0). ``ActuatorCtDisk_OwnerParity``
+runs that deck in one box (the disk on rank 0, the I/O rank) and in the
+three-box layout (the disk on rank 1) and requires the plotfiles, every file
+the owner writes (the disk log, statistics and both wake files) and the momentum
+source the I/O rank writes to agree. ``MovingBodies_CtDisk_Restart_OwnerRank1`` checkpoints the
+three-box run at step 5 and restarts it to step 10 on two ranks (with
+``OVERRUN``): the logs rank 1 wrote past the checkpoint must be dropped, and
+the statistics and wake sums it wrote into the checkpoint taken over (the lines
+are sampled every step and averaged from 1 s, so the checkpoint holds three
+wake samples). ``MovingBodies_CtDisk_RestartOnOneRank`` restarts the same
+checkpoint on one rank, which then owns the disk and reads what rank 1 wrote
+(plotfile to the default tolerances, logs to 8 digits, as the FFT solution
+differs at roundoff between rank counts).
+
 Test Location: `Exec/CanonicalTests/MovingBodies/Actuator_UniformCtDisk`_
 
 .. _`Exec/CanonicalTests/MovingBodies/Actuator_UniformCtDisk`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/Actuator_UniformCtDisk
@@ -818,7 +838,12 @@ checks against its own golds and a box-parity twin.
 ``OpenFAST_ADM_DiskAndTurbine`` puts a prescribed-Ct disk spread over 1 cell
 where T2 stood, behind the turbine spread over 2: the disk's log ``D2_disk.csv``
 and the plotfile match their golds and the integrated source equals minus the
-total load of both bodies.
+total load of both bodies. ``OpenFASTADM_DiskAndTurbine_OwnerParity`` swaps the
+two (the disk upstream) and runs them in one box, where rank 0 owns both, and in
+three 20-cell boxes in x, where the disk is owned by rank 1
+(``MovingBodies_Owners_DiskAndTurbine``): the plotfiles, the disk's log and
+statistics, the turbine's log and the farm's ``total_load.csv``, which the I/O
+rank gathers from the disk's owner, must agree.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoWidths`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskAndTurbine`_
 
@@ -923,7 +948,11 @@ the restart to stop with a message naming it. ``MovingBodies_CtDisk_Restart`` do
 same restart-parity check (with ``OVERRUN``) for the prescribed-Ct disk, asking
 for a later stop time on restart, which a run without turbines may do, and
 ``MovingBodies_Restart_ChangedDiskDensity`` requires a changed ``air_density`` to
-stop the restart. ``OpenFAST_ADM_TwoTurbines_Restart`` restarts the two-turbine
+stop the restart. ``OpenFAST_ADM_Restart_WakeOwnerRank1`` repeats
+``OpenFAST_ADM_Restart`` on two ranks with three 20-cell boxes in x, where the
+turbine and its wake lines are owned by rank 1 (checked by
+``MovingBodies_Owners_Wake``), so the wake files and the running sums in the
+checkpoint come from rank 1. ``OpenFAST_ADM_TwoTurbines_Restart`` restarts the two-turbine
 farm on two ranks with three 20-cell boxes in x (``amr.max_grid_size_x = 24``),
 so the first turbine's logs and checkpoint
 files are written by rank 1 while the I/O rank trims the logs, and requires every

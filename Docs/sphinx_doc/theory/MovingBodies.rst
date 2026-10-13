@@ -53,10 +53,10 @@ linearly in the physical height within each column, using the face heights of
 mesh type. A node is sampled by the rank whose box holds its containing cell,
 reading neighbours from the ghost cells, so the result does not depend on the
 domain decomposition; a node outside the domain aborts the run with its
-coordinates. An OpenFAST turbine's owner sends each of its nodes to the ranks
-whose boxes may hold it and gets the velocity back from the one that does; the
-prescribed-Ct disks and the wake lines, which every rank knows, are sampled by
-every rank at once and the values summed across ranks.
+coordinates. The owner of an OpenFAST turbine or a prescribed-Ct disk sends
+each of its points to the ranks whose boxes may hold it and gets the velocity
+back from the one that does; the wake lines behind a rotor are sampled the same
+way for the rotor's owner.
 
 Force spreading and momentum source
 -----------------------------------
@@ -85,8 +85,7 @@ images, so a kernel wraps across a periodic boundary and the cost grows with
 the number of points and the cube of their widths, not with the mesh. Faces on a non-periodic domain
 boundary get no source. The normalisation of a turbine's kernel is the sum of
 the parts the ranks its kernel reaches compute on their own boxes, added by
-the turbine's owner in rank order and sent back with the force; a disk's is
-summed across all ranks. The sources are computed once per step, from the
+the owner of the turbine or disk in rank order and sent back with the force. The sources are computed once per step, from the
 velocities sampled at the start of the step (the disks) or from the OpenFAST
 step just taken (the turbines), and added to the momentum right-hand side in
 every stage of the step, before the anelastic projection, which removes their
@@ -576,6 +575,15 @@ kept for each time step that has none yet). Only the owner calls
 OpenFAST, holds the turbine's nodes and loads, applies the sampling corrections
 and the FLLC, and writes the turbine's logs, statistics and checkpoint files.
 The run log names each owner, with the footprint radius and time step it read.
+Each prescribed-Ct disk has an owner chosen by the same rule among the disks
+alone, with its ``rotor_radius`` for the footprint and one time step for all:
+a disk runs no model, so it may share a rank with a turbine without holding up
+its OpenFAST steps. Only the disk's owner knows the flow at its points and its
+thrust, and writes its ``_disk.csv`` and statistics. The wake lines behind a
+rotor (a turbine or a disk) belong to the rotor's owner, which samples them,
+keeps their running average and writes their files and checkpoint state; every
+rank keeps their geometry, so a restart on other ranks reads the running sums
+wherever the new owner is.
 
 **What goes where.** Every step the owner sends each node to sample only to the
 ranks whose boxes may hold its cell, and each point it spreads only to the
@@ -583,29 +591,37 @@ ranks whose boxes lie within the reach of its kernel; those ranks send back the
 velocity at the node, then their part of the kernel's normalisation, and get
 the force over the whole normalisation in return. A rank whose boxes no point
 of a turbine reaches never receives any of its data (it still takes part in the
-two integer reductions of each step and in the gathers below). To know whom to expect
-messages from, every rank keeps each turbine's envelope: a box of space that
+two integer reductions of each step and in the gathers below). The disks take
+part in the same two exchanges as the turbines, after them, and the wake lines
+in one of their own at each step that writes them. To know whom to expect
+messages from, every rank keeps each body's envelope: a box of space that
 holds its points and their kernels' reach, widened by its tip radius and two
-cells so that a turning blade or a yawing rotor stays inside. Each exchange
+cells so that a turning blade or a yawing rotor stays inside (a disk's and the
+wake lines' by two cells, since they stand still). Each exchange
 starts with one integer reduction over all ranks that says whether some
-turbine's points have left its envelope; only then are the envelopes widened
+body's points have left its envelope; only then are the envelopes widened
 and shared, which a turbine that stays in place does in its first step only
 (once for the points it samples and, when its kernels reach farther than the
 margin, again for the points it spreads). The run log
-lists, for each turbine, the ranks it exchanges with. Every turbine's numbers
+lists, for each turbine, disk and set of wake lines, the ranks it exchanges with. Every turbine's numbers
 are gathered in four places only, a few numbers per turbine each: the
 farm's totals in ``total_load.csv`` (at the diagnostic steps), the checkpoint's
 ``state`` file (at each checkpoint), and the start-up audit and the wake lines'
-geometry (once).
+geometry (once); every disk's, in ``total_load.csv`` only (its thrust, in a
+build with OpenFAST, which writes that file), and once at the first step, when
+ERF's density at every disk centre is sampled by all ranks for the density
+check.
 
-The result does not depend on which rank owns which turbine: on one or two
+The result does not depend on which rank owns which turbine or disk: on one or two
 ranks it is the value that sampling and spreading every point on every rank,
 with sums across all ranks, gives (bit for bit, but for the sign of an exact
 zero); with more ranks the kernels' normalisations can differ in the last bits,
 since the owner adds the ranks' parts in rank order and an MPI reduction may
 not. The checks on a turbine's points (coverage, the tip's travel, the hub
-axis, a kernel that reaches no face) run on its owner, so on several ranks
-their abort message comes from that rank.
+axis, a kernel that reaches no face) and on a disk's or a wake line's while
+they are sampled and spread (a point outside the domain, a kernel that reaches
+no face) run on its owner, so on several ranks their abort message comes from
+that rank.
 
 OpenFAST keeps a single step counter for all the turbines of a process, so
 the turbines a rank owns are stepped in turn, one OpenFAST time step at a

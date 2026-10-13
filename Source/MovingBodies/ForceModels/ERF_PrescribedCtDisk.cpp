@@ -95,7 +95,7 @@ PrescribedCtDisk::update (const std::vector<Real>& sample_vel, const std::vector
 void
 PrescribedCtDisk::open_diagnostics (bool truncate) const
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
+    if (ParallelDescriptor::MyProc() != m_writer) { return; }
     std::ofstream out;
     if (erf_actuator::open_log(out, m_output_root + "_disk.csv", truncate)) {
         out << "time,u_inf,u_disk,thrust,power,spread_thrust\n";
@@ -105,7 +105,7 @@ PrescribedCtDisk::open_diagnostics (bool truncate) const
 void
 PrescribedCtDisk::write_diagnostics (double time, Real spread_total) const
 {
-    if (!ParallelDescriptor::IOProcessor()) { return; }
+    if (ParallelDescriptor::MyProc() != m_writer) { return; }
     std::ofstream out(m_output_root + "_disk.csv", std::ios::app);
     out << std::setprecision(10) << time << "," << m_u_inf << "," << m_u_disk << ","
         << m_thrust << "," << power() << "," << spread_total << "\n";

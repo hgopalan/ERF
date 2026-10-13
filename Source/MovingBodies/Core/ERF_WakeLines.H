@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_REAL.H>
 
 namespace erf_actuator {
@@ -23,6 +24,9 @@ namespace erf_actuator {
  * sit above -half_width. Every point's offset s (in diameters) is recorded in the files. The
  * lateral line runs along (-axis_y, axis_x, 0), from the right of the downstream direction to
  * its left; the vertical line runs up. Positions in m, ERF domain coordinates; velocities in m/s.
+ *
+ * The files and the checkpoint state are written by one rank, the I/O rank unless set_writer()
+ * names another (the rotor's owner, which alone samples the lines and accumulates the average).
  */
 class WakeLines
 {
@@ -61,6 +65,9 @@ public:
     const std::array<amrex::Real,3>& axis () const { return m_axis; }
     amrex::Real diameter () const { return m_diameter; }
     int num_samples () const { return m_count; }
+    /** The rank that writes the files and the checkpoint state (the I/O rank by default). */
+    void set_writer (int rank) { m_writer = rank; }
+    int writer () const { return m_writer; }
 
     /** Add one set of sampled velocities (3*n, m/s, finite) to the running average. */
     void accumulate (const std::vector<amrex::Real>& vel);
@@ -103,6 +110,7 @@ private:
     std::vector<amrex::Real> m_pos;   //!< 3*n
     std::vector<double> m_sum;   //!< 3*n running sums, in double so a long average keeps its digits in single precision
     int m_count{0};
+    int m_writer{amrex::ParallelDescriptor::IOProcessorNumber()};
 };
 
 } // namespace erf_actuator

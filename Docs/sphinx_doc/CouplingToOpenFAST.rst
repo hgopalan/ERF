@@ -199,14 +199,19 @@ rank more turbines than another or mix two OpenFAST time steps, in which case a
 nearby rank with fewer turbines takes it. Its points go only to the ranks whose
 boxes they touch, so a rank far from every turbine samples and spreads nothing
 for it (it still joins two integer reductions per step). The run log names each
-turbine's owner and the ranks it exchanges with. The turbines a rank owns are
+turbine's and disk's owner and the ranks it, and the wake lines behind it,
+exchange with. The turbines a rank owns are
 stepped in turn, so they must use the same OpenFAST ``DT`` (turbines of
 different ``DT`` get different ranks whenever there are at least as many ranks
 as distinct ``DT``), and a rank that owns several turbines steps their models
 one after the other: run a farm on at least as many ranks as it has turbines. A check on a turbine's points stops
-the run from its owner's rank, whose message is the one to read. The
-prescribed-Ct disks and the wake lines are still sampled and spread by every
-rank, with sums over all ranks.
+the run from its owner's rank, whose message is the one to read. Each
+prescribed-Ct disk has an owner too, chosen by the same rule among the disks
+alone (a disk runs no model, so it may share a rank with a turbine), which
+samples the flow for it, sets its thrust and writes its log and statistics.
+The wake lines behind a rotor belong to the rotor's owner, which samples them,
+keeps their running average and writes their files; sampling them adds one
+integer reduction at each step that writes them.
 
 Restarting
 ----------
@@ -284,8 +289,8 @@ terrain-fitted meshes), the OpenFAST turbine driver with lockstep stepping,
 restart and a start-up audit of the model and geometry, actuator disk and
 actuator line modes with tower and nacelle forces, the filtered lifting-line
 correction, upstream and corrected-disk sampling, prescribed-Ct disks,
-multi-turbine farms whose turbines are owned by ranks they stand on where the
-balance allows and whose points go only to the ranks their kernels reach, wake lines and running
+multi-turbine farms whose turbines and disks are owned by ranks they stand on where the
+balance allows and whose points (and wake lines) go only to the ranks they reach, wake lines and running
 statistics, turbulent inflow from precursor planes or cell perturbations,
 the anchor level on multi-level grids, bodies on terrain, the canonical
 cases with golds, box-parity and restart-parity tests, the OpenFAST-stub CI

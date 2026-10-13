@@ -12,7 +12,6 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
 
-#include "ERF_ActuatorPoints.H"
 #include "ERF_BodyExchange.H"
 #include "ERF_BodyMotion.H"
 #include "ERF_MovingBodiesInputs.H"
@@ -40,10 +39,11 @@ struct SolverChoice;
  * prescribed-Ct disks) are spread onto face-centred momentum sources, which ERF adds to its momentum
  * right-hand side in every stage of the step through add_momentum_sources().
  *
- * Each OpenFAST turbine has one owner rank, chosen from the ranks whose boxes of the anchor level
- * overlap it where the balance allows (set_ground()), which alone runs its model and holds its nodes and loads; its points go
- * only to the ranks whose boxes they touch (erf_actuator::BodyExchange). The prescribed-Ct disks and
- * the wake lines are known on every rank and sampled and spread with reductions over all ranks.
+ * Each OpenFAST turbine and each prescribed-Ct disk has one owner rank, chosen from the ranks whose
+ * boxes of the anchor level overlap it where the balance allows (set_ground()). A turbine's owner alone
+ * runs its model and holds its nodes and loads; a disk's owner alone samples the flow for it and holds
+ * its thrust. Their points go only to the ranks whose boxes they touch (erf_actuator::BodyExchange), and
+ * so do the wake lines behind each rotor, which the rotor's owner samples and averages.
  */
 class MovingBodies
 {
@@ -83,7 +83,8 @@ public:
      * added). Then choose each OpenFAST turbine's owner rank: a rank whose anchor-level boxes overlap its
      * footprint (the column under its base, widened by the model's rotor radius) while that keeps the
      * turbines evenly spread and apart from turbines of another OpenFAST time step, otherwise the nearest
-     * rank that does (erf_actuator::choose_owners). Called once by ERF when the mesh exists: on a fresh start from
+     * rank that does (erf_actuator::choose_owners); and each prescribed-Ct disk's, by the same rule among
+     * the disks alone (its footprint widened by its rotor_radius). Called once by ERF when the mesh exists: on a fresh start from
      * InitData, before the step-0 checkpoint or plotfile (it then initialises OpenFAST); on a restart
      * before read_checkpoint(), once the mesh is read. The heights are written to
      * <diagnostics_dir>/ground.csv. Aborts when the anchor level has no grids (finest_level below it).
@@ -151,8 +152,8 @@ private:
     int m_anchor{0};
     double m_dt{0.0};
     double m_t_max{0.0};          //!< ERF's stop time (s)
-    bool m_disk_density_checked{false};
-    bool m_steps_end_first{false};      //!< max_step * erf.fixed_dt ends the run before the stop time (no step is cut) //!< the disks' air_density checked against ERF's density in this run
+    bool m_disk_density_checked{false};   //!< the disks' air_density checked against ERF's density in this run
+    bool m_steps_end_first{false};        //!< max_step * erf.fixed_dt ends the run before the stop time (no step is cut)
     double m_input_fixed_dt{0.0}; //!< erf.fixed_dt as given (the anchor level's step is it over the sub-cycling ratios)
     double m_t0{0.0};             //!< ERF time at which the bodies started (0 on a fresh start; a precursor's time)
     double m_openfast_tmax{0.0};  //!< OpenFAST's stop time on its own clock, which starts at m_t0 (s)
@@ -165,7 +166,6 @@ private:
     bool m_resumed{false};    //!< the checkpoint held the bodies' state: their logs continue rather than start afresh
     bool m_logs_reopened{false};
     std::vector<std::unique_ptr<erf_actuator::BodyMotion>> m_motion;  //!< one per body
-    erf_actuator::ActuatorPoints m_points;                             //!< all bodies' velocity nodes
     std::vector<std::unique_ptr<erf_actuator::PrescribedCtDisk>> m_disks;
     std::vector<std::string> m_turbine_mode;                           //!< per OpenFAST turbine: adm | alm | none
     std::vector<MovingBodyInputs> m_turbine_in;                        //!< per OpenFAST turbine: its inputs (nacelle, density)
@@ -196,7 +196,7 @@ private:
     /** Abort unless every body's points, with the kernel's reach, lie on the anchor level's grids (at the first step and after a regrid). */
     void check_coverage (const amrex::BoxArray& level_grids, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     amrex::BoxArray m_audited_grids;   //!< the anchor grids the coverage was checked on: checked again when they change
-    /** Sample the wake lines, accumulate the running averages and write both files. */
+    /** Sample each rotor's wake lines for its owner (m_wake_exchange), which accumulates the running average and writes both files. */
     void write_wake_diagnostics (double time, const amrex::MultiFab& U, const amrex::MultiFab& V,
                                  const amrex::MultiFab& W, const amrex::MultiFab* z_phys_nd,
                                  const amrex::Geometry& geom);
@@ -205,15 +205,41 @@ private:
     bool m_wake_written{false};
     std::string m_wake_state_dir;   //!< checkpoint directory whose running averages the lines take over
 
-    /** Feed every body's statistics with the state after this step and rewrite the files (a turbine's on its owner). */
+    /** Feed every body's statistics with the state after this step and rewrite the files (each body's on its owner). */
     void accumulate_statistics (double time);
     std::vector<erf_actuator::RunningStats> m_turbine_stats;   //!< one per OpenFAST turbine
     std::vector<erf_actuator::RunningStats> m_disk_stats;      //!< one per prescribed-Ct disk
+
+    /** The OpenFAST turbines (0 without OpenFAST): the bodies 0 .. num_turbines() - 1 of m_exchange, the disks after them. */
+    int num_turbines () const { return static_cast<int>(m_turbine_mode.size()); }
+    /**
+     * The owners and point-to-point exchanges of the bodies that sample the flow and force it: the
+     * OpenFAST turbines, then the prescribed-Ct disks (disk k is body num_turbines() + k).
+     */
+    erf_actuator::BodyExchange m_exchange;
+    std::vector<std::string> m_exchange_names;   //!< per body of m_exchange: its name, for the run log
+    /** The owners and exchanges of the wake lines, one body per rotor in the order of m_wakes (each its rotor's owner). */
+    erf_actuator::BodyExchange m_wake_exchange;
+    std::vector<std::string> m_wake_exchange_names;
+    /**
+     * Choose every turbine's and every disk's owner rank from the anchor level's boxes, hand the owners to
+     * the driver, the exchange and the writers of the logs, and print them.
+     */
+    void choose_owners (const amrex::Geometry& geom, const amrex::BoxArray& grids, const amrex::DistributionMapping& dmap);
+    /** How far (m) body b of m_exchange reaches beyond its points when its envelope is built; on its owner. */
+    amrex::Real exchange_margin (int b, const amrex::Geometry& geom) const;
+    /** Print, for each body of the exchange whose exchanges now reach other ranks than last time, the ranks it exchanges with. */
+    static void report_participants (const erf_actuator::BodyExchange& ex, const std::vector<std::string>& names,
+                                     std::vector<std::vector<int>>& reported);
+    std::vector<std::vector<int>> m_reported_participants;        //!< per body of m_exchange: the ranks last printed
+    std::vector<std::vector<int>> m_reported_wake_participants;   //!< per body of m_wake_exchange
+    /**
+     * Collective. A table of k values per prescribed-Ct disk, filled by each disk's owner (fill(k, row) for
+     * the disks this rank owns) and summed over the ranks onto the I/O rank, each row exactly as its owner wrote it.
+     */
+    std::vector<amrex::Real> disk_table (int k, const std::function<void(int, amrex::Real*)>& fill) const;
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
-    erf_actuator::BodyExchange m_exchange;   //!< the turbines' owners and point-to-point exchanges
-    /** Choose every turbine's owner rank from the anchor level's boxes and hand the owners to the driver and the exchange. */
-    void choose_turbine_owners (const amrex::Geometry& geom, const amrex::BoxArray& grids, const amrex::DistributionMapping& dmap);
     /**
      * Collective. A table of k values per turbine, filled by each turbine's owner (fill(i, row) for the
      * turbines this rank owns) and summed over the ranks, so that every rank (or only the I/O rank, with
@@ -230,9 +256,6 @@ private:
     /** How far (m) turbine i's envelope reaches beyond its points when it is built: its tip radius and two cells; its owner only. */
     amrex::Real envelope_margin (int i, const amrex::Geometry& geom) const;
     std::vector<std::vector<amrex::Real>> m_turbine_vel;   //!< per turbine, on its owner: the velocities last sampled at its points
-    /** Print, for each turbine whose exchanges now reach other ranks than last time, the ranks it exchanges with. */
-    void report_participants ();
-    std::vector<std::vector<int>> m_reported_participants;   //!< per turbine: the ranks last printed
     /**
      * The start-up audit of every OpenFAST turbine against ERF's set-up, in two parts at the
      * first step: the model files, the geometry and the overlaps before the flow is first

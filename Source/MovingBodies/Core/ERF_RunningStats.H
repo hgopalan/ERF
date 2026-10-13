@@ -30,8 +30,8 @@ namespace erf_actuator {
  * example erf.moving_bodies.avg_start). write() rewrites <output_root>_stats.csv with the current
  * values; the sums are part of the checkpoint, so the statistics continue across a restart.
  * A non-finite sample aborts, naming the statistics and the quantity. The files are written by one
- * rank, the I/O rank unless set_writer() names another (a turbine's owner, which alone accumulates
- * its statistics).
+ * rank, the I/O rank unless set_writer() names another (the owner of a turbine or a prescribed-Ct
+ * disk, which alone accumulates its statistics).
  */
 class RunningStats
 {
