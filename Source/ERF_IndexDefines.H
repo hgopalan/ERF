@@ -3,6 +3,8 @@
 
 #include <AMReX_REAL.H>
 #include <AMReX_Arena.H>
+#include <AMReX_Extension.H>
+#include <AMReX_GpuQualifiers.H>
 
 /**
  * Definition of indexing parameters
@@ -155,6 +157,19 @@ namespace BCVars {
         zvel_bc = NBCVAR_max+2,
         NumTypes
     };
+}
+
+/**
+ * The boundary-condition slot (BCVars) of conserved component n: every passive
+ * scalar shares BCVars::RhoScalar_bc_comp, and each component above the scalars
+ * has its own slot, NSCALARS - 1 below its component index. Boundary planes are
+ * stored by these slots too (ReadBndryPlanes::plane_slot).
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+int cons_bc_comp (int n) noexcept
+{
+    if (n >= RhoScalar_comp && n < RhoScalar_comp + NSCALARS) { return BCVars::RhoScalar_bc_comp; }
+    return (n >= RhoScalar_comp + NSCALARS) ? n - (NSCALARS - 1) : n;
 }
 
 // Note that we don't use these, but we need this vector to be long enough

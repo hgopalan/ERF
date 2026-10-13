@@ -2088,6 +2088,46 @@ add_test_restart_parity(ABL_BndryPlanes_StartTime ABL_BndryPlanes_StartTime 3 8
 add_test_restart_parity(ABL_BndryPlanes_Stale ABL_BndryPlanes_Restart 4 8
     BNDRY_PLANES_DIR "BndryFiles" BNDRY_PLANES_STALE BNDRY_PLANES_STEPS "0 2 4 6 8"
     FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0")
+
+# Boundary planes read field by field (Tests/RunBndryPlanesIngest.cmake): a
+# moist writer (u = 10 m/s, qv = 5 g/kg) and a reader that starts dry and at
+# rest, whose largest value of the field must come from the planes.
+#   _VelocityOnly: velocity read without density. The velocities are checked
+#                  against their own boundary types; when they were checked
+#                  against the density's, they were never read (u stayed 1e-14).
+#   _Qv:           qv read in a build with more than one passive scalar (dust,
+#                  the fire coupling's smoke), where the moisture components sit
+#                  NSCALARS - 1 above their boundary slots; reading the plane and
+#                  the boundary type of the component index left qv at 0.
+#                  With one scalar the two coincide and the test checks the plain
+#                  read.
+function(add_test_bndry_planes_ingest TEST_NAME READ_VARS FIELD MIN MAX)
+    set(TEST_FILES_DIR BndryPlanes_Ingest)
+    setup_test()
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+        "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+        "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+        "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+        "-DNRANKS=${NP}"
+        "-DTEST_EXE=${TEST_EXE}"
+        "-DFEXTREMA=${FEXTREMA_EXE}"
+        "-DWRITER=${CURRENT_TEST_BINARY_DIR}/BndryPlanes_Ingest_Writer.i"
+        "-DREADER=${CURRENT_TEST_BINARY_DIR}/BndryPlanes_Ingest_Reader.i"
+        "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+        "-DREAD_VARS=${READ_VARS}"
+        "-DFIELD=${FIELD}"
+        "-DMIN=${MIN}"
+        "-DMAX=${MAX}"
+        -P ${PROJECT_SOURCE_DIR}/Tests/RunBndryPlanesIngest.cmake)
+    set_tests_properties(${TEST_NAME} PROPERTIES
+        TIMEOUT 600
+        PROCESSORS ${NP}
+        LABELS "regression"
+        ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/writer.log;${CURRENT_TEST_BINARY_DIR}/reader.log;${CURRENT_TEST_BINARY_DIR}/fextrema.log")
+endfunction()
+add_test_bndry_planes_ingest(BndryPlanes_Ingest_VelocityOnly "velocity" x_velocity 4.5 15.0)
+add_test_bndry_planes_ingest(BndryPlanes_Ingest_Qv "temperature density velocity qv" qv 1.0e-4 6.0e-3)
 endif()
 add_test_r(SquallLine_2D                     ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(SuperCell_3D                      ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
