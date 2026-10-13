@@ -797,88 +797,79 @@ ERF::WriteCheckpointFile () const
     } // for lev
 
 #ifdef ERF_ENABLE_FIRE
-    if (m_fire_layer) {
+    if (const FireLayer* const fire_engine = fire_layer()) {
         // The fire state lives on the level its grid refines (erf.fire.anchor_level).
-        const int fire_lev = m_fire_layer->level();
-        if (const amrex::MultiFab* phi = m_fire_layer->get_levelset()) {
+        const int fire_lev = fire_engine->level();
+        if (const amrex::MultiFab* phi = fire_engine->get_levelset()) {
             amrex::Print() << "Writing fire level-set (phi) to checkpoint" << std::endl;
             VisMF::Write(*phi, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FirePhi"));
         }
         // Save fire arrival time (needed to restore burned interior on restart)
-        if (const amrex::MultiFab* at = m_fire_layer->get_arrival_time()) {
+        if (const amrex::MultiFab* at = fire_engine->get_arrival_time()) {
             amrex::Print() << "Writing fire arrival time to checkpoint" << std::endl;
             VisMF::Write(*at, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireArrivalTime"));
         }
         // Balbi with heat_flux_coupling reads the previous step's flux before it is
         // recomputed; without it the first restarted step used a zero flux.
-        if (const amrex::MultiFab* hf = m_fire_layer->get_heat_flux()) {
+        if (const amrex::MultiFab* hf = fire_engine->get_heat_flux()) {
             VisMF::Write(*hf, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireHeatFlux"));
         }
         // The suppression hold test reads the previous step's flame length before
         // the step recomputes it; without it the first restarted step tested
         // every line against zero flames and held lines that should have failed.
-        if (const amrex::MultiFab* fl = m_fire_layer->get_flame_length()) {
+        if (const amrex::MultiFab* fl = fire_engine->get_flame_length()) {
             VisMF::Write(*fl, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFlameLength"));
         }
-        if (const amrex::MultiFab* fuel = m_fire_layer->get_fuel_load()) {
+        if (const amrex::MultiFab* fuel = fire_engine->get_fuel_load()) {
             amrex::Print() << "Writing fire fuel load to checkpoint" << std::endl;
             VisMF::Write(*fuel, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFuelLoad"));
         }
         // Fuel moisture evolves under erf.fire.moisture_dynamic, so without it a
         // restart silently reverts to the inputs-file moisture.
-        if (const amrex::MultiFab* mc = m_fire_layer->get_fuel_mc()) {
+        if (const amrex::MultiFab* mc = fire_engine->get_fuel_mc()) {
             amrex::Print() << "Writing fire fuel moisture to checkpoint" << std::endl;
             VisMF::Write(*mc, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFuelMC"));
         }
         // Shell moistures of the stick model (erf.fire.moisture_model = stick).
-        if (const amrex::MultiFab* st = m_fire_layer->get_stick_mc()) {
+        if (const amrex::MultiFab* st = fire_engine->get_stick_mc()) {
             amrex::Print() << "Writing fire moisture stick shells to checkpoint" << std::endl;
             VisMF::Write(*st, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireStickMC"));
         }
         // Sub-cell displacement carried between FARSITE substeps.
-        if (const amrex::MultiFab* disp = m_fire_layer->get_disp_accum()) {
+        if (const amrex::MultiFab* disp = fire_engine->get_disp_accum()) {
             amrex::Print() << "Writing fire displacement accumulator to checkpoint" << std::endl;
             VisMF::Write(*disp, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireDispAccum"));
         }
         // Crown state; both are null unless erf.fire.crown.enable is set.
-        if (const amrex::MultiFab* ca = m_fire_layer->get_crown_active()) {
+        if (const amrex::MultiFab* ca = fire_engine->get_crown_active()) {
             amrex::Print() << "Writing fire crown activation to checkpoint" << std::endl;
             VisMF::Write(*ca, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireCrownActive"));
         }
-        if (const amrex::MultiFab* cl = m_fire_layer->get_crown_load()) {
+        if (const amrex::MultiFab* cl = fire_engine->get_crown_load()) {
             amrex::Print() << "Writing fire crown load to checkpoint" << std::endl;
             VisMF::Write(*cl, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireCrownLoad"));
-        }
-        // The lagged fluxes injected into the atmosphere on the next step. Without
-        // them the first step after a restart injects no fire heat at all.
-        if (const amrex::MultiFab* q = m_fire_layer->get_Q_atm_prev()) {
-            amrex::Print() << "Writing fire atmosphere flux buffer to checkpoint" << std::endl;
-            VisMF::Write(*q, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQAtmPrev"));
-        }
-        if (const amrex::MultiFab* ql = m_fire_layer->get_Q_lat_atm_prev()) {
-            VisMF::Write(*ql, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
         // The surface precipitation accumulation the rain per column is measured from
         // (erf.fire.precip_source = atmosphere); without it the first restarted step
         // would read the whole accumulation since t = 0 as one step's rain.
-        if (const amrex::MultiFab* pa = m_fire_layer->get_precip_accum_prev()) {
+        if (const amrex::MultiFab* pa = fire_engine->get_precip_accum_prev()) {
             amrex::Print() << "Writing fire precipitation snapshot to checkpoint" << std::endl;
             VisMF::Write(*pa, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FirePrecipAccumPrev"));
         }
         // Exposure accumulators; all null unless erf.fire.exposure.enable.
-        if (const amrex::MultiFab* hl = m_fire_layer->get_heat_load()) {
+        if (const amrex::MultiFab* hl = fire_engine->get_heat_load()) {
             amrex::Print() << "Writing fire exposure accumulators to checkpoint" << std::endl;
             VisMF::Write(*hl, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireHeatLoad"));
         }
-        if (const amrex::MultiFab* pk = m_fire_layer->get_peak_intensity()) {
+        if (const amrex::MultiFab* pk = fire_engine->get_peak_intensity()) {
             VisMF::Write(*pk, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FirePeakIntensity"));
         }
-        if (const amrex::MultiFab* em = m_fire_layer->get_ember_landings()) {
+        if (const amrex::MultiFab* em = fire_engine->get_ember_landings()) {
             VisMF::Write(*em, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireEmberLandings"));
         }
         // Structure ignition state (state, ignition time, time above the
         // intensity threshold, cause); null unless erf.fire.structures.ignition.enable.
-        if (const amrex::MultiFab* ss = m_fire_layer->get_structure_state()) {
+        if (const amrex::MultiFab* ss = fire_engine->get_structure_state()) {
             amrex::Print() << "Writing fire structure ignition state to checkpoint" << std::endl;
             VisMF::Write(*ss, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireStructureState"));
         }
@@ -887,16 +878,16 @@ ERF::WriteCheckpointFile () const
         // in between; the temporal acceleration state; and the crown ROS carried
         // between steps. The crown fraction burned is a per-step diagnostic,
         // written only so the restart plotfile shows it.
-        if (const amrex::MultiFab* ad = m_fire_layer->get_albini_data()) {
+        if (const amrex::MultiFab* ad = fire_engine->get_albini_data()) {
             VisMF::Write(*ad, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireAlbiniData"));
         }
-        if (const amrex::MultiFab* as = m_fire_layer->get_accel_state()) {
+        if (const amrex::MultiFab* as = fire_engine->get_accel_state()) {
             VisMF::Write(*as, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireAccelState"));
         }
-        if (const amrex::MultiFab* cr = m_fire_layer->get_crown_ros_active()) {
+        if (const amrex::MultiFab* cr = fire_engine->get_crown_ros_active()) {
             VisMF::Write(*cr, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireCrownRosActive"));
         }
-        if (const amrex::MultiFab* cf = m_fire_layer->get_crown_fraction_burned()) {
+        if (const amrex::MultiFab* cf = fire_engine->get_crown_fraction_burned()) {
             VisMF::Write(*cf, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireCrownFractionBurned"));
         }
         // The counters: the step (also implied by the atmosphere's) and the level-set
@@ -905,40 +896,53 @@ ERF::WriteCheckpointFile () const
         // different schedule from the uninterrupted run and the fronts diverged.
         if (amrex::ParallelDescriptor::IOProcessor()) {
             std::ofstream f(checkpointname + "/FireState");
-            f << "step " << m_fire_layer->get_step() << "\n"
-              << "levelset_subcycle_count " << m_fire_layer->get_levelset_subcycle_count() << "\n"
-              << std::setprecision(17) << "f_dry_prev " << m_fire_layer->get_f_dry_prev() << "\n"
+            f << "step " << fire_engine->get_step() << "\n"
+              << "levelset_subcycle_count " << fire_engine->get_levelset_subcycle_count() << "\n"
+              << std::setprecision(17) << "f_dry_prev " << fire_engine->get_f_dry_prev() << "\n"
               // the boundary guard: when the fire first entered the band (-1 if never), so a
               // restart neither repeats the warning nor forgets that it fired
-              << "edge_contact_time " << m_fire_layer->get_edge_contact_time() << "\n"
-              << "edge_reach_checked " << (m_fire_layer->get_edge_reach_checked() ? 1 : 0) << "\n"
+              << "edge_contact_time " << fire_engine->get_edge_contact_time() << "\n"
+              << "edge_reach_checked " << (fire_engine->get_edge_reach_checked() ? 1 : 0) << "\n"
               // the lower end of the next ignition window (start of the last step), so
               // scheduled ignitions and the timed perimeter keep the (prev, current]
               // window across the restart instead of the dt-reconstructed one
-              << "prev_window_end " << m_fire_layer->get_prev_window_end() << "\n"
+              << "prev_window_end " << fire_engine->get_prev_window_end() << "\n"
               // where the fire grid is: its level and the lower corner of its region in
               // that level's index space, which a restart must reproduce
               << "anchor_level " << fire_lev << "\n"
-              << "fire_region_lo_x " << m_fire_layer->get_fire_grid().atm_lo[0] << "\n"
-              << "fire_region_lo_y " << m_fire_layer->get_fire_grid().atm_lo[1] << "\n";
+              << "fire_region_lo_x " << fire_engine->get_fire_grid().atm_lo[0] << "\n"
+              << "fire_region_lo_y " << fire_engine->get_fire_grid().atm_lo[1] << "\n";
             // the "already printed" flags of the arrival-time probes and of the
             // structure first-arrival lines, so a restart does not print them again
-            const auto& pr = m_fire_layer->probe_reported();
+            const auto& pr = fire_engine->probe_reported();
             f << "probe_reported " << pr.size();
             for (bool b : pr) { f << " " << (b ? 1 : 0); }
             f << "\n";
-            const auto& er = m_fire_layer->exposure_reported();
+            const auto& er = fire_engine->exposure_reported();
             f << "exposure_reported " << er.size();
             for (char c : er) { f << " " << (c ? 1 : 0); }
             f << "\n";
         }
         // Suppression fields, per-line built length, applied-id set and the
         // active actions (erf.fire.suppression.enable).
-        if (const FireSuppression* sp = m_fire_layer->get_suppression()) {
+        if (const FireSuppression* sp = fire_engine->get_suppression()) {
             sp->write_checkpoint(checkpointname, fire_lev);
         }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
+        }
+    }
+    // The coupling's state: the lagged fluxes injected into the atmosphere on the
+    // next step, whatever the engine. Without them the first step after a restart
+    // injects no fire heat at all.
+    if (m_fire_coupler) {
+        const int fire_lev = m_fire_coupler->level();
+        if (const amrex::MultiFab* q = m_fire_coupler->get_Q_atm_prev()) {
+            amrex::Print() << "Writing fire atmosphere flux buffer to checkpoint" << std::endl;
+            VisMF::Write(*q, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQAtmPrev"));
+        }
+        if (const amrex::MultiFab* ql = m_fire_coupler->get_Q_lat_atm_prev()) {
+            VisMF::Write(*ql, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
     }
 #endif
@@ -2388,10 +2392,12 @@ ERF::ReadCheckpointFile ()
     }
 #endif
 
-    // The fire state is restored by ReadCheckpointFileFire(), which runs after
-    // FireLayer::initialize() has allocated the fire fields. At this point the
-    // FireLayer object exists (it is created in the constructor) but its
-    // MultiFabs do not, so nothing fire-related can be read here.
+    // The fire state is restored by ReadCheckpointFileFire() (the native
+    // engine's) and ReadCheckpointFileFireCoupling() (the lagged fluxes), which
+    // run after FireCoupler::initialize() has allocated the fire fields. At this
+    // point the FireCoupler and its engine exist (they are created in the
+    // constructor) but their MultiFabs do not, so nothing fire-related can be
+    // read here.
 }
 
 /**
@@ -2580,20 +2586,57 @@ ERF::ReadCheckpointFileSurfaceLayer ()
 
 #ifdef ERF_ENABLE_FIRE
 /**
+ * Restore the fire coupling's lagged fluxes (FireQAtmPrev, FireQLatAtmPrev)
+ * during restart, whatever the engine. Called after ReadCheckpointFileFire(),
+ * which for the native engine has already aborted on a checkpoint whose fire
+ * grid sits on another level or region.
+ */
+void
+ERF::ReadCheckpointFileFireCoupling ()
+{
+    if (!m_fire_coupler) { return; }
+    // The lagged fluxes of the coupling, on the level of the fire grid
+    const int fire_lev = m_fire_coupler->level();
+    // A checkpoint without them (no fire state at all, or written before the
+    // fluxes were checkpointed): the buffers keep their zero, said once
+    const std::string dir = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/";
+    if (!amrex::FileExists(dir + "FireQAtmPrev_H") && !amrex::FileExists(dir + "FireQLatAtmPrev_H")) {
+        amrex::Print() << "[FIRE] Checkpoint has no lagged fire fluxes; the first restarted step injects none.\n";
+        return;
+    }
+    for (const auto& [mf, name] : {std::pair<amrex::MultiFab*, const char*>{m_fire_coupler->get_Q_atm_prev_mut(), "FireQAtmPrev"},
+                                   std::pair<amrex::MultiFab*, const char*>{m_fire_coupler->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev"}}) {
+        if (mf == nullptr) { continue; }
+        const std::string header = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/" + name + "_H";
+        if (!amrex::FileExists(header)) {
+            amrex::Print() << "[FIRE] Checkpoint has no " << name
+                           << "; keeping the initialized values.\n";
+            continue;
+        }
+        VisMF::Read(*mf, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name));
+        // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
+        // valid cells (a checkpoint written before the fluxes had ghosts holds none),
+        // so refill the ghosts the way FireCoupler::update_flux_buffer() does.
+        fire_fill_boundary(*mf, geom[fire_lev]);
+    }
+}
+
+/**
  * ERF function for reading fire state from a checkpoint file during restart.
  *
- * This is called after FireLayer::initialize() to restore the fire simulation
- * state (level-set, arrival time, and fuel load).
+ * This is called after FireCoupler::initialize() to restore the native fire
+ * engine's state (level-set, arrival time, fuel load and the rest).
  */
 void
 ERF::ReadCheckpointFileFire ()
 {
-    if (!m_fire_layer) { return; }
+    FireLayer* const fire_engine = fire_layer();
+    if (!fire_engine) { return; }
 
     // The fire state is on the level the fire grid refines. The checkpoint must
     // hold it on the same level and over the same region: reading it onto another
     // grid would put every cell in the wrong place.
-    const int fire_lev = m_fire_layer->level();
+    const int fire_lev = fire_engine->level();
     int chk_fire_lev = -1;
     for (int l = 0; l <= max_level; ++l) {
         if (amrex::FileExists(restart_chkfile + "/Level_" + std::to_string(l) + "/FirePhi_H")) {
@@ -2664,8 +2707,8 @@ ERF::ReadCheckpointFileFire ()
         // its size from the checkpointed level set's boxes.
         const amrex::VisMF chk_phi(amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FirePhi"));
         const amrex::Box chk_region = chk_phi.boxArray().minimalBox();
-        const amrex::Box run_region = m_fire_layer->get_levelset()->boxArray().minimalBox();
-        const amrex::IntVect& run_lo = m_fire_layer->get_fire_grid().atm_lo;
+        const amrex::Box run_region = fire_engine->get_levelset()->boxArray().minimalBox();
+        const amrex::IntVect& run_lo = fire_engine->get_fire_grid().atm_lo;
         if (chk_region != run_region || chk_lo_x != run_lo[0] || chk_lo_y != run_lo[1]) {
             std::ostringstream msg;
             msg << "[FIRE] The fire grid of checkpoint " << restart_chkfile << " covers " << chk_region
@@ -2682,16 +2725,16 @@ ERF::ReadCheckpointFileFire ()
     // The fire step counter continues from the step count of its level: the spotting
     // random seed is random_seed + step, so without this a restarted run drew
     // different brands from the straight run.
-    m_fire_layer->set_step(istep[fire_lev]);
+    fire_engine->set_step(istep[fire_lev]);
 
-    VisMF::Read(*m_fire_layer->get_levelset_mut(),
+    VisMF::Read(*fire_engine->get_levelset_mut(),
         amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FirePhi"));
-    fire_fill_boundary(*m_fire_layer->get_levelset_mut(), m_fire_layer->get_fire_geom());
+    fire_fill_boundary(*fire_engine->get_levelset_mut(), fire_engine->get_fire_geom());
 
-    VisMF::Read(*m_fire_layer->get_arrival_time_mut(),
+    VisMF::Read(*fire_engine->get_arrival_time_mut(),
         amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FireArrivalTime"));
 
-    VisMF::Read(*m_fire_layer->get_fuel_load_mut(),
+    VisMF::Read(*fire_engine->get_fuel_load_mut(),
         amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FireFuelLoad"));
 
     // The fields below were added after the original three. A checkpoint written
@@ -2737,83 +2780,76 @@ ERF::ReadCheckpointFileFire ()
         VisMF::Read(*mf, prefix);
     };
 
-    restore_optional(m_fire_layer->get_fuel_mc_mut(),      "FireFuelMC");
+    restore_optional(fire_engine->get_fuel_mc_mut(),      "FireFuelMC");
     // With erf.fire.moisture_live_model = "fixed" the live classes (components 3
     // and 4) are held at erf.fire.moisture_live, so they come from the inputs:
     // a restart may change the value, and a checkpoint written by a "legacy" run
     // or an older build holds live moisture pinned to [0.30, 0.40]. "legacy"
     // keeps the checkpointed values, which its update evolves.
     if (m_fire_params.moisture_live_model == "fixed") {
-        if (amrex::MultiFab* mc = m_fire_layer->get_fuel_mc_mut(); mc != nullptr && mc->nComp() >= 5) {
+        if (amrex::MultiFab* mc = fire_engine->get_fuel_mc_mut(); mc != nullptr && mc->nComp() >= 5) {
             mc->setVal(m_fire_params.moisture_live, 3, 2);
         }
     }
     // The stick shells are allocated on the first advance; allocate them now
     // so the checkpoint's shells replace the fresh initialisation.
-    if (m_fire_params.moisture_model == "stick" && m_fire_layer->get_stick_mc() == nullptr) {
-        m_fire_layer->allocate_stick_mc();
+    if (m_fire_params.moisture_model == "stick" && fire_engine->get_stick_mc() == nullptr) {
+        fire_engine->allocate_stick_mc();
     }
-    restore_optional(m_fire_layer->get_stick_mc_mut(),     "FireStickMC");
-    restore_optional(m_fire_layer->get_disp_accum_mut(),   "FireDispAccum");
-    restore_optional(m_fire_layer->get_crown_active_mut(), "FireCrownActive");
-    restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");
-    restore_optional(m_fire_layer->get_heat_flux_mut(),      "FireHeatFlux");
-    restore_optional(m_fire_layer->get_flame_length_mut(),   "FireFlameLength");
-    restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
-    restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
-    // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
-    // valid cells (a checkpoint written before the fluxes had ghosts holds none),
-    // so refill the ghosts the way update_atm_flux_buffer() does.
-    if (amrex::MultiFab* q = m_fire_layer->get_Q_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
-    if (amrex::MultiFab* q = m_fire_layer->get_Q_lat_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
+    restore_optional(fire_engine->get_stick_mc_mut(),     "FireStickMC");
+    restore_optional(fire_engine->get_disp_accum_mut(),   "FireDispAccum");
+    restore_optional(fire_engine->get_crown_active_mut(), "FireCrownActive");
+    restore_optional(fire_engine->get_crown_load_mut(),   "FireCrownLoad");
+    restore_optional(fire_engine->get_heat_flux_mut(),      "FireHeatFlux");
+    restore_optional(fire_engine->get_flame_length_mut(),   "FireFlameLength");
     // The precipitation snapshot (erf.fire.precip_source = atmosphere). A checkpoint
     // without it (an older build, or a run that used the uniform rate) cannot give
     // the first restarted step a rain rate: that step reports none and starts the
     // snapshot from its own accumulation, instead of reading the accumulation since
     // t = 0 as one step's rain.
-    if (amrex::MultiFab* pa = m_fire_layer->get_precip_accum_prev_mut()) {
+    if (amrex::MultiFab* pa = fire_engine->get_precip_accum_prev_mut()) {
         const std::string header = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/FirePrecipAccumPrev_H";
         if (amrex::FileExists(header)) {
             VisMF::Read(*pa, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FirePrecipAccumPrev"));
         } else {
             amrex::Print() << "[FIRE] Checkpoint has no FirePrecipAccumPrev; the first restarted step"
                            << " reports no rain and starts the precipitation snapshot from its own accumulation.\n";
-            m_fire_layer->invalidate_precip_accum_prev();
+            fire_engine->invalidate_precip_accum_prev();
         }
     }
-    restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
-    restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
-    restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
+    restore_optional(fire_engine->get_heat_load_mut(),      "FireHeatLoad");
+    restore_optional(fire_engine->get_peak_intensity_mut(), "FirePeakIntensity");
+    restore_optional(fire_engine->get_ember_landings_mut(), "FireEmberLandings");
     // The per-structure state that drives the ignition rule is rebuilt from
     // the field on every rank once it is read.
-    if (m_fire_layer->get_structure_state_mut() != nullptr) {
-        restore_optional(m_fire_layer->get_structure_state_mut(), "FireStructureState");
-        m_fire_layer->restore_structure_ignition_state();
+    if (fire_engine->get_structure_state_mut() != nullptr) {
+        restore_optional(fire_engine->get_structure_state_mut(), "FireStructureState");
+        fire_engine->restore_structure_ignition_state();
     }
-    restore_optional(m_fire_layer->get_albini_data_mut(),           "FireAlbiniData");
-    restore_optional(m_fire_layer->get_accel_state_mut(),           "FireAccelState");
-    restore_optional(m_fire_layer->get_crown_ros_active_mut(),      "FireCrownRosActive");
-    restore_optional(m_fire_layer->get_crown_fraction_burned_mut(), "FireCrownFractionBurned");
+    restore_optional(fire_engine->get_albini_data_mut(),           "FireAlbiniData");
+    restore_optional(fire_engine->get_accel_state_mut(),           "FireAccelState");
+    restore_optional(fire_engine->get_crown_ros_active_mut(),      "FireCrownRosActive");
+    restore_optional(fire_engine->get_crown_fraction_burned_mut(), "FireCrownFractionBurned");
 
     // The level-set subcycle count, so the reinitialisation keeps the schedule of
     // the uninterrupted run; a checkpoint without FireState leaves it at zero,
     // which is right only when the checkpoint step is a multiple of the interval.
     if (has_state) {
-        if (has_subcycles)    { m_fire_layer->set_levelset_subcycle_count(chk_subcycles); }
-        if (has_f_dry)        { m_fire_layer->set_f_dry_prev(chk_f_dry); }   // the smoke emission divides the lagged flux by it
-        if (has_edge_time)    { m_fire_layer->set_edge_contact_time(chk_edge_time); }
-        if (has_edge_checked) { m_fire_layer->set_edge_reach_checked(chk_edge_checked != 0); }
-        if (has_window)       { m_fire_layer->set_prev_window_end(chk_window_end); }
+        if (has_subcycles)    { fire_engine->set_levelset_subcycle_count(chk_subcycles); }
+        if (has_f_dry)        { fire_engine->set_f_dry_prev(chk_f_dry); }   // the smoke emission divides the lagged flux by it
+        if (has_edge_time)    { fire_engine->set_edge_contact_time(chk_edge_time); }
+        if (has_edge_checked) { fire_engine->set_edge_reach_checked(chk_edge_checked != 0); }
+        if (has_window)       { fire_engine->set_prev_window_end(chk_window_end); }
         // the probes and structures already reported before the checkpoint
         if (!chk_probe_flags.empty()) {
             std::vector<bool> pr(chk_probe_flags.size());
             for (std::size_t n = 0; n < pr.size(); ++n) { pr[n] = (chk_probe_flags[n] != 0); }
-            m_fire_layer->set_probe_reported(pr);
+            fire_engine->set_probe_reported(pr);
         }
         if (!chk_exposure_flags.empty()) {
             std::vector<char> er(chk_exposure_flags.size());
             for (std::size_t n = 0; n < er.size(); ++n) { er[n] = static_cast<char>(chk_exposure_flags[n] != 0); }
-            m_fire_layer->set_exposure_reported(er);
+            fire_engine->set_exposure_reported(er);
         }
     } else {
         amrex::Print() << "[FIRE] Checkpoint has no FireState; the reinitialisation"
@@ -2821,7 +2857,7 @@ ERF::ReadCheckpointFileFire ()
     }
     // Suppression: the checkpoint's actions (with geometry and state) replace the
     // file's copies of the same ids; the file only adds new ids, as at start-up.
-    if (FireSuppression* sp = m_fire_layer->get_suppression_mut()) {
+    if (FireSuppression* sp = fire_engine->get_suppression_mut()) {
         sp->read_checkpoint(restart_chkfile, fire_lev);
     }
 }

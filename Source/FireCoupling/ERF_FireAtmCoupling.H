@@ -49,8 +49,9 @@
 //   passes both through fire_tendency. ERF-Fire follows the same approach:
 //   Q_latent = Lv * (bmst + (1 - bmst) * f_water) * (dmass/dt)
 //   with bmst = M_f / (1 + M_f) the fuel-moisture share and f_water = 0.56 the
-//   water of combustion per unit dry mass (compute_fire_latent_flux). This is
-//   stored as fire_latent_flux [W/m2] and distributed with the same
+//   water of combustion per unit dry mass. The fire engine computes it (the
+//   native engine with compute_fire_latent_flux, ERF_FireHeatFlux.H, into its
+//   fire_latent_flux [W/m2]); the coupling distributes it with the same
 //   exponential profile.
 //
 // Assumptions:
@@ -58,8 +59,8 @@
 //     (erf.fire.anchor_level, the finest level by default); coarser levels see
 //     the result through average-down with erf.coupling_type = TwoWay (the
 //     default), not with OneWay; finer levels not at all.
-//   - fire_heat_flux and fire_latent_flux are on the fire grid (C*nx x C*ny x 1
-//     over the fire region).
+//   - The engine's sensible and latent fluxes (FireFluxes) are on the fire grid
+//     (C*nx x C*ny x 1 over the fire region).
 //   - The coarsening from fire grid to atmospheric grid is the area average of
 //     average_down(), with the region's lower corner added (FireGrid::atm_lo).
 //   - z_phys_cc is the cell-centre terrain-following height MultiFab [m].
@@ -142,43 +143,6 @@ inline void coarsen_fire_flux_to_atm(
                 }
             }
             crse(i, j, k, n) = volfrac * c;
-        });
-    }
-}
-
-// Compute fire latent heat flux [W/m2] from sensible heat flux and fuel moisture.
-//
-// WRF-SFIRE's bookkeeping (module_fr_sfire_atm.F): the burn rate Q/h is read as
-// a wet-mass rate, of which the share b = M/(1 + M) is fuel water and the rest
-// dry fuel yielding f_w = 0.56 kg of water of combustion per kg. The loads the
-// fuel models carry are oven-dry, for which the water released per unit dry
-// fuel is M + 0.56 and the factor would be (M + 0.56) instead of b + (1 - b)
-// 0.56: 0.640 against 0.593 at M = 0.08 (7 %) and 0.860 against 0.662 at
-// M = 0.30 (23 %). The SFIRE form is kept for parity with WRF-SFIRE and the
-// Community Fire Behavior Model; fire_coupling.rst states the basis.
-inline void compute_fire_latent_flux(
-    amrex::MultiFab& Q_lat_out,
-    const amrex::MultiFab& Q_sfc,
-    amrex::Real M_f,
-    amrex::Real h_fuel_Jkg)
-{
-    if (h_fuel_Jkg <= 0.0) {
-        Q_lat_out.setVal(0.0);
-        return;
-    }
-
-    constexpr amrex::Real L_V = 2.501e6;
-    amrex::Real bmst = M_f / (1.0 + M_f);
-    constexpr amrex::Real f_water = 0.56;
-    amrex::Real ratio = L_V / h_fuel_Jkg;
-
-    for (amrex::MFIter mfi(Q_sfc, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        auto const& q_sfc_a = Q_sfc.array(mfi);
-        auto const& q_lat_a = Q_lat_out.array(mfi);
-        auto const& bx = mfi.tilebox();
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(const amrex::IntVect& iv) {
-            amrex::Real factor = ratio * (bmst + (1.0 - bmst) * f_water);
-            q_lat_a(iv) = factor * q_sfc_a(iv);
         });
     }
 }

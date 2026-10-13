@@ -646,10 +646,10 @@ void ERF::advance_dycore (int level,
         // columns of the fire grid's level only
         const MultiFab* Q_fire_for_pbl = nullptr;
 #ifdef ERF_ENABLE_FIRE
-        if (m_fire_layer && level == m_fire_layer->level() && m_fire_params.enable &&
-            m_fire_params.injects_flux() &&
+        if (m_fire_coupler && level == m_fire_coupler->level() &&
+            m_fire_coupler->params().injects_flux() &&
             tc.mrf_fire_thermal_excess) {
-            Q_fire_for_pbl = m_fire_layer->get_Q_atm_prev();
+            Q_fire_for_pbl = m_fire_coupler->get_Q_atm_prev();
         }
 #endif
 

@@ -103,62 +103,22 @@ amrex::Long count_burning_cells (const amrex::MultiFab& phi)
 
 } // namespace erf_fire_diag
 
-namespace {
-
-// Where the fire grid sits, printed once at start-up, and the warning when a
-// finer level covers part of it: the fire then reads that level's coarser wind,
-// and its heat on this level is replaced by the finer level's average-down.
-void report_fire_region(const ERF& erf, int lev, const FireGrid& fg)
+void FireLayer::verify_prerequisites(const ERF& erf, int lev)
 {
-    const Geometry& g = fg.geom;
-    amrex::Print() << "[FIRE] Fire grid on level " << lev << " of 0-" << erf.finestLevel()
-                   << ": x " << g.ProbLo(0) << " to " << g.ProbHi(0)
-                   << " m, y " << g.ProbLo(1) << " to " << g.ProbHi(1) << " m, "
-                   << g.Domain().length(0) << " x " << g.Domain().length(1) << " fire cells of "
-                   << g.CellSize(0) << " x " << g.CellSize(1) << " m\n";
-
-    if (lev >= erf.finestLevel()) { return; }
-
-    // Share of the fire region that level lev + 1 covers, in columns of level lev.
-    const Box region(IntVect(fg.atm_lo[0], fg.atm_lo[1], 0),
-                     IntVect(fg.atm_lo[0] + g.Domain().length(0) / fg.C - 1,
-                             fg.atm_lo[1] + g.Domain().length(1) / fg.C - 1, 0));
-    BoxArray fine = erf.boxArray(lev + 1);
-    fine.coarsen(erf.refRatio(lev));
-    amrex::Long covered = 0;
-    for (int n = 0; n < fine.size(); ++n) {
-        Box b = fine[n];
-        b.setSmall(2, 0);
-        b.setBig(2, 0);
-        b &= region;
-        if (b.ok()) { covered += b.numPts(); }
-    }
-    const amrex::Real share = amrex::Real(covered) / amrex::Real(region.numPts());
-    amrex::Print() << "[FIRE] WARNING: the fire grid is on level " << lev << " but the finest level is "
-                   << erf.finestLevel() << " (erf.fire.anchor_level = " << lev << "), and level " << lev + 1
-                   << " covers " << 100.0 * share << " % of the fire grid. The fire reads the wind of level "
-                   << lev << " and its heat, moisture and smoke go into level " << lev << " only: with "
-                   << "erf.coupling_type = TwoWay the average-down from the finer level replaces the heated cells "
-                   << "under it, so that heat is lost, and with OneWay the finer level never sees the fire. "
-                   << "Leave erf.fire.anchor_level unset to put the fire grid on the finest level.\n";
+    verify_native_fire_prerequisites(erf, lev, m_params);
 }
 
-} // namespace
-
 void FireLayer::initialize(const ERF& erf,
-                            int lev,
-                            const SurfaceLayer* surface_layer_ptr,
-                            const MultiFab* z_phys_nd_atm,
-                            const FireParams& fire_params)
+                           int lev,
+                           const FireGrid& fg,
+                           const SurfaceLayer* surface_layer_ptr,
+                           const MultiFab* z_phys_nd_atm)
 {
-    m_params = fire_params;
+    amrex::ignore_unused(surface_layer_ptr);
+    const FireParams& fire_params = m_params;
     m_lev    = lev;
-    verify_fire_prerequisites(erf, lev, surface_layer_ptr, fire_params);
-    m_fg = create_fire_grid(erf.boxArray(lev), erf.DistributionMap(lev),
-                            erf.Geom(lev), fire_params.grid_ratio);
-    m_fg.lev = lev;
+    m_fg     = fg;
     m_nz = erf.Geom(lev).Domain().length(2);
-    report_fire_region(erf, lev, m_fg);
 
     fire_phi        = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 3);
     fire_wind_ref   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
@@ -254,20 +214,12 @@ void FireLayer::initialize(const ERF& erf,
         fire_crown_ros_active->setVal(0.0_rt);
     }
 
-    // Phase 6: fire-atmosphere coupling MultiFabs
+    // The k = 0 slabs of the level's boxes, for the fields the engine keeps per
+    // atmospheric column (the coupler holds the lagged fluxes on the same layout)
     const BoxArray& ba_atm = erf.boxArray(lev);
     const DistributionMapping& dm_atm = erf.DistributionMap(lev);
     BoxArray ba_atm_2d = ba_atm;
     ba_atm_2d.coarsen(IntVect(1, 1, erf.Geom(lev).Domain().length(2)));
-    // Ghost columns for the MRF fire thermal excess, which reads the fluxes in the
-    // halo around every tile. ERF's state carries ComputeGhostCells() + 1 columns,
-    // at most 5, and ComputeDiffusivityMRF keeps its halo within the state's and
-    // checks these fluxes against it; update_atm_flux_buffer() fills them.
-    const IntVect ng_flux(5, 5, 0);
-    m_Q_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, ng_flux);
-    m_Q_lat_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, ng_flux);
-    m_Q_atm_prev->setVal(0.0_rt);
-    m_Q_lat_atm_prev->setVal(0.0_rt);
     // The surface precipitation accumulation the rain per column is measured from
     // (erf.fire.precip_source = atmosphere): zero at a fresh start, as the scheme's
     // accumulators are; a restart restores it from the checkpoint.
@@ -519,6 +471,9 @@ void FireLayer::initialize(const ERF& erf,
                            << "FM1 fcwh=" << h_fcwh[1] << " m, FM4 fcwh=" << h_fcwh[4] << " m\n";
         }
     }
+    // The sampling height of every fire cell for the shared wind sampler, once:
+    // the fuel map (read above) does not change during the run
+    if (m_use_per_fuel_wind_ht && fire_fuel_model) { fill_per_fuel_wind_height(); }
 
     // Phase 13B: Pre-compute alternative ROS model coefficients.
     {
@@ -723,7 +678,7 @@ void FireLayer::initialize(const ERF& erf,
         // with heat_open_fraction and its diagnostics, and for the wind
         // extraction with structures.wind_open_columns.
         if (m_params.structures.enable) {
-            build_open_fraction(erf.Geom(lev));
+            build_open_fraction(erf.Geom(lev), ba_atm_2d, dm_atm);
         }
     }
 
@@ -789,16 +744,16 @@ void FireLayer::initialize(const ERF& erf,
     }
 }
 
-// surface_layer is unused: the fire layer reads the atmospheric state it needs
-// through the wind, temperature and humidity MultiFabs passed alongside it. The
-// parameter stays for interface symmetry with initialize().
-void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
-                        const MultiFab& xvel, const MultiFab& yvel,
-                        const MultiFab& z_phys_cc,
-                        const MultiFab& T_atm_k0, const MultiFab& RH_atm_k0,
-                        const MultiFab* precip_accum_k0)
+void FireLayer::advance(const FireForcing& forcing)
 {
-    amrex::ignore_unused(surface_layer);
+    const Real time = forcing.time;
+    const Real dt   = forcing.dt;
+    const MultiFab& xvel      = forcing.xvel;
+    const MultiFab& yvel      = forcing.yvel;
+    const MultiFab& z_phys_cc = forcing.z_phys_cc;
+    const MultiFab& T_atm_k0  = forcing.T_k0;
+    const MultiFab& RH_atm_k0 = forcing.RH_k0;
+    const MultiFab* precip_accum_k0 = forcing.precip_accum_k0;
 
     m_current_time = time;
     m_dt_atm       = dt;
@@ -814,12 +769,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         fire_wind_ref->setVal(m_params.prescribed_wind_y, 1, 1, 0);
     } else {
         const bool wind_open = m_params.structures.wind_open_columns && m_open_frac_atm && m_roof_h_atm;
+        // The per-fuel wind height of every fire cell, when the fuel varies per
+        // cell (filled once by initialize(): the fuel map is static)
+        const bool per_fuel_ht = m_use_per_fuel_wind_ht && fire_fuel_model;
         fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
                                           *fire_surface_z, *fire_col_ground,
                                           m_fg, z_wind, m_nz,
-                                          m_use_per_fuel_wind_ht ? fire_fuel_model.get() : nullptr,
-                                          m_use_per_fuel_wind_ht ? m_d_fcwh.data() : nullptr,
-                                          m_use_per_fuel_wind_ht ? FUEL_SLOT_COUNT - 1 : 0,
+                                          per_fuel_ht ? m_wind_ht_cell.get() : nullptr,
                                           m_params.wind_interp,
                                           wind_open ? m_open_frac_atm.get() : nullptr,
                                           wind_open ? m_roof_h_atm.get() : nullptr,
@@ -1451,7 +1407,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     compute_heat_flux_and_diagnostics(dt);
 
     // Burning structures: their release joins fire_heat_flux on their
-    // footprint cells (and so the atmosphere, through update_atm_flux_buffer),
+    // footprint cells (and so the atmosphere, through the coupler's flux buffer),
     // their equivalent intensity is handed to the spotting launch below, and
     // their radiant fraction becomes the incident flux on the cells around them.
     if (m_struct_ign) {
@@ -1692,6 +1648,29 @@ void FireLayer::check_edge_guard()
                    << " s with " << m_n_edge_cells << " burning cells in it. The front stops at the edge and"
                    << " nothing outside the grid burns; the contact time is in the statistics CSV"
                    << " (erf.fire.boundary_guard_action = warn).\n";
+}
+
+void FireLayer::fill_per_fuel_wind_height()
+{
+    if (!m_wind_ht_cell) {
+        m_wind_ht_cell = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    }
+    const Real* d_fcwh = m_d_fcwh.data();
+    const int nfuelcats = FUEL_SLOT_COUNT - 1;
+    for (MFIter mfi(*m_wind_ht_cell, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        auto const& zc = m_wind_ht_cell->array(mfi);
+        auto const& fm = fire_fuel_model->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const int fuel_code = static_cast<int>(fm(i, j, k) + Real(0.5));   // nearest integer, as every reader
+            // Table slot of the code (Anderson at its own code, Scott-Burgan
+            // above 13), unknown codes taking slot 1, clamped to the table.
+            int slot = fuel_slot(fuel_code);
+            if (slot < 1) slot = 1;
+            slot = amrex::min(slot, nfuelcats);
+            zc(i, j, k) = d_fcwh[slot];
+        });
+    }
 }
 
 void FireLayer::apply_waf_to_wind()
@@ -2112,15 +2091,9 @@ void FireLayer::apply_crown_fire_ros()
     }
 }
 
-void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
+void FireLayer::fill_fluxes(FireFluxes& fluxes)
 {
-    if (!m_params.injects_flux() && !m_params.smoke_enable) {
-        if (m_params.fire_debug) {
-            amrex::Print() << "[FIRE DEBUG] Skipping flux buffer update: coupling_type is passive (injects_flux=false) and smoke_enable=false" << std::endl;
-        }
-        return;
-    }
-    if (!fire_heat_flux || !m_Q_atm_prev) { return; }
+    if (!fire_heat_flux) { return; }
 
     if (m_params.fire_debug) {
         const amrex::Real dA = m_fg.geom.CellSize(0) * m_fg.geom.CellSize(1);
@@ -2156,42 +2129,37 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
     const amrex::Real f_dry = m_params.cfbm_partition() ? 1.0_rt / (1.0_rt + M_f) : 1.0_rt;
     m_f_dry_prev = f_dry;   // the smoke emission divides this back out
     if (m_params.cfbm_partition()) {
-        amrex::MultiFab Q_sens(fire_heat_flux->boxArray(), fire_heat_flux->DistributionMap(), 1, 0);
-        amrex::MultiFab::Copy(Q_sens, *fire_heat_flux, 0, 0, 1, 0);
-        Q_sens.mult(f_dry, 0, 1, 0);
-        coarsen_fire_flux_to_atm(*m_Q_atm_prev, Q_sens, geom_atm, m_fg);
+        if (!m_Q_sens_fire) {
+            m_Q_sens_fire = std::make_unique<amrex::MultiFab>(fire_heat_flux->boxArray(),
+                                                              fire_heat_flux->DistributionMap(), 1, 0);
+        }
+        amrex::MultiFab::Copy(*m_Q_sens_fire, *fire_heat_flux, 0, 0, 1, 0);
+        m_Q_sens_fire->mult(f_dry, 0, 1, 0);
+        fluxes.sensible = m_Q_sens_fire.get();
     } else {
-        coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fire_heat_flux,
-                                 geom_atm, m_fg);
+        fluxes.sensible = fire_heat_flux.get();
     }
     if (m_params.fire_debug) {
-        amrex::Print() << "[FIRE DEBUG] Sensible flux to the atmosphere: max " << m_Q_atm_prev->max(0)
-                       << " W/m2 (partition=" << m_params.heat_flux_partition
-                       << ", f_dry_fuel=" << f_dry << ", fuel moisture=" << M_f << ")" << std::endl;
+        // appended by the coupler to its line of the sensible flux, as before the split
+        std::ostringstream note;
+        note.precision(amrex::OutStream().precision());   // amrex::Print's, as the line had
+        note << " (partition=" << m_params.heat_flux_partition
+             << ", f_dry_fuel=" << f_dry << ", fuel moisture=" << M_f << ")";
+        fluxes.debug_note = note.str();
+    } else {
+        fluxes.debug_note.clear();
     }
 
-    if (m_params.inject_latent && m_Q_lat_atm_prev) {
+    if (m_params.inject_latent) {
         compute_fire_latent_flux(*fire_latent_flux, *fire_heat_flux, M_f, h_fuel_Jkg);
-        coarsen_fire_flux_to_atm(*m_Q_lat_atm_prev, *fire_latent_flux,
-                                 geom_atm, m_fg);
+        fluxes.latent = fire_latent_flux.get();
         if (m_params.fire_debug) {
             amrex::Print() << "[FIRE DEBUG] Latent heat flux computed. Max latent flux: "
                            << fire_latent_flux->max(0) << " W/m2, fuel moisture: " << M_f << std::endl;
         }
     } else {
-        if (m_params.fire_debug) {
-            amrex::Print() << "[FIRE DEBUG] Skipping latent heat injection (inject_latent=false or no moisture)" << std::endl;
-        }
-        m_Q_lat_atm_prev->setVal(0.0_rt);
+        fluxes.latent = nullptr;
     }
-
-    // The MRF fire thermal excess reads these fluxes in the halo columns around
-    // every tile; give them the neighbouring box's value (and the edge column's
-    // outside a non-periodic face), so a column sees the same flux whichever box
-    // holds it. On a finer level the columns outside the refined region have no
-    // fire grid and keep the zero they were allocated with.
-    fire_fill_boundary(*m_Q_atm_prev, geom_atm);
-    if (m_Q_lat_atm_prev) { fire_fill_boundary(*m_Q_lat_atm_prev, geom_atm); }
 }
 
 void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
@@ -2311,7 +2279,7 @@ amrex::Real FireLayer::burnout_tau_s(int fuel_code) const
     return burn_time / m_params.burnout_time_to_efold;
 }
 
-amrex::Real FireLayer::smoke_heat_per_kg_atm() const
+amrex::Real FireLayer::smoke_heat_per_kg() const
 {
     amrex::Real h = m_params.smoke_heat_of_comb;
     if (m_params.smoke_heat_from_fuel) {
@@ -2321,54 +2289,11 @@ amrex::Real FireLayer::smoke_heat_per_kg_atm() const
     return h * m_f_dry_prev;
 }
 
-void FireLayer::apply_fire_coupling_to_cc_source(
-    amrex::MultiFab& cc_source,
-    const amrex::MultiFab& S_old,
-    const amrex::MultiFab& z_phys_cc,
-    const amrex::Geometry& geom_atm,
-    bool has_moisture)
+void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm,
+                                    const amrex::BoxArray& ba2d,
+                                    const amrex::DistributionMapping& dm)
 {
-    if (!m_params.injects_flux()) { return; }
-    if (!m_Q_atm_prev) { return; }
-    if (m_params.fire_atm_feedback <= 0.0_rt) { return; }
-
-    if (m_params.fire_debug) {
-        amrex::Print() << "[FIRE DEBUG] Applying fire coupling to atmosphere (coupling_type="
-                       << m_params.coupling_type << ", feedback=" << m_params.fire_atm_feedback
-                       << ", max_Q_prev=" << m_Q_atm_prev->max(0) << " W/m2)" << std::endl;
-    }
-
-    const amrex::MultiFab* Q_lat_ptr = (m_params.inject_latent && has_moisture)
-        ? m_Q_lat_atm_prev.get() : nullptr;
-
-    // Pass fire_debug so apply_fire_tendency_to_cc_source prints tendency diagnostics.
-    // With fire_debug=true you will see per-RK-stage output:
-    //   [FIRE COUPLING] Q_atm_max=...  alfg=...
-    //   [FIRE COUPLING] RhoTheta tendency sum=...  max=...  expected_surface_max=...
-    apply_fire_tendency_to_cc_source(
-        cc_source,
-        *m_Q_atm_prev,
-        Q_lat_ptr,
-        z_phys_cc,
-        S_old,
-        geom_atm,
-        m_params.heat_flux_alfg,
-        m_params.fire_atm_feedback,
-        has_moisture,
-        m_params.fire_debug,
-        m_params.source_mode == "add",
-        m_open_frac_atm.get(),
-        m_roof_h_atm.get(),
-        m_params.heat_open_fraction,
-        m_params.heat_tendency_density,
-        m_params.heat_tendency_exner);
-}
-
-void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
-{
-    if (!fire_nonburnable || !fire_structure_height || !m_Q_atm_prev) { return; }
-    const amrex::BoxArray& ba2d = m_Q_atm_prev->boxArray();
-    const amrex::DistributionMapping& dm = m_Q_atm_prev->DistributionMap();
+    if (!fire_nonburnable || !fire_structure_height) { return; }
     // One ghost cell: the bilinear wind stencil reaches the neighbouring column.
     m_open_frac_atm = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 1);
     m_roof_h_atm    = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 1);

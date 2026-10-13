@@ -846,7 +846,8 @@ zero), ``FireStickKeyNoStick_abort`` and ``FireSuppressionKeyNoEnable_abort``
 (keys given without the switch that reads them), ``FireMrfExcessNoFlux_abort``
 (the MRF fire thermal excess without an injecting fire),
 ``FireSourceModeConflict_abort`` (the default ``source_mode = overwrite`` with
-Rayleigh damping of theta, which it would discard),
+Rayleigh damping of theta, which it would discard), ``FireEngineUnknown_abort``
+(an ``erf.fire.engine`` that is not an engine),
 ``DustRoadFileMissing_abort`` (a missing road file, which left every rank but
 the IO rank waiting in a broadcast), ``DustTransportBins_abort`` (separately
 transported bins, which the single dust scalar cannot hold) and

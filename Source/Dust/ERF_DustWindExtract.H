@@ -3,7 +3,7 @@
  * @brief Wind and surface field extraction from ERF 3D solver to the 2D dust grid.
  *
  * The wind interpolation algorithm copies fill_fire_wind_from_interpolation
- * from Source/Fire/ERF_FireWindExtract.cpp, substituting DustGrid for FireGrid
+ * from Source/FireCoupling/ERF_FireWindExtract.cpp, substituting DustGrid for FireGrid
  * and grid_ratio for C. Per-fuel and WAF parameters are not applicable to dust.
  *
  * SurfaceLayer accessors used:
@@ -12,7 +12,7 @@
  *   get_pblh(0)    — PBL height [m]
  *
  * References:
- *   Source/Fire/ERF_FireWindExtract.H (algorithm source):
+ *   Source/FireCoupling/ERF_FireWindExtract.H (algorithm source):
  *     https://github.com/hgopalan/ERF/blob/a2ca3d1a7cea08a480c9d10e93ffdfab1b24b24e/
  *     Source/Fire/ERF_FireWindExtract.H
  *   Hong & Pan (1996). Mon. Wea. Rev., 124, 2322.

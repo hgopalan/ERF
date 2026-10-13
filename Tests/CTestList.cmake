@@ -2578,6 +2578,10 @@ add_test_fire_abort(FireSourceModeConflict_abort FireRestart        inputs_coupl
     "the default erf.fire.source_mode = overwrite replaces the theta source" "erf.rayleigh_damp_T=true")
 add_test_fire_abort(FireMrfExcessNoFlux_abort FireRestart           inputs_levelset_straight
     "erf.pbl_mrf_fire_thermal_excess = true on level 0 needs erf.fire.enable" "erf.pbl_type=MRF erf.pbl_mrf_fire_thermal_excess=true")
+# the fire engine behind the shared coupling layer (erf.fire.engine): a name that is
+# not an engine stops the run naming the key and the engines there are
+add_test_fire_abort(FireEngineUnknown_abort   FireRestart           inputs_levelset_straight
+    "erf.fire.engine = .lsfire. is not one of .native." "erf.fire.engine=lsfire")
 # the fire grid on a refined level (erf.fire.anchor_level, the finest level by default):
 # the same front as a single-level run at that resolution, the level-0 heat budget after
 # average-down (and its loss with the fire on the coarser level), restart, and a restart

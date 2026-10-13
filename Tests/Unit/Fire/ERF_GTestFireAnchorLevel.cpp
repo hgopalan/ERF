@@ -13,6 +13,7 @@
 #include "ERF_FireGrid.H"
 #include "ERF_FireAtmCoupling.H"
 #include "ERF_TerrainSlope.H"
+#include "ERF_FireSurfaceHeight.H"
 #include "ERF_FireWindExtract.H"
 
 /**
@@ -137,6 +138,48 @@ void fill_linear_wind (MultiFab& xvel, MultiFab& yvel, MultiFab& zcc)
         auto z = zcc.array(mfi);
         ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             z(i, j, k) = (Real(k) + 0.5_rt) * DX;
+        });
+    }
+}
+
+/// Face velocities whose cell averages are u = z and v = 2 z at the cell-centre
+/// height z, the same in every column, and those heights; ghosts included
+void fill_sheared_wind (MultiFab& xvel, MultiFab& yvel, MultiFab& zcc)
+{
+    for (MFIter mfi(xvel); mfi.isValid(); ++mfi) {
+        auto u = xvel.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            u(i, j, k) = (Real(k) + 0.5_rt) * DX;
+        });
+    }
+    for (MFIter mfi(yvel); mfi.isValid(); ++mfi) {
+        auto v = yvel.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            v(i, j, k) = 2.0_rt * (Real(k) + 0.5_rt) * DX;
+        });
+    }
+    for (MFIter mfi(zcc); mfi.isValid(); ++mfi) {
+        auto z = zcc.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            z(i, j, k) = (Real(k) + 0.5_rt) * DX;
+        });
+    }
+}
+
+/// Per-cell sampling height h = 15 + (x - 200) / 10 + (y - 100) / 20 m: a
+/// different height in every fire cell, 15 to 55 m over the region, all
+/// between the first and the third cell centre
+AMREX_GPU_HOST_DEVICE inline Real cell_height (Real x, Real y) noexcept
+{
+    return 15.0_rt + 0.1_rt * (x - 200.0_rt) + 0.05_rt * (y - 100.0_rt);
+}
+void fill_cell_height (MultiFab& h, const Geometry& g)
+{
+    const Real x0 = g.ProbLo(0), y0 = g.ProbLo(1), dxf = g.CellSize(0), dyf = g.CellSize(1);
+    for (MFIter mfi(h); mfi.isValid(); ++mfi) {
+        auto a = h.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            a(i, j, k) = cell_height(x0 + (Real(i) + 0.5_rt) * dxf, y0 + (Real(j) + 0.5_rt) * dyf);
         });
     }
 }
@@ -334,17 +377,54 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
 
     // Bilinear: a field linear in position is reproduced at the fire cell centre
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, 0.1, below_first_log);
+                                      nullptr, 1, nullptr, nullptr, 0.0, 0.1, below_first_log);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) { return x + 0.5_rt * y; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) { return y + 0.25_rt * x; }), 1.0e3 * TOL);
 
     // Nearest: the value at the centre of the column holding the fire cell
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 0, nullptr, nullptr, 0.0, 0.1, below_first_log);
+                                      nullptr, 0, nullptr, nullptr, 0.0, 0.1, below_first_log);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) {
         return (column_of(x) + 0.5_rt) * DX + 0.5_rt * (column_of(y) + 0.5_rt) * DX; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) {
         return (column_of(y) + 0.5_rt) * DX + 0.25_rt * (column_of(x) + 0.5_rt) * DX; }), 1.0e3 * TOL);
+}
+
+/**
+ * Each fire cell sampled at its own height (the per-cell field an engine hands
+ * the sampler, the native engine's per-fuel wind height): with u = z and
+ * v = 2 z in every column a cell sampled at h reads (h, 2 h), the height
+ * differing from cell to cell (cell_height, 15 to 55 m, between cell centres),
+ * and the sampling height recorded is the cell's own; the global height (10 m,
+ * below the first centre) is not used.
+ */
+TEST(FireAnchorLevel, EachFireCellIsSampledAtItsOwnHeight)
+{
+    AtmLevel L = region_level();
+    FireGrid fg = create_fire_grid(L.ba, L.dm, L.geom, C);
+
+    MultiFab xvel(convert(L.ba, IntVect(1, 0, 0)), L.dm, 1, 2);
+    MultiFab yvel(convert(L.ba, IntVect(0, 1, 0)), L.dm, 1, 2);
+    MultiFab zcc(L.ba, L.dm, 1, 2);
+    fill_sheared_wind(xvel, yvel, zcc);
+
+    MultiFab zs(fg.ba, fg.dm, 1, 0);
+    zs.setVal(0.0);
+    MultiFab grounds(fg.ba, fg.dm, 4, 0);
+    grounds.setVal(0.0);
+    MultiFab wind(fg.ba, fg.dm, 2, 0);
+    MultiFab ez(fg.ba, fg.dm, 1, 0);
+    MultiFab hcell(fg.ba, fg.dm, 1, 0);
+    fill_cell_height(hcell, fg.geom);
+
+    auto height = [] (Real x, Real y) { return cell_height(x, y); };
+    for (int interp : {1, 0}) {
+        fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
+                                          &hcell, interp, nullptr, nullptr, 0.0, 0.1, false);
+        EXPECT_LT(max_rel_error(wind, fg, 0, height), 1.0e3 * TOL) << "wind_interp " << interp;
+        EXPECT_LT(max_rel_error(wind, fg, 1, [&] (Real x, Real y) { return 2.0_rt * height(x, y); }), 1.0e3 * TOL);
+        EXPECT_LT(max_rel_error(ez, fg, 0, height), 1.0e3 * TOL) << "the sampling height recorded";
+    }
 }
 
 /**
@@ -378,14 +458,14 @@ TEST(FireAnchorLevel, WindBelowTheFirstCentreFollowsTheLogProfile)
     const Real f10 = std::log(10.0_rt / z0) / std::log(z1 / z0);   // 0.95379
 
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+                                      nullptr, 1, nullptr, nullptr, 0.0, z0, true);
     EXPECT_LT(max_rel_error(wind, fg, 0, [=](Real x, Real y) { return f10 * (x + 0.5_rt * y); }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [=](Real x, Real y) { return f10 * (y + 0.25_rt * x); }), 1.0e3 * TOL);
     EXPECT_NEAR(f10, 0.95379_rt, 1.0e-5) << "the factor itself";
 
     // at the first centre the profile factor is 1
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, z1, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+                                      nullptr, 1, nullptr, nullptr, 0.0, z0, true);
     EXPECT_LT(max_rel_error(wind, fg, 0, [](Real x, Real y) { return x + 0.5_rt * y; }), 1.0e3 * TOL);
 
     // a ground 2.5 m up: the first centre is 10 m above it and the 5 m target
@@ -394,7 +474,7 @@ TEST(FireAnchorLevel, WindBelowTheFirstCentreFollowsTheLogProfile)
     grounds.setVal(2.5_rt);
     const Real f5 = std::log(5.0_rt / z0) / std::log(10.0_rt / z0);
     fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 5.0, 4,
-                                      nullptr, nullptr, 0, 1, nullptr, nullptr, 0.0, z0, true);
+                                      nullptr, 1, nullptr, nullptr, 0.0, z0, true);
     EXPECT_LT(max_rel_error(wind, fg, 0, [=](Real x, Real y) { return f5 * (x + 0.5_rt * y); }), 1.0e3 * TOL);
     EXPECT_NEAR(f5, 0.84949_rt, 1.0e-5);
 }

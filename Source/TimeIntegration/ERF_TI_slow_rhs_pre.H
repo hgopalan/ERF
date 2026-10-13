@@ -1,8 +1,7 @@
 #include "ERF_SrcHeaders.H"
 
 #ifdef ERF_ENABLE_FIRE
-#include <ERF_FireLayer.H>
-#include <ERF_FireSmokeEmission.H>
+#include <ERF_FireCoupler.H>
 #endif
 
 /**
@@ -153,39 +152,22 @@
 
         // *****************************************************************************
         // Re-inject fire-to-atmosphere heat flux AFTER make_sources, which resets
-        // cc_src at every RK stage. The lagged fire flux (m_Q_atm_prev) is constant
+        // cc_src at every RK stage. The lagged fire flux (FireCoupler) is constant
         // across all RK stages and must be added here to survive the integrator.
         // *****************************************************************************
 #ifdef ERF_ENABLE_FIRE
-        // on the level the fire grid refines; coarser levels get it by average-down
-        if (m_fire_layer && level == m_fire_layer->level()
-            && m_fire_layer->get_params().injects_flux()
-            && m_fire_layer->get_Q_atm_prev()) {
+        // on the level the fire grid refines; coarser levels get it by average-down.
+        // The heat and vapour with the WRF-Fire profile, then the smoke tracer,
+        // proportional to the fuel burnt (FireCoupler::add_sources).
+        if (m_fire_coupler && level == m_fire_coupler->level()) {
             bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
-            m_fire_layer->apply_fire_coupling_to_cc_source(
-                cc_src,
-                S_old[IntVars::cons],
-                *zpc_to_use,
-                fine_geom,
-                has_moisture);
-        }
-
-        // *****************************************************************************
-        // Phase 4: Inject smoke tracer from fire heat flux AFTER make_sources
-        // and AFTER fire coupling. Smoke is proportional to fire heat flux.
-        // *****************************************************************************
-        if (m_fire_layer && level == m_fire_layer->level() && m_fire_layer->get_params().smoke_enable &&
-            m_fire_layer->get_Q_atm_prev()) {
-            inject_smoke_from_fire(
-                cc_src,
-                *m_fire_layer->get_Q_atm_prev(),
-                zpn_to_use,
-                fine_geom,
-                m_fire_layer->get_params().smoke_emission_factor,
-                m_fire_layer->smoke_heat_per_kg_atm(),
-                RhoSmoke_comp,
-                m_fire_layer->get_params().fire_debug,
-                istep[level]);
+            m_fire_coupler->add_sources(cc_src,
+                                        S_old[IntVars::cons],
+                                        *zpc_to_use,
+                                        zpn_to_use,
+                                        fine_geom,
+                                        has_moisture,
+                                        istep[level]);
         }
 #endif
 

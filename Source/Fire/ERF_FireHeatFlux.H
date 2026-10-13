@@ -296,4 +296,41 @@ inline void fill_fire_heat_flux(
     }
 }
 
+// Compute fire latent heat flux [W/m2] from sensible heat flux and fuel moisture.
+//
+// WRF-SFIRE's bookkeeping (module_fr_sfire_atm.F): the burn rate Q/h is read as
+// a wet-mass rate, of which the share b = M/(1 + M) is fuel water and the rest
+// dry fuel yielding f_w = 0.56 kg of water of combustion per kg. The loads the
+// fuel models carry are oven-dry, for which the water released per unit dry
+// fuel is M + 0.56 and the factor would be (M + 0.56) instead of b + (1 - b)
+// 0.56: 0.640 against 0.593 at M = 0.08 (7 %) and 0.860 against 0.662 at
+// M = 0.30 (23 %). The SFIRE form is kept for parity with WRF-SFIRE and the
+// Community Fire Behavior Model; fire_coupling.rst states the basis.
+inline void compute_fire_latent_flux(
+    amrex::MultiFab& Q_lat_out,
+    const amrex::MultiFab& Q_sfc,
+    amrex::Real M_f,
+    amrex::Real h_fuel_Jkg)
+{
+    if (h_fuel_Jkg <= 0.0) {
+        Q_lat_out.setVal(0.0);
+        return;
+    }
+
+    constexpr amrex::Real L_V = 2.501e6;
+    amrex::Real bmst = M_f / (1.0 + M_f);
+    constexpr amrex::Real f_water = 0.56;
+    amrex::Real ratio = L_V / h_fuel_Jkg;
+
+    for (amrex::MFIter mfi(Q_sfc, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        auto const& q_sfc_a = Q_sfc.array(mfi);
+        auto const& q_lat_a = Q_lat_out.array(mfi);
+        auto const& bx = mfi.tilebox();
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(const amrex::IntVect& iv) {
+            amrex::Real factor = ratio * (bmst + (1.0 - bmst) * f_water);
+            q_lat_a(iv) = factor * q_sfc_a(iv);
+        });
+    }
+}
+
 #endif

@@ -2056,12 +2056,23 @@ private:
     amrex::Vector<std::unique_ptr<ForestDrag>> m_forest_drag;
 
 #ifdef ERF_ENABLE_FIRE
-    std::unique_ptr<FireLayer>        m_fire_layer = nullptr;
+    /// The fire coupling (atmosphere side) and the engine it owns (erf.fire.engine)
+    std::unique_ptr<FireCoupler>      m_fire_coupler = nullptr;
     FireParams                        m_fire_params;
+    /// The native fire engine behind the coupler, for its plotfile, checkpoint and
+    /// fire-dust fields; nullptr without fire or with another engine.
+    FireLayer* fire_layer () {
+        return m_fire_coupler ? dynamic_cast<FireLayer*>(&m_fire_coupler->engine()) : nullptr;
+    }
+    const FireLayer* fire_layer () const {
+        return m_fire_coupler ? dynamic_cast<const FireLayer*>(&static_cast<const FireCoupler&>(*m_fire_coupler).engine()) : nullptr;
+    }
     std::string m_fire_plot_file {"plt_fire_"};
     int         m_fire_plot_int  = -1;
     amrex::Real m_fire_plot_per  = -1.0;
     void ReadCheckpointFileFire ();
+    /// Restore the fire coupling's lagged fluxes, whatever the engine
+    void ReadCheckpointFileFireCoupling ();
 #endif
 
 

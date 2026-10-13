@@ -8,6 +8,9 @@
 #include <vector>
 #include <ERF_FireParams.H>
 #include <ERF_FireGrid.H>
+#include <ERF_FireEngine.H>
+#include <ERF_FireWindAdjust.H>
+#include <ERF_FireEnginePrerequisites.H>
 #include <ERF_Rothermel.H>
 #include <ERF_FarsiteEllipse.H>
 #include <ERF_FireIgnition.H>
@@ -55,17 +58,17 @@ class ERF;
 
 /**
  * @file ERF_FireLayer.H
- * @brief Main fire layer container and orchestrator
+ * @brief The native fire engine
  *
- * The FireLayer class is the primary interface between the ERF atmospheric
- * solver and the wildfire spread module. It owns all fire-specific data
+ * The FireLayer class is ERF's own wildfire spread model, the fire engine
+ * behind the shared coupling layer (FireCoupler, ERF_FireEngine.H) when
+ * erf.fire.engine = native (the default). It owns all fire-specific data
  * (level-set, wind, ROS, slopes, etc.) and orchestrates the computation
- * pipeline each timestep.
+ * pipeline each timestep; the coupler owns what touches the atmosphere.
  *
- * Owned by ERF as std::unique_ptr<FireLayer> m_fire_layer, created in
- * ERF::initializeFire() (from the ERF constructor) if erf.fire.enable = true,
- * and set up by initialize() in ERF::InitData_post(); nothing may read its
- * fire inputs (m_params) in between.
+ * Created with ERF's FireParams in ERF::initializeFire() (from the ERF
+ * constructor) if erf.fire.enable = true, handed to the FireCoupler, and set
+ * up by FireCoupler::initialize() in ERF::InitData_post().
  */
 
 /**
@@ -105,30 +108,35 @@ class ERF;
  *   - comp 3: M_lh       [fraction] — Live herbaceous moisture (BEHAVE multi-class path only)
  *   - comp 4: M_lw       [fraction] — Live woody moisture (BEHAVE multi-class path only)
  */
-class FireLayer
+class FireLayer : public FireEngine
 {
 public:
 
-    /** @brief Constructor */
-    FireLayer() = default;
+    /**
+     * @brief Constructor
+     * @param[in] fire_params  Fire configuration (ERF's, read once at start-up)
+     */
+    explicit FireLayer(const FireParams& fire_params) : m_params(fire_params) {}
 
     /** @brief Destructor */
-    ~FireLayer() = default;
+    ~FireLayer() override = default;
+
+    /// erf.fire.engine = native
+    const char* name() const override { return "native"; }
+
+    /// The native engine's own start-up checks (verify_native_fire_prerequisites).
+    void verify_prerequisites(const ERF& erf, int lev) override;
 
     /**
-     * @brief Initialize fire module after SurfaceLayer is ready.
+     * @brief Set the native engine up on the fire grid the coupler built.
      *
-     * Called from ERF::InitData_post(). Performs:
-     * 1. Prerequisite verification (verify_fire_prerequisites)
-     * 2. Create fire grid (create_fire_grid)
-     * 3. Allocate all MultiFabs
-     * 4. Compute static fields: terrain slopes, curvature
-     * 5. Initialize fire level-set (ignition circle)
-     * 6. Set initial fuel properties (moisture, fuel load)
-     *
-     * The caller (ERF, a friend of itself) passes the private members as
-     * explicit arguments so that FireLayer never needs to access ERF's
-     * private/protected data directly.
+     * Called from FireCoupler::initialize() in ERF::InitData_post(), after the
+     * coupling's and the engine's start-up checks and once the SurfaceLayer is
+     * ready. Performs:
+     * 1. Allocate all MultiFabs on the fire grid
+     * 2. Compute static fields: terrain slopes, curvature, column grounds
+     * 3. Initialize fire level-set (ignition circle)
+     * 4. Set initial fuel properties (moisture, fuel load)
      *
      * @param[in] erf                ERF instance — used only for public
      *                               AmrCore accessors (boxArray, DistributionMap,
@@ -136,29 +144,24 @@ public:
      * @param[in] lev                AMR level the fire grid refines
      *                               (fire_anchor_level(): erf.fire.anchor_level,
      *                               the finest level by default).
-     * @param[in] surface_layer_ptr  Pointer to the SurfaceLayer owned by ERF
-     *                               (pass m_SurfaceLayer[Orientation::zlo()].get() at the call site).
-     *                               May be nullptr when called before the surface
-     *                               layer is constructed (prereq check only).
+     * @param[in] fg                 The fire grid (create_fire_grid).
+     * @param[in] surface_layer_ptr  Pointer to the bottom SurfaceLayer owned by ERF.
      * @param[in] z_phys_nd_atm      Atmospheric nodal terrain-height MultiFab of
-     *                               level lev (pass z_phys_nd[lev].get());
+     *                               level lev (z_phys_nd[lev].get());
      *                               nullptr on flat terrain (TerrainType::None).
-     * @param[in] fire_params        Fire configuration struct.
-     *
-     * @throw amrex::Error if prerequisites not met.
      */
-    void initialize(const ERF&            erf,
-                    int                   lev,
-                    const SurfaceLayer*   surface_layer_ptr,
-                    const amrex::MultiFab* z_phys_nd_atm,
-                    const FireParams&     fire_params);
+    void initialize(const ERF&             erf,
+                    int                    lev,
+                    const FireGrid&        fg,
+                    const SurfaceLayer*    surface_layer_ptr,
+                    const amrex::MultiFab* z_phys_nd_atm) override;
 
     /**
      * @brief Advance fire simulation by one atmospheric timestep.
      *
-     * Called from ERF::Advance() once per step of the level the fire grid
-     * refines, after that level's dycore, with `time` the START of the step
-     * (ERF passes t_old). The pipeline, in order:
+     * Called from FireCoupler::advance() once per step of the level the fire
+     * grid refines, after that level's dycore, with forcing.time the START of
+     * the step (t_old). The pipeline, in order:
      * 1. wind at sampled_wind_ht() from the atmospheric columns, the WAF and the
      *    terrain corrections (fire_wind_ref -> fire_wind_eff)
      * 2. fuel moisture (time-lag or stick model, rain) when moisture_dynamic
@@ -172,35 +175,33 @@ public:
      * 7. boundary guard, heat flux and burnout, structure heat sources,
      *    exposure accumulators, spotting, probes, structure ignition, the
      *    exposure and statistics CSV rows
-     * ERF then calls update_atm_flux_buffer for the lagged coupling.
+     * The coupler then calls fill_fluxes() for the lagged coupling.
      *
-     * @param[in]     time           Start time of the atmospheric step [s]
-     * @param[in]     dt             Timestep [s]
-     * @param[in,out] surface_layer  Unused (kept for interface symmetry with the
-     *                               dust layer; the fire samples the wind itself).
-     * @param[in]     xvel           x-velocity on atmospheric grid [m/s]
-     * @param[in]     yvel           y-velocity on atmospheric grid [m/s]
-     * @param[in]     z_phys_cc      Cell-center terrain height on atmospheric grid [m]
-     * @param[in]     T_atm_k0       Air temperature at k=0 [K] (theta * Exner, see
-     *                               compute_t_from_conservative). On the
-     *                               atmospheric grid (coarser than fire grid).
-     * @param[in]     RH_atm_k0      Atmospheric relative humidity at k=0 [fraction 0-1]
-     *                               On atmospheric grid (coarser than fire grid).
-     * @param[in]     precip_accum_k0 Surface precipitation accumulation of every
-     *                               column [kg/m2], on the atmospheric grid
-     *                               coarsened to one cell in z (ERF_FirePrecip.H);
-     *                               required with erf.fire.precip_source =
-     *                               atmosphere, ignored (may be null) otherwise.
+     * @param[in] forcing  The atmospheric state (ERF_FireEngine.H): the wind,
+     *                     the cell-centre heights, the air temperature and
+     *                     relative humidity at k = 0 and, with
+     *                     erf.fire.precip_source = atmosphere, the surface
+     *                     precipitation accumulation of every column
      */
-    void advance(amrex::Real time,
-                 amrex::Real dt,
-                 SurfaceLayer& surface_layer,
-                 const amrex::MultiFab& xvel,
-                 const amrex::MultiFab& yvel,
-                 const amrex::MultiFab& z_phys_cc,
-                 const amrex::MultiFab& T_atm_k0,
-                 const amrex::MultiFab& RH_atm_k0,
-                 const amrex::MultiFab* precip_accum_k0 = nullptr);
+    void advance(const FireForcing& forcing) override;
+
+    /**
+     * @brief The sensible and latent fluxes of the step just taken.
+     *
+     * Called from FireCoupler after advance(), when heat or smoke reaches the
+     * atmosphere. The sensible flux is fire_heat_flux, scaled by the dry-fuel
+     * fraction under erf.fire.heat_flux_partition = cfbm; the latent flux
+     * (erf.fire.inject_latent) is computed from the same unpartitioned release.
+     */
+    void fill_fluxes(FireFluxes& fluxes) override;
+
+    /// erf.fire.precip_source = atmosphere: the rain per column comes from the forcing.
+    bool wants_surface_precip() const override { return m_precip_accum_prev != nullptr; }
+
+    /// Open fraction of every atmospheric column (erf.fire.heat_open_fraction), or nullptr.
+    const amrex::MultiFab* heat_open_fraction_atm() const override { return m_open_frac_atm.get(); }
+    /// Mean roof height of the blocked part of every atmospheric column, or nullptr.
+    const amrex::MultiFab* roof_height_atm() const override { return m_roof_h_atm.get(); }
 
     /**
      * @brief Get heat flux for atmospheric coupling.
@@ -547,28 +548,6 @@ public:
         return m_fg;
     }
 
-    /**
-     * @brief Get coarsened sensible heat flux on atmospheric grid from previous timestep.
-     * @return Pointer to m_Q_atm_prev MultiFab (allocated and zeroed by initialize(),
-     *         so never null afterwards; zero until the first advance fills it).
-     */
-    const amrex::MultiFab* get_Q_atm_prev() const
-    {
-        return m_Q_atm_prev.get();
-    }
-
-    /**
-     * @brief Get coarsened latent heat flux on atmospheric grid from previous timestep.
-     * @return Pointer to m_Q_lat_atm_prev MultiFab (allocated and zeroed by
-     *         initialize(), so never null afterwards).
-     */
-    const amrex::MultiFab* get_Q_lat_atm_prev() const
-    {
-        return m_Q_lat_atm_prev.get();
-    }
-
-    /// Mutable access to the lagged sensible flux buffer, for checkpoint restart.
-    amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
     amrex::MultiFab* get_heat_flux_mut()  { return fire_heat_flux.get(); }
     /// The previous step's flame length is read by the suppression hold test
     /// before advance() recomputes it, so it is checkpointed with the heat flux.
@@ -675,10 +654,8 @@ public:
      * change with erf.fire.heat_flux_partition.
      * @return Heat per kilogram of fuel [J/kg] to divide the lagged flux by.
      */
-    amrex::Real smoke_heat_per_kg_atm() const;
+    amrex::Real smoke_heat_per_kg() const override;
 
-    /// Mutable access to the lagged latent flux buffer, for checkpoint restart.
-    amrex::MultiFab* get_Q_lat_atm_prev_mut() { return m_Q_lat_atm_prev.get(); }
 
     /// Heat-release diagnostic h (w0 - w) R [kW/m], the pre-2026-10 form of the
     /// fireline intensity (ERF_FireDiagnostics.H); always allocated.
@@ -773,40 +750,6 @@ public:
     {
         return fire_latent_flux.get();
     }
-
-    /**
-     * @brief Store the current fire heat flux into the previous-step buffer.
-     *
-     * Called from ERF::Advance() at the END of the fire advance, after
-     * compute_heat_flux_and_diagnostics() has filled fire_heat_flux.
-     * Coarsens fire_heat_flux from fire grid to atmospheric grid and
-     * computes latent flux.
-     *
-     * @param[in] geom_atm  Atmospheric geometry (used for coarsening)
-     */
-    void update_atm_flux_buffer(const amrex::Geometry& geom_atm);
-
-    /**
-     * @brief Apply the previous-step fire fluxes to cc_source using WRF-Fire profile.
-     *
-     * Injects the one-step-lagged fire flux from the previous timestep into
-     * cc_source using the exponential distribution profile. Called from the slow
-     * right-hand side at every RK stage (ERF_TI_slow_rhs_pre.H), after
-     * make_sources has rebuilt cc_source; m_Q_atm_prev is constant over the
-     * step, so every stage receives the same tendency.
-     *
-     * @param[in,out] cc_source    3D source array for conserved variables
-     * @param[in]     S_old        atmospheric conserved state at time n (for density)
-     * @param[in]     z_phys_cc    cell-centre terrain height [m]
-     * @param[in]     geom_atm     atmospheric geometry
-     * @param[in]     has_moisture whether moisture is active
-     */
-    void apply_fire_coupling_to_cc_source(
-        amrex::MultiFab& cc_source,
-        const amrex::MultiFab& S_old,
-        const amrex::MultiFab& z_phys_cc,
-        const amrex::Geometry& geom_atm,
-        bool has_moisture);
 
     /**
      * @brief Get the fire parameters for access to coupling type and other settings.
@@ -923,16 +866,12 @@ private:
     amrex::Real       m_prev_window_end  = 0.0;
     bool              m_have_prev_window = false;
 
-    // Phase 6: fire-atmosphere coupling MultiFabs
-    // Fire fluxes coarsened onto the atmospheric columns of the fire grid's level
-    // (one slab per box of that level), held from the previous timestep for
-    // injection into cc_source at the start of the next (one-step explicit lag).
-    // Their ghost columns hold the neighbouring box's value for the MRF fire
-    // thermal excess, which reads a halo around every tile; outside the refined
-    // region of a finer level they hold zero.
-    std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
-    std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
-    amrex::Real                              m_f_dry_prev = 1.0;      // partition factor m_Q_atm_prev was filled with
+    // Fire-atmosphere coupling: the sensible flux handed to the coupler under
+    // the CFBM partition (fire_heat_flux times the dry-fuel fraction), and the
+    // partition factor of the last fluxes handed over, which the smoke divides
+    // back out. The coupler owns the lagged fluxes on the atmospheric columns.
+    std::unique_ptr<amrex::MultiFab>         m_Q_sens_fire;           // sensible [W/m²], CFBM partition only
+    amrex::Real                              m_f_dry_prev = 1.0;      // partition factor of the last fill_fluxes()
     bool                                     m_polygon_applied = false; // the timed perimeter polygon has been stamped
 
     // Open-fraction heat placement (erf.fire.heat_open_fraction): per
@@ -978,6 +917,9 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..FUEL_SLOT_COUNT-1], device copy
     amrex::Gpu::DeviceVector<amrex::Real> m_d_burnout_tau;   ///< burnout e-folding time by fuel code (index 1-13) [s], erf.fire.burnout_model = sfire
     bool                                     m_use_per_fuel_wind_ht = false;
+    /// Per-fuel wind height [m] of every fire cell, filled once by initialize()
+    /// when the per-fuel height is on and the fuel varies per cell (a fuel map)
+    std::unique_ptr<amrex::MultiFab>         m_wind_ht_cell;
 
     // Deck-defined fuel models (erf.fire.custom_fuel.*) and the slot table of
     // fuel properties every ROS model, the heat flux and the fuel load read.
@@ -1092,7 +1034,7 @@ private:
     amrex::Real                              m_ignition_r = 20.0;
 
     // Configuration
-    FireParams                               m_params{FireParams::DefaultsOnly{}};  ///< set by initialize()
+    FireParams                               m_params;  ///< set by the constructor
 
 
     /// Reach estimate on the first step with a burning cell: distance to each
@@ -1116,8 +1058,16 @@ public:
      */
     void apply_waf_to_wind();
 
-    /// Fill m_open_frac_atm and m_roof_h_atm from the mask and structure height.
-    void build_open_fraction(const amrex::Geometry& geom_atm);
+    /// Fill m_wind_ht_cell with each fire cell's per-fuel wind height (the
+    /// slot of its fuel code in m_d_fcwh), for the shared wind sampler; called
+    /// once by initialize(). Public for the nvcc rule above.
+    void fill_per_fuel_wind_height();
+
+    /// Fill m_open_frac_atm and m_roof_h_atm, on the k = 0 slabs ba_atm_2d of
+    /// the fire grid's level, from the mask and structure height.
+    void build_open_fraction(const amrex::Geometry& geom_atm,
+                             const amrex::BoxArray& ba_atm_2d,
+                             const amrex::DistributionMapping& dm_atm);
 
     /// Rate of spread for ros_model = "prescribed" (ERF_PrescribedFire.H).
     void fill_prescribed_ros(amrex::MultiFab& out) const;

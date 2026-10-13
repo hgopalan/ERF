@@ -72,7 +72,7 @@ ERF::sum_integrated_quantities (double time)
     }
 #endif
 #ifdef ERF_ENABLE_FIRE
-    if (m_fire_layer) {
+    if (m_fire_coupler) {
         smoke_sl = volWgtSumMF(0, vars_new[0][Vars::cons], RhoSmoke_comp, dJ0, mfx0, mfy0, false);
     }
 #endif
@@ -96,7 +96,7 @@ ERF::sum_integrated_quantities (double time)
         }
 #endif
 #ifdef ERF_ENABLE_FIRE
-        if (m_fire_layer) {
+        if (m_fire_coupler) {
             smoke_ml += volWgtSumMF(lev, vars_new[lev][Vars::cons], RhoSmoke_comp, dJ, mfx, mfy, true);
         }
 #endif
@@ -179,7 +179,7 @@ ERF::sum_integrated_quantities (double time)
            if (m_DustLayer) { Print() << " RHO DUST   = " << dust_sl << '\n'; }
 #endif
 #ifdef ERF_ENABLE_FIRE
-           if (m_fire_layer) { Print() << " RHO SMOKE  = " << smoke_sl << '\n'; }
+           if (m_fire_coupler) { Print() << " RHO SMOKE  = " << smoke_sl << '\n'; }
 #endif
         } else {
 #if 1
@@ -194,7 +194,7 @@ ERF::sum_integrated_quantities (double time)
            if (m_DustLayer) { Print() << " RHO DUST   SL/ML = " << dust_sl << " " << dust_ml << '\n'; }
 #endif
 #ifdef ERF_ENABLE_FIRE
-           if (m_fire_layer) { Print() << " RHO SMOKE  SL/ML = " << smoke_sl << " " << smoke_ml << '\n'; }
+           if (m_fire_coupler) { Print() << " RHO SMOKE  SL/ML = " << smoke_sl << " " << smoke_ml << '\n'; }
 #endif
         }
 

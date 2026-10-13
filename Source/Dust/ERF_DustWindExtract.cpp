@@ -5,7 +5,7 @@
  * Extracts atmospheric wind at reference height and surface fields
  * from the 3D atmospheric solver onto the 2D dust grid each timestep.
  * The wind interpolation follows column_wind_at_height in
- * Source/Fire/ERF_FireWindExtract.cpp (bisection bracket, clamped to the lowest
+ * Source/FireCoupling/ERF_FireWindExtract.cpp (bisection bracket, clamped to the lowest
  * and highest cell centres), with DustGrid substituted for FireGrid.
  */
 

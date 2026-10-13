@@ -32,7 +32,6 @@ public:
 
     void add (const char* key, const std::string& v) { m_pp.add(key, v); m_names.emplace_back(key); }
     void add (const char* key, double v)             { m_pp.add(key, v); m_names.emplace_back(key); }
-    void add (const char* key, int v)                { m_pp.add(key, v); m_names.emplace_back(key); }
     void add (const char* key, bool v)               { m_pp.add(key, v); m_names.emplace_back(key); }
 
 private:

@@ -175,8 +175,8 @@ ERF::Evolve ()
 
     // Write fire output at time 0 (initial condition)
 #ifdef ERF_ENABLE_FIRE
-    if (m_fire_layer && istep[0] == 0 && (m_fire_plot_int > 0 || m_fire_plot_per > zero)) {
-        WriteFirePlotfile(m_fire_plot_file, *m_fire_layer, cur_time, istep[0]);
+    if (fire_layer() && istep[0] == 0 && (m_fire_plot_int > 0 || m_fire_plot_per > zero)) {
+        WriteFirePlotfile(m_fire_plot_file, *fire_layer(), cur_time, istep[0]);
         if (m_fire_params.fire_debug) {
             amrex::Print() << "[FIRE] Initial fire output written at time 0" << std::endl;
         }
@@ -231,7 +231,7 @@ ERF::Evolve ()
 #ifdef ERF_USE_DUST
         if (m_DustLayer) {
 #ifdef ERF_ENABLE_FIRE
-            if (m_fire_dust_coupling.enabled && m_fire_layer) {
+            if (m_fire_dust_coupling.enabled && fire_layer()) {
                 // Every fire field the dust step reads is copied onto the dust
                 // BoxArray by index overlap, with the DUST periodicity: the dust
                 // domain is the atmosphere's refined by the grid ratio, and with the
@@ -248,12 +248,12 @@ ERF::Evolve ()
                 // fire-domain-sized host vector and all-reduced every step.
                 // the three dust-grid scratch fields are defined once (the dust
                 // BoxArray never changes) and refilled every step
-                if (m_fire_layer->get_levelset() != nullptr) {
+                if (fire_layer()->get_levelset() != nullptr) {
                     if (!m_fire_phi_scratch_for_crust.ok())
                         m_fire_phi_scratch_for_crust.define(dust_ba, dust_dm, 1, 0);
                     m_fire_phi_scratch_for_crust.setVal(1.0_rt);   // unburned where no fire cell lands
                     m_fire_phi_scratch_for_crust.ParallelCopy(
-                        *m_fire_layer->get_levelset(), 0, 0, 1, 0, 0, per);
+                        *fire_layer()->get_levelset(), 0, 0, 1, 0, 0, per);
                     m_fire_dust_coupling.fire_phi_scratch = &m_fire_phi_scratch_for_crust;
                 } else {
                     m_fire_dust_coupling.fire_phi_scratch = nullptr;
@@ -265,17 +265,17 @@ ERF::Evolve ()
                 // if it were the 6.1 m wind, 0.36x for grass, so the fire path never
                 // exceeded the surface layer's u*.
                 if (m_fire_dust_coupling.fire_wind_to_dust &&
-                    m_fire_layer->get_wind_ref() != nullptr &&
-                    m_fire_layer->get_levelset() != nullptr) {
+                    fire_layer()->get_wind_ref() != nullptr &&
+                    fire_layer()->get_levelset() != nullptr) {
                     amrex::MultiFab& fire_wind_scratch = m_fire_wind_scratch_for_ustar;   // (u, v), 1 ghost cell
                     if (!fire_wind_scratch.ok()) fire_wind_scratch.define(dust_ba, dust_dm, 2, 1);
                     fire_wind_scratch.setVal(0.0_rt);
                     fire_wind_scratch.ParallelCopy(
-                        *m_fire_layer->get_wind_ref(), 0, 0, 2, 0, 1, per);
+                        *fire_layer()->get_wind_ref(), 0, 0, 2, 0, 1, per);
                     fire_wind_scratch.FillBoundary(per);
 
                     const int C = amrex::max(
-                        m_fire_layer->get_grid_ratio() / m_DustLayer->get_grid_ratio(), 1);
+                        fire_layer()->get_grid_ratio() / m_DustLayer->get_grid_ratio(), 1);
 
                     // Into the fire-u* field, which advance() maxes into u* after it
                     // has filled u* from the surface layer. Applied to dust_ustar_in
@@ -298,12 +298,12 @@ ERF::Evolve ()
                 // Phase 3: fire heat flux for the convective lofting, applied inside
                 // DustLayer::advance before the budget and the particles read the flux
                 if (m_fire_dust_coupling.fire_lofting_enabled &&
-                    m_fire_layer->get_heat_flux()) {
+                    fire_layer()->get_heat_flux()) {
                     if (!m_fire_heat_scratch_for_lofting.ok())
                         m_fire_heat_scratch_for_lofting.define(dust_ba, dust_dm, 1, 1);
                     m_fire_heat_scratch_for_lofting.setVal(0.0_rt);
                     m_fire_heat_scratch_for_lofting.ParallelCopy(
-                        *m_fire_layer->get_heat_flux(), 0, 0, 1, 0, 1, per);
+                        *fire_layer()->get_heat_flux(), 0, 0, 1, 0, 1, per);
                     m_fire_heat_scratch_for_lofting.FillBoundary(per);
                     m_DustLayer->set_fire_lofting(&m_fire_heat_scratch_for_lofting,
                                                   m_fire_dust_coupling.lofting_k_loft,
@@ -418,9 +418,9 @@ ERF::WriteAtIntermediateTime (int step, double cur_time)
     }
 
 #ifdef ERF_ENABLE_FIRE
-    if (m_fire_layer && (m_fire_plot_int > 0 || m_fire_plot_per > zero)) {
+    if (fire_layer() && (m_fire_plot_int > 0 || m_fire_plot_per > zero)) {
         if (writeNow(cur_time, step+1, m_fire_plot_int, m_fire_plot_per, dt[0], last_fire_plot_time)) {
-            WriteFirePlotfile(m_fire_plot_file, *m_fire_layer, cur_time, step+1);
+            WriteFirePlotfile(m_fire_plot_file, *fire_layer(), cur_time, step+1);
             if (m_fire_plot_per > zero) {last_fire_plot_time += m_fire_plot_per;}
         }
     }
@@ -1724,11 +1724,11 @@ ERF::InitData_post ()
     }
 
 #ifdef ERF_ENABLE_FIRE
-    // The fire layer is initialised after the surface layers are built (so its
+    // The fire coupling is initialised after the surface layers are built (so its
     // own prerequisite checks run there), and ERF::Advance samples Theta_prim,
     // which is only allocated with a surface layer. Any other bottom boundary
     // used to skip both and crash on the first step, so stop here instead.
-    if (m_fire_layer &&
+    if (m_fire_coupler &&
         phys_bc_type[Orientation(Direction::z,Orientation::low)] != ERF_BC::surface_layer) {
         Abort("[FIRE] The fire module requires a surface layer at the bottom boundary: "
               "set zlo.type = \"surface_layer\" with erf.most.z0 and a diffusion choice "
@@ -2149,29 +2149,35 @@ ERF::InitData_post ()
         ReadCheckpointFileSurfaceLayer();
     }
 
-    // Initialize the fire layer once every surface layer exists (on a restart,
-    // after their fields are restored), on the level its grid refines:
+    // Initialize the fire coupling and its engine once every surface layer
+    // exists (on a restart, after their fields are restored), on the level
+    // the fire grid refines:
     // erf.fire.anchor_level, the finest level when unset (level 0 on a
     // single-level run).
     // This runs on a clean start and on a restart alike: on a restart the
     // fields are allocated and set up from the inputs here, then overwritten
-    // from the checkpoint by ReadCheckpointFileFire().
+    // from the checkpoint by ReadCheckpointFileFire() and
+    // ReadCheckpointFileFireCoupling().
 #ifdef ERF_ENABLE_FIRE
     // z_phys_nd[fire_lev] is null on flat terrain; the fire
-    // layer handles that case itself, so it must not gate initialization.
-    if (m_fire_layer) {
-        const int fire_lev = fire_anchor_level(m_fire_params, finest_level);
-        m_fire_layer->initialize(*this, fire_lev, m_SurfaceLayer[Orientation::zlo()].get(), z_phys_nd[fire_lev].get(), m_fire_params);
+    // engine handles that case itself, so it must not gate initialization.
+    if (m_fire_coupler) {
+        const int fire_lev = fire_anchor_level(m_fire_coupler->params().anchor_level, finest_level);
+        m_fire_coupler->initialize(*this, fire_lev, m_SurfaceLayer[Orientation::zlo()].get(), z_phys_nd[fire_lev].get());
         // erf.fire.precip_source = atmosphere needs the microphysics accumulators of the
         // fire grid's level, which exist now that every level is built.
-        verify_fire_precip_source(m_fire_params,
+        verify_fire_precip_source(m_fire_params.precip_source,
                                   micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(fire_lev)
                                         : SurfacePrecipAccumulationSources{});
+        // The native engine's own start-up: the run end for its reach
+        // estimate and the check that the ignition marked a cell.
+        FireLayer* fire = fire_layer();
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(fire != nullptr, "[FIRE] erf.fire.engine = native is the only engine");
         // For the reach estimate at ignition: max_step counts level-0 steps, and the
         // fire takes one step per step of its own level.
         int fire_steps_per_coarse_step = 1;
         for (int l = 1; l <= fire_lev; ++l) { fire_steps_per_coarse_step *= nsubsteps[l]; }
-        m_fire_layer->set_run_end(stop_time, max_step, fire_steps_per_coarse_step);
+        fire->set_run_end(stop_time, max_step, fire_steps_per_coarse_step);
 
         // Verify that at least one cell was marked during fire initialization,
         // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at
@@ -2185,10 +2191,10 @@ ERF::InitData_post ()
             || !m_fire_params.ignition.ignition_schedule_file.empty()
             || m_fire_params.ignition.threshold_enable
             || (m_fire_params.prescribed_heat.flux > 0.0);
-        if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
+        if (const amrex::MultiFab* phi = fire->get_levelset(); phi && !deferred_ignition) {
             Real phi_min = phi->min(0);
             if (!(phi_min < 0.0_rt)) {
-                const amrex::Geometry& gf = m_fire_layer->get_fire_geom();
+                const amrex::Geometry& gf = fire->get_fire_geom();
                 std::ostringstream msg;
                 msg << "[FIRE] Fire initialization failed: no cells were marked as burned. "
                     << "Check ignition parameters (ignition_x, ignition_y, ignition_r";
@@ -2201,7 +2207,8 @@ ERF::InitData_post ()
         }
 
         if (restart_chkfile != "") {
-            ReadCheckpointFileFire();
+            ReadCheckpointFileFire();          // the native engine's state
+            ReadCheckpointFileFireCoupling();  // the coupling's lagged fluxes
         }
     }
 #endif
@@ -2216,7 +2223,7 @@ ERF::InitData_post ()
                 m_DustLayer->write_diag_header();
             }
 #ifdef ERF_ENABLE_FIRE
-            if (m_fire_layer && m_DustLayer) {
+            if (fire_layer() && m_DustLayer) {
                 amrex::ParmParse pp("erf");
                 pp.query("fire_dust_coupling",        m_fire_dust_coupling.enabled);
                 pp.query("fire_dust_crust_reduction", m_fire_dust_coupling.post_fire_crust_reduction);
@@ -2227,7 +2234,7 @@ ERF::InitData_post ()
                 // erf.fire.use_per_fuel_wind_ht): the dust-side height follows
                 // it, and a different value aborts
                 {
-                    amrex::Real wind_ref_ht = m_fire_layer->get_params().sampled_wind_ht();
+                    amrex::Real wind_ref_ht = fire_layer()->get_params().sampled_wind_ht();
                     m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
                     if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust) {
                     amrex::Real zref_given = wind_ref_ht;
@@ -2762,17 +2769,6 @@ if (m_DustLayer && restart_chkfile.empty()) {
         }
     }
 
-/*#ifdef ERF_ENABLE_FIRE
-    // Initialize fire module
-    m_fire_params = FireParams();
-    if (m_fire_params.enable) {
-        m_fire_layer = std::make_unique<FireLayer>();
-        m_fire_layer->initialize(*this,
-                         m_SurfaceLayer[Orientation::zlo()].get(),
-                         *z_phys_nd[0],
-                         m_fire_params);
-    }
-#endif*/
 }
 
 //
@@ -3360,7 +3356,8 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
 #ifdef ERF_ENABLE_FIRE
     // Contracts between the fire inputs and the solver inputs, checked here
     // where ReadParameters() has filled solverChoice and before any level is
-    // built (the grid-dependent checks stay in verify_fire_prerequisites).
+    // built (the grid-dependent checks stay in verify_fire_prerequisites and
+    // verify_native_fire_prerequisites).
     if (m_fire_params.enable) {
         // The smoke tracer is a transported scalar: without the scalar
         // transport its emission is injected and dropped every stage.
@@ -3423,7 +3420,7 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
                          + " needs erf.fire.enable = true with erf.fire.coupling_type = lagged or synchronous"
                          " (the fire flux it adds)");
         }
-        // the lagged flux carries 5 halo columns (FireLayer::initialize); the
+        // the lagged flux carries 5 halo columns (FireCoupler::initialize); the
         // smoothing stencil must fit them, and used to abort at the first step
         if (tc.enable_pblh_smoothing && tc.pblh_smoothing_passes > 5) {
             amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess reads the lagged fire flux in a halo of 5 columns;"
@@ -3432,7 +3429,17 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
         }
     }
     if (m_fire_params.enable) {
-        m_fire_layer = std::make_unique<FireLayer>();
+        // The engine erf.fire.engine selects, behind the shared coupling layer.
+        // FireParams has already rejected any other name (FireEngineUnknown_abort);
+        // the abort below is the backstop for an engine added there but not here.
+        const FireCouplingParams coupling = m_fire_params.coupling_params();
+        std::unique_ptr<FireEngine> engine;
+        if (coupling.engine == "native") {
+            engine = std::make_unique<FireLayer>(m_fire_params);
+        } else {
+            amrex::Abort("[FIRE] erf.fire.engine = \"" + coupling.engine + "\" is not one of \"native\"");
+        }
+        m_fire_coupler = std::make_unique<FireCoupler>(coupling, std::move(engine));
         amrex::Print() << "[FIRE] Fire module enabled (grid_ratio="
                        << m_fire_params.grid_ratio << ")\n";
         if (m_fire_params.fire_debug) {

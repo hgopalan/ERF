@@ -204,7 +204,7 @@ there. Whether that was benign depended on the box layout. With one box per
 rank the case ran; with two boxes on one rank, or two per rank on four ranks,
 the level set blew up at the inflow face on the third step and the fire
 "burned" twenty hectares in fifty seconds. Every fire-grid exchange now goes
-through `fire_fill_boundary` (`Source/Fire/ERF_FireGrid.H`), which
+through `fire_fill_boundary` (`Source/FireCoupling/ERF_FireGrid.H`), which
 extrapolates the nearest interior value into the ghost cells of a
 non-periodic face, and five box layouts on one to four ranks give the same
 fire to roundoff. Periodic cases are unchanged.

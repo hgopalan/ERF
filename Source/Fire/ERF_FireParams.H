@@ -9,6 +9,7 @@
 #include <vector>
 #include <ERF_FuelModels.H>
 #include <ERF_FbpModel.H>
+#include <ERF_FireCouplingParams.H>
 
 /**
  * @file ERF_FireParams.H
@@ -23,6 +24,9 @@
 struct FireParams
 {
     bool              enable              = false;       ///< Enable fire module
+    // The fire engine behind the shared coupling layer (FireCoupler); the
+    // native engine (FireLayer) is the only one so far.
+    std::string       engine              = "native";    ///< erf.fire.engine
     bool              fire_debug          = false;       ///< Enable debug output for fire calculations
     int               grid_ratio          = 5;           ///< Fire grid refinement factor (C)
     // The AMR level whose grid the fire grid refines. -1 (default) is the finest
@@ -852,18 +856,6 @@ struct FireParams
     // the lagged flux lives on the atmospheric grid without the fuel codes.
     bool  smoke_heat_from_fuel   = false;
 
-    /// Tag for a FireParams that keeps the defaults above and reads no input.
-    struct DefaultsOnly {};
-
-    /**
-     * @brief The defaults, without reading ParmParse
-     *
-     * For a copy that is overwritten before use (FireLayer's, set by
-     * FireLayer::initialize from ERF's): reading the inputs again would run
-     * every start-up check and print every warning a second time.
-     */
-    explicit FireParams(DefaultsOnly) {}
-
     /**
      * @brief Construct FireParams from ParmParse
      *
@@ -1142,7 +1134,7 @@ struct FireParams
        pp.query("levelset.visc_front_cells", levelset_visc_front_cells);
        pp.query("levelset.visc_transition_cells", levelset_visc_transition_cells);
        // ranges of the level-set controls (cfl, reinit_every and reinit_iters
-       // are checked in verify_fire_prerequisites with the grid in hand)
+       // are checked in verify_native_fire_prerequisites with the grid in hand)
        // (levelset.reinit_dtau and reinit_jp_sign_eps2 take any value: <= 0
        // selects the automatic 0.01 dx and dx^2, the defaults are -1)
        nonneg("levelset.eps_visc", levelset_eps_visc);
@@ -1201,6 +1193,8 @@ struct FireParams
        pp.query("fire_stats_csv_file", fire_stats_csv_file);
 
        // Phase 6: fire-atmosphere coupling parameters
+       pp.query("engine", engine);
+       one_of("engine", engine, {"native"});
        pp.query("heat_flux_alfg", heat_flux_alfg);
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);
@@ -2114,6 +2108,28 @@ struct FireParams
     bool guards_edge()  const { return boundary_guard_cells > 0 && boundary_guard_action != "none"; }
     bool guard_aborts() const { return boundary_guard_action == "abort"; }
     bool injects_flux()   const { return is_lagged() || is_synchronous(); }
+
+    /// The inputs of the shared coupling layer (FireCoupler), as parsed and
+    /// checked here.
+    FireCouplingParams coupling_params() const
+    {
+        FireCouplingParams c;
+        c.engine                = engine;
+        c.grid_ratio            = grid_ratio;
+        c.anchor_level          = anchor_level;
+        c.coupling_type         = coupling_type;
+        c.heat_flux_alfg        = heat_flux_alfg;
+        c.fire_atm_feedback     = fire_atm_feedback;
+        c.inject_latent         = inject_latent;
+        c.source_mode           = source_mode;
+        c.heat_open_fraction    = heat_open_fraction;
+        c.heat_tendency_density = heat_tendency_density;
+        c.heat_tendency_exner   = heat_tendency_exner;
+        c.smoke_enable          = smoke_enable;
+        c.smoke_emission_factor = smoke_emission_factor;
+        c.fire_debug            = fire_debug;
+        return c;
+    }
     /// The CFBM partition: sensible flux scaled by the dry-fuel fraction 1 / (1 + M_f).
     bool cfbm_partition() const { return heat_flux_partition == "cfbm"; }
 };

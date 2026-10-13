@@ -18,6 +18,7 @@
 #include "ERF_CheneyGouldModel.H"
 #include "ERF_IgnitionSchedule.H"
 #include "ERF_FireWindExtract.H"
+#include "ERF_FireWindAdjust.H"
 #include "ERF_FireUtils.H"
 
 /**

@@ -3,11 +3,6 @@
 #include <ERF_Utils.H>
 #include "Microphysics/SBM/ERF_SBMStateManager.H"
 
-#ifdef ERF_ENABLE_FIRE
-#include <ERF_FireUtils.H>
-#include <ERF_FirePrecip.H>
-#endif
-
 #ifdef ERF_USE_WINDFARM
 #include <ERF_WindFarm.H>
 #endif
@@ -490,77 +485,20 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     }
 
 #ifdef ERF_ENABLE_FIRE
-    // Advance the fire on the level its grid refines (erf.fire.anchor_level)
-    if (m_fire_layer && lev == m_fire_layer->level()) {
-
-        // Air temperature and RH at k=0 for the fuel moisture update, derived
-        // from the pre-dycore state. This is used in both lagged and synchronous
-        // modes: the moisture ODE uses time-averaged T, and the change in T from
-        // fire heating within one atmospheric step is small relative to the
-        // moisture time lag. The temperature is theta * Exner(p) (the moisture
-        // curves, Balbi's T_a and the threshold ignition take an air
-        // temperature); the plain k = 0 potential temperature used here before
-        // was 14-16 K too warm at 840 hPa.
-        MultiFab T_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
-        compute_t_from_conservative(T_atm_k0, S_old);
-        MultiFab RH_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
-        compute_rh_from_conservative(RH_atm_k0, S_old, Geom(lev));
-
-        // Surface precipitation accumulation of every column after this step's
-        // microphysics, for the rain per column of the fuel moisture model
-        // (erf.fire.precip_source = atmosphere); the fire layer differences it
-        // against the accumulation it saw at its previous step.
-        std::unique_ptr<MultiFab> precip_accum_k0;
-        if (m_fire_layer->get_precip_accum_prev() != nullptr) {
-            const SurfacePrecipAccumulationSources precip_sources =
-                micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(lev)
-                      : SurfacePrecipAccumulationSources{};
-            precip_accum_k0 = std::make_unique<MultiFab>(ba2d[lev], S_old.DistributionMap(), 1, 0);
-            fire_surface_precip_accum_k0(*precip_accum_k0, precip_sources, Geom(lev).Domain().smallEnd(2));
-        }
-
-        // In passive and lagged modes, fire uses pre-dycore wind (vars_old).
-        // In synchronous mode, fire uses post-dycore wind (vars_new) so that
-        // the fire spread rate at step n+1 reflects the atmospheric momentum
-        // response to fire heating from step n.
-        if (m_fire_layer->get_params().is_synchronous()) {
-            if (m_fire_layer->get_params().fire_debug) {
-                amrex::Print() << "[FIRE DEBUG] Fire advance using SYNCHRONOUS coupling with POST-dycore wind at t="
-                               << time << ", dt=" << dt_lev << std::endl;
-            }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
-                                  vars_new[lev][Vars::xvel],
-                                  vars_new[lev][Vars::yvel],
-                                  *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
-        } else if (m_fire_layer->get_params().is_lagged()) {
-            if (m_fire_layer->get_params().fire_debug) {
-                amrex::Print() << "[FIRE DEBUG] Fire advance using LAGGED coupling with PRE-dycore wind at t="
-                               << time << ", dt=" << dt_lev << std::endl;
-            }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
-                                  vars_old[lev][Vars::xvel],
-                                  vars_old[lev][Vars::yvel],
-                                  *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
-        } else {
-            // Passive mode
-            if (m_fire_layer->get_params().fire_debug) {
-                amrex::Print() << "[FIRE DEBUG] Fire advance using PASSIVE coupling with PRE-dycore wind at t="
-                               << time << ", dt=" << dt_lev << std::endl;
-            }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
-                                  vars_old[lev][Vars::xvel],
-                                  vars_old[lev][Vars::yvel],
-                                  *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
-        }
-
-        // Store current fire flux for injection at the next timestep via
-        // the RK source term in ERF_TI_slow_rhs_pre.H. This applies in
-        // both lagged and synchronous modes. In passive mode the buffer is
-        // set to zero inside update_atm_flux_buffer() via the injects_flux() guard.
-        m_fire_layer->update_atm_flux_buffer(Geom(lev));
+    // Advance the fire on the level its grid refines (erf.fire.anchor_level).
+    // The coupler hands the engine the wind (before the dycore with passive and
+    // lagged coupling, after it with synchronous), the air temperature and
+    // humidity at k = 0 from the state before the dycore and, when the engine
+    // asks for it, the surface precipitation accumulated through this step's
+    // microphysics; it then holds the engine's fluxes for the next step.
+    if (m_fire_coupler && lev == m_fire_coupler->level()) {
+        const SurfacePrecipAccumulationSources precip_sources =
+            micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(lev)
+                  : SurfacePrecipAccumulationSources{};
+        m_fire_coupler->advance(time, dt_lev, S_old,
+                                vars_old[lev][Vars::xvel], vars_old[lev][Vars::yvel],
+                                vars_new[lev][Vars::xvel], vars_new[lev][Vars::yvel],
+                                *z_phys_cc[lev], ba2d[lev], Geom(lev), precip_sources);
     }
 #endif
 

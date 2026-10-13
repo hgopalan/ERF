@@ -241,8 +241,9 @@ function(build_erf_lib erf_lib_name)
   if(ERF_ENABLE_DUST)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_DUST)
     if(NOT ERF_ENABLE_FIRE)
+      # the dust layer applies the native fire engine's terrain wind corrections
       target_sources(${erf_lib_name} PRIVATE
-                     ${SRC_DIR}/Fire/ERF_FireWindExtract.cpp)
+                     ${SRC_DIR}/Fire/ERF_FireWindAdjust.cpp)
       target_include_directories(${erf_lib_name} PUBLIC
                                  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Fire>)
     endif()
@@ -440,10 +441,20 @@ function(build_erf_lib erf_lib_name)
   endif()
 
   if(ERF_ENABLE_FIRE)
+    # The fire coupling, atmosphere side, shared by every fire engine
     target_sources(${erf_lib_name} PRIVATE
-      ${SRC_DIR}/Fire/ERF_FireGrid.cpp
-      ${SRC_DIR}/Fire/ERF_FirePrerequisites.cpp
-      ${SRC_DIR}/Fire/ERF_FireWindExtract.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireCoupler.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireGrid.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FirePrerequisites.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireWindExtract.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireSurfaceHeight.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireSmokeEmission.cpp
+    )
+    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/FireCoupling>)
+    # The native fire engine (erf.fire.engine = native)
+    target_sources(${erf_lib_name} PRIVATE
+      ${SRC_DIR}/Fire/ERF_FireEnginePrerequisites.cpp
+      ${SRC_DIR}/Fire/ERF_FireWindAdjust.cpp
       ${SRC_DIR}/Fire/ERF_FireTerrainReader.cpp
       ${SRC_DIR}/Fire/ERF_TerrainSlope.cpp
       ${SRC_DIR}/Fire/ERF_Rothermel.cpp
@@ -451,7 +462,6 @@ function(build_erf_lib erf_lib_name)
       ${SRC_DIR}/Fire/ERF_FireSuppression.cpp
       ${SRC_DIR}/Fire/ERF_Fire.cpp
       ${SRC_DIR}/Fire/ERF_FirePlotfile.cpp
-      ${SRC_DIR}/Fire/ERF_FireSmokeEmission.cpp
       ${SRC_DIR}/Fire/ERF_StructureIgnition.cpp
       ${SRC_DIR}/Fire/ERF_CustomFuel.cpp
     )

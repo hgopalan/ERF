@@ -353,7 +353,7 @@ public:
      *   - Prints dust_deposition_rate domain integral (Phase 12 confirmation)
      *
      * Pattern: follows SurfaceLayer extraction in Phase 9 (ERF_DustWindExtract.H),
-     * which adapts fill_fire_wind_from_interpolation from Source/Fire/.
+     * which adapts fill_fire_wind_from_interpolation from Source/FireCoupling/.
      *
      * @param[in] S_new_cons  Conserved state MultiFab after dycore advance (level 0).
      * @param[in] Q1fx3       Vertical moisture flux (face-staggered z). Null when

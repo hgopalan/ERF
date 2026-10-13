@@ -12,7 +12,8 @@ AMReX (``AmrMesh::checkInput``)
     default to 1 in ``Source/main.cpp``, so this only bites a case that sets
     the blocking factor itself.
 
-Fire prerequisites (``verify_fire_prerequisites``, Source/Fire)
+Fire prerequisites (``verify_fire_prerequisites``, Source/FireCoupling, then
+``verify_native_fire_prerequisites``, Source/Fire)
   * box x/y lengths divisible by ``erf.fire.grid_ratio``
   * no z-decomposition: the z box length must equal ``amr.n_cell`` z, which
     means ``amr.max_grid_size_z`` has to be set whenever n_cell z exceeds the
@@ -24,7 +25,7 @@ Fire prerequisites (``verify_fire_prerequisites``, Source/Fire)
     ``levelset.cfl``, ``farsite.cfl_fire``
 
 Ignition reachability
-  * ``FireLayer::initialize`` asserts at least one cell is marked burned.  A
+  * ``ERF::InitData_post`` asserts at least one cell is marked burned.  A
     circular ignition only marks a cell when its radius reaches a fire-cell
     centre, so a positive ``ignition_r`` must be comparable to the fire cell
     size; ``ignition_r = 0`` is no disc (a polygon, line or schedule ignites).
@@ -166,7 +167,7 @@ def check(path, repo_root):
             f"z box length {box_nz} != n_cell z {nz}; set amr.max_grid_size_z = {nz} "
             "(fire prerequisite: 'Cannot decompose in z direction')")
 
-    # Domain depth vs the wind's sampling height (FirePrerequisites check 12):
+    # Domain depth vs the wind's sampling height (verify_native_fire_prerequisites check 12):
     # the depth, not the top, against wind_ref_ht (6.096 m with
     # use_per_fuel_wind_ht) or wind_sample_ht when set.
     lo = real(d, "geometry.prob_lo", 2) or 0.0

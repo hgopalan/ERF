@@ -16,7 +16,7 @@
  *   Brownian, impaction and interception efficiencies, which are not computed
  *   here. v_d is never below v_s and shares its 1 m/s cap.
  *
- * Structural reference: ERF_FireAtmCoupling.H in Source/Fire/:
+ * Structural reference: ERF_FireAtmCoupling.H in Source/FireCoupling/:
  *   https://github.com/hgopalan/ERF/blob/ecb9b7656bbb98fcc5d4f781e486825ee9478a73/
  *   Source/Fire/ERF_FireAtmCoupling.H
  *

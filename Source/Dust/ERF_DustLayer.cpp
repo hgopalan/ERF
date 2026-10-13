@@ -19,7 +19,7 @@
 #include <ERF_DustFireLofting.H>
 #include <ERF_DustMSHA.H>
 #include <ERF_DustMSHAOutput.H>
-#include <ERF_FireWindExtract.H>
+#include <ERF_FireWindAdjust.H>
 #include <ERF.H>
 #include <ERF_SurfaceLayer.H>
 #include <AMReX_Print.H>
@@ -882,6 +882,9 @@ DustLayer::advance(
 
   // Fire lofting of this step's flux, before the budget, the particles and the
   // diagnostics read it (it used to be applied by ERF after advance() returned).
+  // Only the fire sets m_loft_heat, and ERF_DustFireLofting.cpp is compiled with
+  // the fire module only: a dust build without fire failed to link here.
+#if defined(ERF_ENABLE_FIRE)
   if (m_loft_heat) {
     apply_fire_lofting_to_emission_flux(*dust_emission_flux, *m_loft_heat,
                                         m_params.n_size_bins, m_loft_k,
@@ -889,6 +892,7 @@ DustLayer::advance(
                                         m_params.dust_debug, m_step);
     m_loft_heat = nullptr;
   }
+#endif
 
   // Phase 23: compute critical material flux and write budget.
   if (!m_params.cm_fractions.empty() && dust_emission_flux && dust_cm_flux) {

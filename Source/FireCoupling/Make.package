@@ -1,0 +1,20 @@
+ifeq ($(USE_FIRE), TRUE)
+  CEXE_sources += FireCoupling/ERF_FireCoupler.cpp
+  CEXE_sources += FireCoupling/ERF_FireGrid.cpp
+  CEXE_sources += FireCoupling/ERF_FirePrerequisites.cpp
+  CEXE_sources += FireCoupling/ERF_FireWindExtract.cpp
+  CEXE_sources += FireCoupling/ERF_FireSurfaceHeight.cpp
+  CEXE_sources += FireCoupling/ERF_FireSmokeEmission.cpp
+
+  CEXE_headers += FireCoupling/ERF_FireCoupler.H
+  CEXE_headers += FireCoupling/ERF_FireCouplingParams.H
+  CEXE_headers += FireCoupling/ERF_FireEngine.H
+  CEXE_headers += FireCoupling/ERF_FireGrid.H
+  CEXE_headers += FireCoupling/ERF_FirePrerequisites.H
+  CEXE_headers += FireCoupling/ERF_FireWindExtract.H
+  CEXE_headers += FireCoupling/ERF_FireSurfaceHeight.H
+  CEXE_headers += FireCoupling/ERF_FirePrecip.H
+  CEXE_headers += FireCoupling/ERF_FireUtils.H
+  CEXE_headers += FireCoupling/ERF_FireAtmCoupling.H
+  CEXE_headers += FireCoupling/ERF_FireSmokeEmission.H
+endif
