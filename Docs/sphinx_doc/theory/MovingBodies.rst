@@ -321,7 +321,12 @@ smears the tip loading and raises the power for a given inflow: two 2.5 m cells
 (5 m) over-predicted the power by 44 %. The line must not jump over cells between two
 steps: at every step ERF computes how many cells the blade tip sweeps,
 ``rotor_speed * tip_radius * dt / min(dx, dy, dz)``, with the tip radius the
-largest distance of a blade node from the hub axis, and aborts when it exceeds
+largest distance of a blade node from the hub axis and, on a terrain-following
+or stretched mesh, ``dz`` the shortest physical cell height (the spacing of
+``z_phys_nd``'s nodes) in the box of the hub plus and minus the tip radius,
+not the nominal one (the vertical spacing: on a slope the spacing normal to the
+coordinate surfaces is a little shorter, 41.5 m against 42.2 m over the
+Askervein summit), and aborts when it exceeds
 ``erf.moving_bodies.alm_max_tip_cells`` (1 by default), naming the largest
 ``erf.fixed_dt`` that passes. For the IEA 15 MW at rated speed (tip speed
 about 90 m/s) one cell per step means ``dt <= dx / 90``. The check runs every
