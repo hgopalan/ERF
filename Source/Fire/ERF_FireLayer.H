@@ -917,8 +917,8 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..FUEL_SLOT_COUNT-1], device copy
     amrex::Gpu::DeviceVector<amrex::Real> m_d_burnout_tau;   ///< burnout e-folding time by fuel code (index 1-13) [s], erf.fire.burnout_model = sfire
     bool                                     m_use_per_fuel_wind_ht = false;
-    /// Per-fuel wind height [m] of every fire cell, filled before each wind
-    /// sample when the per-fuel height is on and the fuel varies per cell
+    /// Per-fuel wind height [m] of every fire cell, filled once by initialize()
+    /// when the per-fuel height is on and the fuel varies per cell (a fuel map)
     std::unique_ptr<amrex::MultiFab>         m_wind_ht_cell;
 
     // Deck-defined fuel models (erf.fire.custom_fuel.*) and the slot table of
@@ -1059,8 +1059,8 @@ public:
     void apply_waf_to_wind();
 
     /// Fill m_wind_ht_cell with each fire cell's per-fuel wind height (the
-    /// slot of its fuel code in m_d_fcwh), for the shared wind sampler.
-    /// Public for the nvcc rule above.
+    /// slot of its fuel code in m_d_fcwh), for the shared wind sampler; called
+    /// once by initialize(). Public for the nvcc rule above.
     void fill_per_fuel_wind_height();
 
     /// Fill m_open_frac_atm and m_roof_h_atm, on the k = 0 slabs ba_atm_2d of

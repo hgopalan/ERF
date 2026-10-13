@@ -142,6 +142,42 @@ void fill_linear_wind (MultiFab& xvel, MultiFab& yvel, MultiFab& zcc)
     }
 }
 
+/// Face velocities whose cell averages are u = z and v = 2 z at the cell-centre
+/// height z, the same in every column, and those heights; ghosts included
+void fill_sheared_wind (MultiFab& xvel, MultiFab& yvel, MultiFab& zcc)
+{
+    for (MFIter mfi(xvel); mfi.isValid(); ++mfi) {
+        auto u = xvel.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            u(i, j, k) = (Real(k) + 0.5_rt) * DX;
+        });
+    }
+    for (MFIter mfi(yvel); mfi.isValid(); ++mfi) {
+        auto v = yvel.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            v(i, j, k) = 2.0_rt * (Real(k) + 0.5_rt) * DX;
+        });
+    }
+    for (MFIter mfi(zcc); mfi.isValid(); ++mfi) {
+        auto z = zcc.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            z(i, j, k) = (Real(k) + 0.5_rt) * DX;
+        });
+    }
+}
+
+/// Per-cell sampling height: 20 m for fire cells west of x = 400 m, 50 m east
+void fill_split_height (MultiFab& h, const Geometry& g)
+{
+    const Real x0 = g.ProbLo(0), dxf = g.CellSize(0);
+    for (MFIter mfi(h); mfi.isValid(); ++mfi) {
+        auto a = h.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            a(i, j, k) = (x0 + (Real(i) + 0.5_rt) * dxf < 400.0_rt) ? 20.0_rt : 50.0_rt;
+        });
+    }
+}
+
 /// Column of level `L` holding a physical coordinate
 int column_of (Real x) { return static_cast<int>(std::floor(x / DX)); }
 
@@ -346,6 +382,43 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
         return (column_of(x) + 0.5_rt) * DX + 0.5_rt * (column_of(y) + 0.5_rt) * DX; }), 1.0e3 * TOL);
     EXPECT_LT(max_rel_error(wind, fg, 1, [](Real x, Real y) {
         return (column_of(y) + 0.5_rt) * DX + 0.25_rt * (column_of(x) + 0.5_rt) * DX; }), 1.0e3 * TOL);
+}
+
+/**
+ * Each fire cell sampled at its own height (the per-cell field an engine hands
+ * the sampler, the native engine's per-fuel wind height): with u = z and
+ * v = 2 z in every column the cell sampled at 20 m reads (20, 40) and the
+ * one at 50 m (50, 100), both between cell centres, and the sampling height
+ * recorded is the cell's own; the global height (10 m, below the first centre)
+ * is not used.
+ */
+TEST(FireAnchorLevel, EachFireCellIsSampledAtItsOwnHeight)
+{
+    AtmLevel L = region_level();
+    FireGrid fg = create_fire_grid(L.ba, L.dm, L.geom, C);
+
+    MultiFab xvel(convert(L.ba, IntVect(1, 0, 0)), L.dm, 1, 2);
+    MultiFab yvel(convert(L.ba, IntVect(0, 1, 0)), L.dm, 1, 2);
+    MultiFab zcc(L.ba, L.dm, 1, 2);
+    fill_sheared_wind(xvel, yvel, zcc);
+
+    MultiFab zs(fg.ba, fg.dm, 1, 0);
+    zs.setVal(0.0);
+    MultiFab grounds(fg.ba, fg.dm, 4, 0);
+    grounds.setVal(0.0);
+    MultiFab wind(fg.ba, fg.dm, 2, 0);
+    MultiFab ez(fg.ba, fg.dm, 1, 0);
+    MultiFab hcell(fg.ba, fg.dm, 1, 0);
+    fill_split_height(hcell, fg.geom);
+
+    auto height = [] (Real x, Real) { return (x < 400.0_rt) ? 20.0_rt : 50.0_rt; };
+    for (int interp : {1, 0}) {
+        fill_fire_wind_from_interpolation(wind, ez, xvel, yvel, zcc, zs, grounds, fg, 10.0, 4,
+                                          &hcell, interp, nullptr, nullptr, 0.0, 0.1, false);
+        EXPECT_LT(max_rel_error(wind, fg, 0, height), 1.0e3 * TOL) << "wind_interp " << interp;
+        EXPECT_LT(max_rel_error(wind, fg, 1, [&] (Real x, Real y) { return 2.0_rt * height(x, y); }), 1.0e3 * TOL);
+        EXPECT_LT(max_rel_error(ez, fg, 0, height), 1.0e3 * TOL) << "the sampling height recorded";
+    }
 }
 
 /**

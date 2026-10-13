@@ -797,7 +797,7 @@ ERF::WriteCheckpointFile () const
     } // for lev
 
 #ifdef ERF_ENABLE_FIRE
-    if (FireLayer* const fire_engine = fire_layer()) {
+    if (const FireLayer* const fire_engine = fire_layer()) {
         // The fire state lives on the level its grid refines (erf.fire.anchor_level).
         const int fire_lev = fire_engine->level();
         if (const amrex::MultiFab* phi = fire_engine->get_levelset()) {
@@ -848,15 +848,6 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* cl = fire_engine->get_crown_load()) {
             amrex::Print() << "Writing fire crown load to checkpoint" << std::endl;
             VisMF::Write(*cl, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireCrownLoad"));
-        }
-        // The lagged fluxes injected into the atmosphere on the next step. Without
-        // them the first step after a restart injects no fire heat at all.
-        if (const amrex::MultiFab* q = m_fire_coupler->get_Q_atm_prev()) {
-            amrex::Print() << "Writing fire atmosphere flux buffer to checkpoint" << std::endl;
-            VisMF::Write(*q, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQAtmPrev"));
-        }
-        if (const amrex::MultiFab* ql = m_fire_coupler->get_Q_lat_atm_prev()) {
-            VisMF::Write(*ql, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
         // The surface precipitation accumulation the rain per column is measured from
         // (erf.fire.precip_source = atmosphere); without it the first restarted step
@@ -939,6 +930,19 @@ ERF::WriteCheckpointFile () const
         }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
+        }
+    }
+    // The coupling's state: the lagged fluxes injected into the atmosphere on the
+    // next step, whatever the engine. Without them the first step after a restart
+    // injects no fire heat at all.
+    if (m_fire_coupler) {
+        const int fire_lev = m_fire_coupler->level();
+        if (const amrex::MultiFab* q = m_fire_coupler->get_Q_atm_prev()) {
+            amrex::Print() << "Writing fire atmosphere flux buffer to checkpoint" << std::endl;
+            VisMF::Write(*q, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQAtmPrev"));
+        }
+        if (const amrex::MultiFab* ql = m_fire_coupler->get_Q_lat_atm_prev()) {
+            VisMF::Write(*ql, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
     }
 #endif
@@ -2586,6 +2590,30 @@ ERF::ReadCheckpointFileSurfaceLayer ()
  * state (level-set, arrival time, and fuel load).
  */
 void
+ERF::ReadCheckpointFileFireCoupling ()
+{
+    if (!m_fire_coupler) { return; }
+    // The lagged fluxes of the coupling, on the level of the fire grid (the
+    // engine's restore has checked that the checkpoint holds it on that level)
+    const int fire_lev = m_fire_coupler->level();
+    for (const auto& [mf, name] : {std::pair<amrex::MultiFab*, const char*>{m_fire_coupler->get_Q_atm_prev_mut(), "FireQAtmPrev"},
+                                   std::pair<amrex::MultiFab*, const char*>{m_fire_coupler->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev"}}) {
+        if (mf == nullptr) { continue; }
+        const std::string header = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/" + name + "_H";
+        if (!amrex::FileExists(header)) {
+            amrex::Print() << "[FIRE] Checkpoint has no " << name
+                           << "; keeping the initialized values.\n";
+            continue;
+        }
+        VisMF::Read(*mf, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name));
+        // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
+        // valid cells (a checkpoint written before the fluxes had ghosts holds none),
+        // so refill the ghosts the way FireCoupler::update_flux_buffer() does.
+        fire_fill_boundary(*mf, geom[fire_lev]);
+    }
+}
+
+void
 ERF::ReadCheckpointFileFire ()
 {
     FireLayer* const fire_engine = fire_layer();
@@ -2760,13 +2788,6 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(fire_engine->get_crown_load_mut(),   "FireCrownLoad");
     restore_optional(fire_engine->get_heat_flux_mut(),      "FireHeatFlux");
     restore_optional(fire_engine->get_flame_length_mut(),   "FireFlameLength");
-    restore_optional(m_fire_coupler->get_Q_atm_prev_mut(),     "FireQAtmPrev");
-    restore_optional(m_fire_coupler->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
-    // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
-    // valid cells (a checkpoint written before the fluxes had ghosts holds none),
-    // so refill the ghosts the way FireCoupler::update_flux_buffer() does.
-    if (amrex::MultiFab* q = m_fire_coupler->get_Q_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
-    if (amrex::MultiFab* q = m_fire_coupler->get_Q_lat_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
     // The precipitation snapshot (erf.fire.precip_source = atmosphere). A checkpoint
     // without it (an older build, or a run that used the uniform rate) cannot give
     // the first restarted step a rain rate: that step reports none and starts the

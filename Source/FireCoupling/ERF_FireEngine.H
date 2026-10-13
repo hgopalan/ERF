@@ -3,6 +3,7 @@
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
+#include <string>
 #include <ERF_FireGrid.H>
 
 class ERF;
@@ -31,7 +32,9 @@ class SurfaceLayer;
  * Every field lives on the level the fire grid refines (erf.fire.anchor_level),
  * in that level's index space and with its ghost cells; the engine samples
  * them onto its own grid (FireGrid::atm_lo gives the corner of the fire
- * region). The k = 0 slabs hold one cell in z per box of the level.
+ * region). The k = 0 slabs hold one cell in z per box of the level. The
+ * slabs and the precipitation are temporaries of FireCoupler::advance(): an
+ * engine reads them during its advance() and keeps no pointer to them.
  */
 struct FireForcing
 {
@@ -57,6 +60,10 @@ struct FireFluxes
 {
     const amrex::MultiFab* sensible = nullptr;  ///< Sensible heat flux into the air [W/m2]; nullptr = none this step
     const amrex::MultiFab* latent   = nullptr;  ///< Latent heat flux into the air [W/m2]; nullptr = no water released
+    /// With erf.fire.fire_debug: text the coupling appends to its debug line of
+    /// the sensible flux (the native engine's partition, dry-fuel fraction and
+    /// fuel moisture, which FireFluxPartition/run_partition.sh reads)
+    std::string            debug_note;
 };
 
 /**

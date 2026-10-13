@@ -49,8 +49,9 @@
 //   passes both through fire_tendency. ERF-Fire follows the same approach:
 //   Q_latent = Lv * (bmst + (1 - bmst) * f_water) * (dmass/dt)
 //   with bmst = M_f / (1 + M_f) the fuel-moisture share and f_water = 0.56 the
-//   water of combustion per unit dry mass (compute_fire_latent_flux). This is
-//   stored as fire_latent_flux [W/m2] and distributed with the same
+//   water of combustion per unit dry mass. The fire engine computes it (the
+//   native engine with compute_fire_latent_flux, ERF_FireHeatFlux.H, into its
+//   fire_latent_flux [W/m2]); the coupling distributes it with the same
 //   exponential profile.
 //
 // Assumptions:
@@ -58,8 +59,8 @@
 //     (erf.fire.anchor_level, the finest level by default); coarser levels see
 //     the result through average-down with erf.coupling_type = TwoWay (the
 //     default), not with OneWay; finer levels not at all.
-//   - fire_heat_flux and fire_latent_flux are on the fire grid (C*nx x C*ny x 1
-//     over the fire region).
+//   - The engine's sensible and latent fluxes (FireFluxes) are on the fire grid
+//     (C*nx x C*ny x 1 over the fire region).
 //   - The coarsening from fire grid to atmospheric grid is the area average of
 //     average_down(), with the region's lower corner added (FireGrid::atm_lo).
 //   - z_phys_cc is the cell-centre terrain-following height MultiFab [m].

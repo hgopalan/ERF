@@ -100,7 +100,7 @@ level's wind, temperature and humidity, and puts its heat, moisture and smoke
 into that level's source; coarser levels receive them through average-down
 (:ref:`sec:FireCoupling`). A level finer than the fire's never sees the fire,
 and with two-way coupling its average-down replaces the heated cells under it,
-so the fire layer prints a warning, with the share of the fire grid a finer
+so the coupling prints a warning at start-up, with the share of the fire grid a finer
 level covers, whenever :cpp:`erf.fire.anchor_level` is not the finest level.
 The fire state is checkpointed under that level's directory together with the
 level and the region's corner, and a restart that would put the fire grid on
@@ -152,8 +152,9 @@ atmospheric state. In order the engine:
    heat flux and the flame diagnostics;
 7. reports probes and appends the statistics CSV.
 
-The coupling layer then averages the step's heat flux onto the atmospheric
-columns and holds it for injection into the atmosphere at the next step.
+With lagged or synchronous coupling, or with the smoke tracer, the coupling
+layer then averages the step's heat flux onto the atmospheric columns and
+holds it for injection into the atmosphere at the next step.
 
 The level set ``fire_phi`` is normalised: it is :math:`-1` well inside the
 burned region, :math:`+1` well outside, zero on the front, and varies

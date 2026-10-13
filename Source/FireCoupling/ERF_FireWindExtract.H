@@ -15,8 +15,8 @@
  * that the fire engine supplies), interpolated linearly in height and
  * bilinearly or nearest between the surrounding columns, with an optional
  * two-height log-law resampling (erf.fire.wind_sample_ht); no MOST
- * reconstruction is involved. Every fire engine reads its wind through it;
- * the dust layer uses it too. What the engine does with the wind afterwards
+ * reconstruction is involved. A fire engine may read its wind through it (the
+ * native engine does). What the engine does with the wind afterwards
  * (wind adjustment factors, terrain corrections) is in the engine
  * (ERF_FireWindAdjust.H for the native engine).
  */

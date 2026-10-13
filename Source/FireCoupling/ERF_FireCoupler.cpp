@@ -177,14 +177,14 @@ FireCoupler::update_flux_buffer (const Geometry& geom_atm)
     coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fluxes.sensible, geom_atm, m_fg);
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Sensible flux to the atmosphere: max " << m_Q_atm_prev->max(0)
-                       << " W/m2" << std::endl;
+                       << " W/m2" << fluxes.debug_note << std::endl;
     }
 
     if (m_params.inject_latent && fluxes.latent) {
         coarsen_fire_flux_to_atm(*m_Q_lat_atm_prev, *fluxes.latent, geom_atm, m_fg);
     } else {
         if (m_params.fire_debug) {
-            amrex::Print() << "[FIRE DEBUG] Skipping latent heat injection (inject_latent=false or no moisture)" << std::endl;
+            amrex::Print() << "[FIRE DEBUG] Skipping latent heat injection (inject_latent=false or the engine reports no latent flux)" << std::endl;
         }
         m_Q_lat_atm_prev->setVal(0.0_rt);
     }

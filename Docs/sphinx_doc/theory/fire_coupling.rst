@@ -21,10 +21,12 @@ coupled to ERF the same way.
 * **The coupling layer** (``Source/FireCoupling``, the ``FireCoupler`` class)
   is everything on the atmosphere side. It checks that the mesh can carry a
   fire grid, builds that grid on the level :cpp:`erf.fire.anchor_level`
-  selects, hands the fire the atmospheric state at the start of each of its
-  steps, averages the heat the fire reports onto the atmospheric columns,
-  holds it for one step, and injects it at every Runge-Kutta stage of the
-  next step together with the smoke tracer. It also provides the shared
+  selects and hands the fire the atmospheric state at the start of each of
+  its steps. With ``"lagged"`` or ``"synchronous"`` coupling it averages the
+  heat the fire reports onto the atmospheric columns, holds it for one step,
+  and injects it at every Runge-Kutta stage of the next step; with
+  :cpp:`erf.fire.smoke_enable` it injects the smoke tracer the same way, also
+  with ``"passive"`` coupling, which injects no heat. It also provides the shared
   helpers a fire model may use: the wind sampler and the ground of each
   column described below.
 * **The fire engine** (``FireEngine`` in ``ERF_FireEngine.H``) is the fire
@@ -48,7 +50,9 @@ inputs (:cpp:`erf.fire.grid_ratio`, :cpp:`erf.fire.anchor_level`,
 :cpp:`erf.fire.source_mode`, :cpp:`erf.fire.heat_open_fraction`,
 :cpp:`erf.fire.heat_tendency_density`, :cpp:`erf.fire.heat_tendency_exner`,
 :cpp:`erf.fire.smoke_enable` and :cpp:`erf.fire.smoke_emission_factor`) mean
-the same for every engine.
+the same for every engine, except that :cpp:`erf.fire.heat_open_fraction`
+needs the engine to report which part of each column its structures block;
+the native engine does, from its structure map.
 
 Wind extraction
 ---------------
@@ -343,7 +347,7 @@ waves the heating raises and is not conserved where they cross the
 coarse-fine interface of the compressible solver. With the fire
 grid on a coarser level than the finest, the same average-down replaces the
 heated cells under the finer level with unheated ones and that heat is lost,
-and with ``"OneWay"`` the finer level never sees it; the fire layer warns at
+and with ``"OneWay"`` the finer level never sees it; the coupling warns at
 start-up whenever the level is not the finest. The same test runs the heat disc
 with MRF and the thermal excess on level 1 and restarts it, which must reproduce
 both levels byte for byte.

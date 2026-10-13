@@ -471,6 +471,9 @@ void FireLayer::initialize(const ERF& erf,
                            << "FM1 fcwh=" << h_fcwh[1] << " m, FM4 fcwh=" << h_fcwh[4] << " m\n";
         }
     }
+    // The sampling height of every fire cell for the shared wind sampler, once:
+    // the fuel map (read above) does not change during the run
+    if (m_use_per_fuel_wind_ht && fire_fuel_model) { fill_per_fuel_wind_height(); }
 
     // Phase 13B: Pre-compute alternative ROS model coefficients.
     {
@@ -741,9 +744,6 @@ void FireLayer::initialize(const ERF& erf,
     }
 }
 
-// surface_layer is unused: the fire layer reads the atmospheric state it needs
-// through the wind, temperature and humidity MultiFabs passed alongside it. The
-// parameter stays for interface symmetry with initialize().
 void FireLayer::advance(const FireForcing& forcing)
 {
     const Real time = forcing.time;
@@ -769,9 +769,9 @@ void FireLayer::advance(const FireForcing& forcing)
         fire_wind_ref->setVal(m_params.prescribed_wind_y, 1, 1, 0);
     } else {
         const bool wind_open = m_params.structures.wind_open_columns && m_open_frac_atm && m_roof_h_atm;
-        // The per-fuel wind height of every fire cell, when the fuel varies per cell
+        // The per-fuel wind height of every fire cell, when the fuel varies per
+        // cell (filled once by initialize(): the fuel map is static)
         const bool per_fuel_ht = m_use_per_fuel_wind_ht && fire_fuel_model;
-        if (per_fuel_ht) { fill_per_fuel_wind_height(); }
         fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
                                           *fire_surface_z, *fire_col_ground,
                                           m_fg, z_wind, m_nz,
@@ -2140,8 +2140,14 @@ void FireLayer::fill_fluxes(FireFluxes& fluxes)
         fluxes.sensible = fire_heat_flux.get();
     }
     if (m_params.fire_debug) {
-        amrex::Print() << "[FIRE DEBUG] Sensible flux partition=" << m_params.heat_flux_partition
-                       << ", f_dry_fuel=" << f_dry << ", fuel moisture=" << M_f << std::endl;
+        // appended by the coupler to its line of the sensible flux, as before the split
+        std::ostringstream note;
+        note.precision(amrex::OutStream().precision());   // amrex::Print's, as the line had
+        note << " (partition=" << m_params.heat_flux_partition
+             << ", f_dry_fuel=" << f_dry << ", fuel moisture=" << M_f << ")";
+        fluxes.debug_note = note.str();
+    } else {
+        fluxes.debug_note.clear();
     }
 
     if (m_params.inject_latent) {

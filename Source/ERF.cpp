@@ -2161,7 +2161,7 @@ ERF::InitData_post ()
     // z_phys_nd[fire_lev] is null on flat terrain; the fire
     // engine handles that case itself, so it must not gate initialization.
     if (m_fire_coupler) {
-        const int fire_lev = fire_anchor_level(m_fire_params.anchor_level, finest_level);
+        const int fire_lev = fire_anchor_level(m_fire_coupler->params().anchor_level, finest_level);
         m_fire_coupler->initialize(*this, fire_lev, m_SurfaceLayer[Orientation::zlo()].get(), z_phys_nd[fire_lev].get());
         // erf.fire.precip_source = atmosphere needs the microphysics accumulators of the
         // fire grid's level, which exist now that every level is built.
@@ -2206,7 +2206,8 @@ ERF::InitData_post ()
         }
 
         if (restart_chkfile != "") {
-            ReadCheckpointFileFire();
+            ReadCheckpointFileFire();          // the native engine's state
+            ReadCheckpointFileFireCoupling();  // the coupling's lagged fluxes
         }
     }
 #endif
@@ -3427,15 +3428,17 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
         }
     }
     if (m_fire_params.enable) {
-        // The engine erf.fire.engine selects (checked by FireParams), behind the
-        // shared coupling layer
+        // The engine erf.fire.engine selects, behind the shared coupling layer.
+        // FireParams has already rejected any other name (FireEngineUnknown_abort);
+        // the abort below is the backstop for an engine added there but not here.
+        const FireCouplingParams coupling = m_fire_params.coupling_params();
         std::unique_ptr<FireEngine> engine;
-        if (m_fire_params.engine == "native") {
+        if (coupling.engine == "native") {
             engine = std::make_unique<FireLayer>(m_fire_params);
         } else {
-            amrex::Abort("[FIRE] erf.fire.engine = \"" + m_fire_params.engine + "\" is not one of \"native\"");
+            amrex::Abort("[FIRE] erf.fire.engine = \"" + coupling.engine + "\" is not one of \"native\"");
         }
-        m_fire_coupler = std::make_unique<FireCoupler>(m_fire_params.coupling_params(), std::move(engine));
+        m_fire_coupler = std::make_unique<FireCoupler>(coupling, std::move(engine));
         amrex::Print() << "[FIRE] Fire module enabled (grid_ratio="
                        << m_fire_params.grid_ratio << ")\n";
         if (m_fire_params.fire_debug) {

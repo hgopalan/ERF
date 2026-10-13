@@ -14,7 +14,7 @@
  * References:
  *   Source/FireCoupling/ERF_FireWindExtract.H (algorithm source):
  *     https://github.com/hgopalan/ERF/blob/a2ca3d1a7cea08a480c9d10e93ffdfab1b24b24e/
- *     Source/FireCoupling/ERF_FireWindExtract.H
+ *     Source/Fire/ERF_FireWindExtract.H
  *   Hong & Pan (1996). Mon. Wea. Rev., 124, 2322.
  *     https://doi.org/10.1175/1520-0493(1996)124<2322:NBLVDI>2.0.CO;2
  *   Marticorena & Bergametti (1995). J. Geophys. Res., 100, 16415.

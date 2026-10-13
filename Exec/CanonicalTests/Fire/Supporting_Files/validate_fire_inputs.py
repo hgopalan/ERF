@@ -167,7 +167,7 @@ def check(path, repo_root):
             f"z box length {box_nz} != n_cell z {nz}; set amr.max_grid_size_z = {nz} "
             "(fire prerequisite: 'Cannot decompose in z direction')")
 
-    # Domain depth vs the wind's sampling height (FirePrerequisites check 12):
+    # Domain depth vs the wind's sampling height (verify_native_fire_prerequisites check 12):
     # the depth, not the top, against wind_ref_ht (6.096 m with
     # use_per_fuel_wind_ht) or wind_sample_ht when set.
     lo = real(d, "geometry.prob_lo", 2) or 0.0

@@ -33,7 +33,7 @@
  *
  * Pattern reference: ERF_FireAtmCoupling.H in Source/FireCoupling/:
  *   https://github.com/hgopalan/ERF/blob/7856affedd8bb3c878b62c308f39c36bf2228791/
- *   Source/FireCoupling/ERF_FireAtmCoupling.H
+ *   Source/Fire/ERF_FireAtmCoupling.H
  *
  * References:
  *   Stokes, G.G. (1851). Trans. Cambridge Phil. Soc., 9, 8-106.

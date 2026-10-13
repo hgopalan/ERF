@@ -241,13 +241,10 @@ function(build_erf_lib erf_lib_name)
   if(ERF_ENABLE_DUST)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_DUST)
     if(NOT ERF_ENABLE_FIRE)
-      # the dust layer samples its wind with the fire coupling's sampler and
-      # applies the native fire engine's terrain wind corrections
+      # the dust layer applies the native fire engine's terrain wind corrections
       target_sources(${erf_lib_name} PRIVATE
-                     ${SRC_DIR}/FireCoupling/ERF_FireWindExtract.cpp
                      ${SRC_DIR}/Fire/ERF_FireWindAdjust.cpp)
       target_include_directories(${erf_lib_name} PUBLIC
-                                 $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/FireCoupling>
                                  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Fire>)
     endif()
     target_sources(${erf_lib_name} PRIVATE

@@ -22,12 +22,14 @@ class SurfaceLayer;
  * - checks the ERF configuration a fire grid needs and builds that grid on
  *   the level it refines (erf.fire.anchor_level);
  * - each step of that level, hands the engine the atmospheric state
- *   (FireForcing), advances it, and averages the fluxes it reports
+ *   (FireForcing) and advances it; with lagged or synchronous coupling, or
+ *   with the smoke tracer, it averages the fluxes the engine reports
  *   (FireFluxes) onto the atmospheric columns, where they wait for the next
  *   step (the one-step explicit lag of WRF-Fire);
  * - at every Runge-Kutta stage of that next step, injects the lagged heat and
  *   vapour into the cell sources with the WRF-Fire exponential profile
- *   (ERF_FireAtmCoupling.H) and the smoke tracer (ERF_FireSmokeEmission.H);
+ *   (ERF_FireAtmCoupling.H; lagged and synchronous coupling only) and the
+ *   smoke tracer (ERF_FireSmokeEmission.H; erf.fire.smoke_enable);
  * - holds the lagged fluxes for the boundary-layer scheme and the checkpoint.
  *
  * Coarser levels see the fire through average-down, finer levels not at all.

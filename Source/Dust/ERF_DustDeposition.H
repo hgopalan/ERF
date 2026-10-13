@@ -18,7 +18,7 @@
  *
  * Structural reference: ERF_FireAtmCoupling.H in Source/FireCoupling/:
  *   https://github.com/hgopalan/ERF/blob/ecb9b7656bbb98fcc5d4f781e486825ee9478a73/
- *   Source/FireCoupling/ERF_FireAtmCoupling.H
+ *   Source/Fire/ERF_FireAtmCoupling.H
  *
  * References:
  *   Seinfeld, J.H., & Pandis, S.N. (2006). Atmospheric Chemistry and Physics,
