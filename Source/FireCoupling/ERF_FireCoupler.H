@@ -70,16 +70,16 @@ public:
      * drive the coupling with an engine of its own without an ERF object
      * (Tests/Unit/Fire/ERF_GTestFireCoupler.cpp).
      *
-     * @param[in] lev     The level the fire grid refines
-     * @param[in] fg      The fire grid (create_fire_grid)
-     * @param[in] ba_atm  The level's boxes
-     * @param[in] dm_atm  Their owners
-     * @param[in] nz      Cells of the level in z
+     * @param[in] lev       The level the fire grid refines
+     * @param[in] fg        The fire grid (create_fire_grid)
+     * @param[in] ba_atm    The level's boxes
+     * @param[in] dm_atm    Their owners
+     * @param[in] geom_atm  The level's geometry
      */
     void set_fire_grid (int lev, const FireGrid& fg,
                         const amrex::BoxArray& ba_atm,
                         const amrex::DistributionMapping& dm_atm,
-                        int nz);
+                        const amrex::Geometry& geom_atm);
 
     /**
      * @brief Advance the fire one step of its level and refill the lagged fluxes
@@ -134,6 +134,36 @@ public:
                       bool has_moisture,
                       int step);
 
+    /**
+     * @brief Write the fire to a checkpoint: the engine's state
+     *        (FireEngine::write_checkpoint), then the coupling's lagged fluxes
+     *        (FireQAtmPrev and FireQLatAtmPrev) under checkpointname/Level_<lev>/
+     */
+    void write_checkpoint (const std::string& checkpointname) const;
+
+    /**
+     * @brief Why a checkpoint's lagged fluxes do not belong to this run's fire
+     *        grid, or an empty string when they do
+     *
+     * @param[in] chk_lev     The level the checkpoint holds them on
+     * @param[in] chk_region  The columns they cover (minimal box of their boxes)
+     */
+    std::string checkpoint_mismatch (int chk_lev, const amrex::Box& chk_region) const;
+
+    /**
+     * @brief Restore the engine's state, then the lagged fluxes, on a restart
+     *
+     * Aborts when the checkpoint holds the lagged fluxes on another level or
+     * over another region than this run's fire grid. A checkpoint without them
+     * (no fire state, or written before they were checkpointed) leaves them at
+     * zero: the first restarted step injects no fire heat.
+     *
+     * @param[in] restart_chkfile  The checkpoint directory
+     * @param[in] max_level        ERF's max_level
+     * @param[in] step             The step count of the fire grid's level at the checkpoint
+     */
+    void read_checkpoint (const std::string& restart_chkfile, int max_level, int step);
+
     /// The level the fire grid refines (erf.fire.anchor_level, resolved at initialize).
     int level () const { return m_lev; }
 
@@ -154,12 +184,8 @@ public:
      *        region. Allocated at initialize, so never null afterwards.
      */
     const amrex::MultiFab* get_Q_atm_prev () const { return m_Q_atm_prev.get(); }
-    /// Mutable access, for checkpoint restart.
-    amrex::MultiFab* get_Q_atm_prev_mut () { return m_Q_atm_prev.get(); }
     /// Latent heat flux [W/m2] of the previous fire step, laid out as get_Q_atm_prev().
     const amrex::MultiFab* get_Q_lat_atm_prev () const { return m_Q_lat_atm_prev.get(); }
-    /// Mutable access, for checkpoint restart.
-    amrex::MultiFab* get_Q_lat_atm_prev_mut () { return m_Q_lat_atm_prev.get(); }
 
 private:
     /// Average the engine's fluxes onto the atmospheric columns for the next step.
@@ -169,6 +195,7 @@ private:
     std::unique_ptr<FireEngine> m_engine;
     FireGrid                    m_fg;
     int                         m_lev = 0;
+    amrex::Geometry             m_geom_atm;   ///< geometry of the fire grid's level
 
     // The engine's fluxes averaged onto the atmospheric columns of the fire
     // grid's level (one slab per box of that level), held from the previous

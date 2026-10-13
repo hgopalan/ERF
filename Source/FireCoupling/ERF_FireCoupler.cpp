@@ -1,4 +1,5 @@
 #include <ERF_FireCoupler.H>
+#include <ERF_FireEngineTemplate.H>
 #include <ERF_FireAtmCoupling.H>
 #include <ERF_FirePrerequisites.H>
 #include <ERF_FirePrecip.H>
@@ -7,8 +8,22 @@
 #include <ERF_IndexDefines.H>
 #include <ERF.H>
 #include <AMReX_Print.H>
+#include <AMReX_VisMF.H>
+#include <AMReX_PlotFileUtil.H>
+#include <AMReX_Utility.H>
+#include <sstream>
+#include <type_traits>
+#include <utility>
 
 using namespace amrex;
+
+// The template for new engines declares every method FireEngine requires: a pure
+// virtual method added to the interface and missing there makes the template
+// abstract. Optional methods (with a default body) are not caught here; the
+// interface asks for them to be added to the template by hand. Compile time
+// only; no FireEngineTemplate is ever created.
+static_assert(!std::is_abstract_v<FireEngineTemplate>,
+              "ERF_FireEngineTemplate.H must declare every pure virtual method of FireEngine");
 
 namespace {
 
@@ -72,8 +87,7 @@ FireCoupler::initialize (const ERF& erf,
                                    erf.Geom(lev), m_params.grid_ratio);
     fg.lev = lev;
     report_fire_region(erf, lev, fg);
-    set_fire_grid(lev, fg, erf.boxArray(lev), erf.DistributionMap(lev),
-                  erf.Geom(lev).Domain().length(2));
+    set_fire_grid(lev, fg, erf.boxArray(lev), erf.DistributionMap(lev), erf.Geom(lev));
 
     m_engine->initialize(erf, lev, m_fg, surface_layer, z_phys_nd_atm);
 
@@ -91,10 +105,12 @@ void
 FireCoupler::set_fire_grid (int lev, const FireGrid& fg,
                             const BoxArray& ba_atm,
                             const DistributionMapping& dm_atm,
-                            int nz)
+                            const Geometry& geom_atm)
 {
-    m_lev = lev;
-    m_fg  = fg;
+    m_lev      = lev;
+    m_fg       = fg;
+    m_geom_atm = geom_atm;
+    const int nz = geom_atm.Domain().length(2);
 
     // The lagged fluxes live on the k = 0 slabs of the level's boxes, with the
     // level's owners. Ghost columns for the MRF fire thermal excess, which reads
@@ -269,5 +285,88 @@ FireCoupler::add_sources (MultiFab& cc_source,
             RhoSmoke_comp,
             m_params.fire_debug,
             step);
+    }
+}
+
+void
+FireCoupler::write_checkpoint (const std::string& checkpointname) const
+{
+    // The engine's own state first, as read_checkpoint restores it
+    m_engine->write_checkpoint(checkpointname);
+
+    // The lagged fluxes injected into the atmosphere on the next step. Without
+    // them the first step after a restart injects no fire heat at all.
+    if (m_Q_atm_prev) {
+        amrex::Print() << "Writing fire atmosphere flux buffer to checkpoint" << std::endl;
+        VisMF::Write(*m_Q_atm_prev, MultiFabFileFullPrefix(m_lev, checkpointname, "Level_", "FireQAtmPrev"));
+    }
+    if (m_Q_lat_atm_prev) {
+        VisMF::Write(*m_Q_lat_atm_prev, MultiFabFileFullPrefix(m_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
+    }
+}
+
+std::string
+FireCoupler::checkpoint_mismatch (int chk_lev, const Box& chk_region) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_Q_atm_prev, "[FIRE] FireCoupler: set_fire_grid() before the checkpoint");
+    // The fluxes cover the columns of the level's boxes, which form the fire
+    // region (verify_fire_prerequisites, check 7b)
+    const Box run_region = m_Q_atm_prev->boxArray().minimalBox();
+    if (chk_lev == m_lev && chk_region == run_region) { return {}; }
+    std::ostringstream msg;
+    msg << "holds the lagged fire fluxes on level " << chk_lev << " over the columns " << chk_region
+        << ", but this run's fire grid covers the columns " << run_region << " of level " << m_lev
+        << ". Restart with the erf.fire.anchor_level and the refinement the checkpoint was written with.";
+    return msg.str();
+}
+
+void
+FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level, int step)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_Q_atm_prev, "[FIRE] FireCoupler: set_fire_grid() before the checkpoint");
+    // The engine first: the native engine aborts on a checkpoint whose fire grid
+    // sits on another level or region, naming its own fields
+    m_engine->read_checkpoint(restart_chkfile, max_level, step);
+
+    // The lagged fluxes, on the level of the fire grid. A checkpoint without them
+    // (no fire state at all, or written before the fluxes were checkpointed): the
+    // buffers keep their zero, said once.
+    // decided on the I/O rank and broadcast, so every rank takes the same branch
+    // into the collective reads below
+    int chk_lev = -1;
+    if (ParallelDescriptor::IOProcessor()) {
+        for (int l = 0; l <= max_level; ++l) {
+            if (amrex::FileExists(restart_chkfile + "/Level_" + std::to_string(l) + "/FireQAtmPrev_H")) {
+                chk_lev = l;
+                break;
+            }
+        }
+    }
+    ParallelDescriptor::Bcast(&chk_lev, 1, ParallelDescriptor::IOProcessorNumber());
+    if (chk_lev < 0) {
+        amrex::Print() << "[FIRE] Checkpoint has no lagged fire fluxes; the first restarted step injects none.\n";
+        return;
+    }
+    // Whatever the engine: the fluxes belong to this run's fire grid, on its
+    // level and over its region (the native engine has already checked its own
+    // fields, so this is the backstop for any other engine)
+    const Box chk_region = VisMF(MultiFabFileFullPrefix(chk_lev, restart_chkfile, "Level_", "FireQAtmPrev"))
+                               .boxArray().minimalBox();
+    if (const std::string why = checkpoint_mismatch(chk_lev, chk_region); !why.empty()) {
+        amrex::Abort("[FIRE] The checkpoint " + restart_chkfile + " " + why);
+    }
+    for (const auto& [mf, name] : {std::pair<MultiFab*, const char*>{m_Q_atm_prev.get(), "FireQAtmPrev"},
+                                   std::pair<MultiFab*, const char*>{m_Q_lat_atm_prev.get(), "FireQLatAtmPrev"}}) {
+        if (mf == nullptr) { continue; }
+        const std::string header = restart_chkfile + "/Level_" + std::to_string(m_lev) + "/" + name + "_H";
+        if (!amrex::FileExists(header)) {
+            amrex::Print() << "[FIRE] Checkpoint has no " << name << "; keeping the initialized values.\n";
+            continue;
+        }
+        VisMF::Read(*mf, MultiFabFileFullPrefix(m_lev, restart_chkfile, "Level_", name));
+        // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
+        // valid cells (a checkpoint written before the fluxes had ghosts holds none),
+        // so refill the ghosts the way update_flux_buffer() does.
+        fire_fill_boundary(*mf, m_geom_atm);
     }
 }

@@ -5,6 +5,7 @@ ifeq ($(USE_FIRE), TRUE)
   CEXE_sources += Fire/ERF_TerrainSlope.cpp
   CEXE_sources += Fire/ERF_Rothermel.cpp
   CEXE_sources += Fire/ERF_FireLayer.cpp
+  CEXE_sources += Fire/ERF_FireCheckpoint.cpp
   CEXE_sources += Fire/ERF_FireSuppression.cpp
   CEXE_sources += Fire/ERF_Fire.cpp
   CEXE_sources += Fire/ERF_FirePlotfile.cpp

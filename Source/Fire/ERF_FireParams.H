@@ -2122,6 +2122,7 @@ struct FireParams
         c.fire_atm_feedback     = fire_atm_feedback;
         c.inject_latent         = inject_latent;
         c.source_mode           = source_mode;
+        c.source_mode_given     = source_mode_given;
         c.heat_open_fraction    = heat_open_fraction;
         c.heat_tendency_density = heat_tendency_density;
         c.heat_tendency_exner   = heat_tendency_exner;

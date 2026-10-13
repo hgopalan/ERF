@@ -7,6 +7,12 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParmParse.H>
+#include <AMReX_Utility.H>
+#include <AMReX_VisMF.H>
+#include <AMReX_PlotFileUtil.H>
+#include <AMReX_FileSystem.H>
+#include <AMReX_ParallelDescriptor.H>
+#include "../ERF_GTestTempDir.H"
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -42,7 +48,11 @@
  *   and vapour sources only;
  * - passive coupling injects no heat (and, without smoke, asks for no flux),
  *   and inject_latent = false drops a latent flux the engine reports;
- * - the erf.fire.* coupling keys reach FireCouplingParams unchanged.
+ * - the erf.fire.* coupling keys reach FireCouplingParams unchanged;
+ * - a checkpoint restores the lagged fluxes bit for bit, ghosts refilled
+ *   (also from a checkpoint written without ghost columns), after the
+ *   engine's own restore; a checkpoint without them leaves them at zero, and
+ *   one of another level or region is refused.
  */
 
 using namespace amrex;
@@ -128,12 +138,25 @@ public:
     }
     Real smoke_heat_per_kg () const override { return HEAT_PER_KG; }
     bool wants_surface_precip () const override { return wants_precip; }
+    void start_run (Real, int, int) override {}
+    void write_checkpoint (const std::string&) const override { ++n_write_chk; }
+    void read_checkpoint (const std::string&, int, int step) override
+    {
+        ++n_read_chk; read_step = step;
+        // the coupler restores its fluxes after the engine: still zero here
+        if (owner) { flux_at_read = owner->get_Q_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)); }
+    }
+    void write_plotfile (const std::string&, Real, int) const override {}
 
     std::unique_ptr<MultiFab> sensible, latent;
     bool report_latent = true;
     bool report_sensible = true;
     bool wants_precip  = false;
     int n_advance = 0, n_fill = 0;
+    mutable int n_write_chk = 0;
+    int n_read_chk = 0, read_step = -1;
+    const FireCoupler* owner = nullptr;   ///< the coupler holding this engine, for the order check
+    Real flux_at_read = -1.0;
     const MultiFab* last_xvel = nullptr;
     const MultiFab* last_yvel = nullptr;
     bool got_precip = false;
@@ -206,7 +229,7 @@ std::unique_ptr<FireCoupler> make_coupler (const Level& lev, const FireCouplingP
     engine = eng.get();
     auto cpl = std::make_unique<FireCoupler>(p, std::move(eng));
     FireGrid fg = create_fire_grid(lev.ba, lev.dm, lev.geom, C);
-    cpl->set_fire_grid(0, fg, lev.ba, lev.dm, NZ);
+    cpl->set_fire_grid(0, fg, lev.ba, lev.dm, lev.geom);
     engine->set_up(cpl->fire_grid());
     return cpl;
 }
@@ -430,6 +453,103 @@ void TheRainIsHandedOverOnlyWhenAsked ()
     EXPECT_EQ(eng->precip_ncomp, 1);
 }
 
+/// A fresh checkpoint directory with the level directory VisMF writes into, under
+/// the system temporary directory and named per process (the same test runs in
+/// several CTest entries at once; erf_gtest_temp_path)
+std::string make_chk_dir (const std::string& stem)
+{
+    const std::string name = erf_gtest_temp_path(stem).string();
+    if (ParallelDescriptor::IOProcessor()) {
+        UtilCreateDirectory(name + "/Level_0", 0755);
+    }
+    ParallelDescriptor::Barrier();
+    return name;
+}
+
+void TheCheckpointRestoresTheLaggedFluxes ()
+{
+    auto lev = make_level(false);
+    StandInEngine* eng = nullptr;
+    auto cpl = make_coupler(*lev, coupling("lagged", false), eng);
+    step(*cpl, *lev);
+    const std::string chk = make_chk_dir("fire_coupler_chk");
+    cpl->write_checkpoint(chk);
+    ParallelDescriptor::Barrier();   // the headers are written by one rank
+    EXPECT_EQ(eng->n_write_chk, 1) << "the coupler writes the engine's state with its own";
+
+    // a fresh coupler and engine read it back: the engine first, then the fluxes,
+    // bit for bit on the valid columns and refilled on the ghost columns
+    StandInEngine* eng2 = nullptr;
+    auto cpl2 = make_coupler(*lev, coupling("lagged", false), eng2);
+    eng2->owner = cpl2.get();
+    cpl2->read_checkpoint(chk, 0, 7);
+    EXPECT_EQ(eng2->n_read_chk, 1);
+    EXPECT_EQ(eng2->flux_at_read, 0.0_rt) << "the engine is restored before the lagged fluxes";
+    EXPECT_EQ(eng2->read_step, 7) << "the engine gets the step of its level";
+    for (int which : {0, 1}) {
+        const MultiFab& a = which ? *cpl->get_Q_lat_atm_prev() : *cpl->get_Q_atm_prev();
+        const MultiFab& b = which ? *cpl2->get_Q_lat_atm_prev() : *cpl2->get_Q_atm_prev();
+        MultiFab d(a.boxArray(), a.DistributionMap(), 1, a.nGrowVect());
+        MultiFab::Copy(d, a, 0, 0, 1, a.nGrowVect());
+        MultiFab::Subtract(d, b, 0, 0, 1, a.nGrowVect());
+        EXPECT_EQ(d.norm0(0, 1, a.nGrowVect()), 0.0_rt) << (which ? "latent" : "sensible") << " flux, ghosts included";
+        EXPECT_GT(b.min(0), 0.0_rt);
+    }
+
+    // a checkpoint written before the fluxes carried ghost columns holds the
+    // valid columns only: the restore refills the ghosts (the MRF thermal
+    // excess reads them) to the values the run itself had
+    const std::string old = make_chk_dir("fire_coupler_chk_noghost");
+    for (int which : {0, 1}) {
+        const MultiFab& a = which ? *cpl->get_Q_lat_atm_prev() : *cpl->get_Q_atm_prev();
+        MultiFab valid(a.boxArray(), a.DistributionMap(), 1, 0);
+        MultiFab::Copy(valid, a, 0, 0, 1, 0);
+        VisMF::Write(valid, MultiFabFileFullPrefix(0, old, "Level_", which ? "FireQLatAtmPrev" : "FireQAtmPrev"));
+    }
+    ParallelDescriptor::Barrier();
+    StandInEngine* eng4 = nullptr;
+    auto cpl4 = make_coupler(*lev, coupling("lagged", false), eng4);
+    cpl4->read_checkpoint(old, 0, 0);
+    for (int which : {0, 1}) {
+        const MultiFab& a = which ? *cpl->get_Q_lat_atm_prev()  : *cpl->get_Q_atm_prev();
+        const MultiFab& b = which ? *cpl4->get_Q_lat_atm_prev() : *cpl4->get_Q_atm_prev();
+        MultiFab d(a.boxArray(), a.DistributionMap(), 1, a.nGrowVect());
+        MultiFab::Copy(d, a, 0, 0, 1, a.nGrowVect());
+        MultiFab::Subtract(d, b, 0, 0, 1, a.nGrowVect());
+        EXPECT_EQ(d.norm0(0, 1, a.nGrowVect()), 0.0_rt)
+            << (which ? "latent" : "sensible") << " ghost columns refilled from a checkpoint without them";
+    }
+
+    // a checkpoint without them (no fire state): the fluxes stay zero
+    const std::string empty = make_chk_dir("fire_coupler_chk_empty");
+    StandInEngine* eng3 = nullptr;
+    auto cpl3 = make_coupler(*lev, coupling("lagged", false), eng3);
+    cpl3->read_checkpoint(empty, 0, 0);
+    EXPECT_EQ(eng3->n_read_chk, 1) << "the engine is asked whatever the coupling finds";
+    EXPECT_EQ(cpl3->get_Q_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt);
+
+    if (ParallelDescriptor::IOProcessor()) {
+        FileSystem::RemoveAll(chk);
+        FileSystem::RemoveAll(empty);
+        FileSystem::RemoveAll(old);
+    }
+    ParallelDescriptor::Barrier();
+}
+
+void ACheckpointOfAnotherFireGridIsRefused ()
+{
+    // the coupler on the region of columns 2-5; its own region and level pass
+    auto lev = make_level(true);
+    StandInEngine* eng = nullptr;
+    auto cpl = make_coupler(*lev, coupling("lagged", false), eng);
+    const Box own(IntVect(2, 0, 0), IntVect(5, NY - 1, 0));
+    EXPECT_TRUE(cpl->checkpoint_mismatch(0, own).empty());
+    // fluxes of the whole domain, or of the same columns on another level, do not
+    const Box whole(IntVect(0, 0, 0), IntVect(NX - 1, NY - 1, 0));
+    EXPECT_NE(cpl->checkpoint_mismatch(0, whole).find("columns"), std::string::npos);
+    EXPECT_NE(cpl->checkpoint_mismatch(1, own).find("on level 1"), std::string::npos);
+}
+
 /// Keys added to erf.fire for one test and removed on exit
 class ScopedKeys
 {
@@ -498,3 +618,5 @@ TEST(FireCoupler, PassiveCouplingInjectsNoHeat)                    { PassiveCoup
 TEST(FireCoupler, InjectLatentOffDropsTheEnginesLatentFlux)        { InjectLatentOffDropsTheEnginesLatentFlux(); }
 TEST(FireCoupler, TheRainIsHandedOverOnlyWhenAsked)                { TheRainIsHandedOverOnlyWhenAsked(); }
 TEST(FireCoupler, TheFireInputsReachTheCoupling)                   { TheFireInputsReachTheCoupling(); }
+TEST(FireCoupler, TheCheckpointRestoresTheLaggedFluxes)            { TheCheckpointRestoresTheLaggedFluxes(); }
+TEST(FireCoupler, ACheckpointOfAnotherFireGridIsRefused)           { ACheckpointOfAnotherFireGridIsRefused(); }

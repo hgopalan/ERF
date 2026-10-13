@@ -847,7 +847,14 @@ zero), ``FireStickKeyNoStick_abort`` and ``FireSuppressionKeyNoEnable_abort``
 (the MRF fire thermal excess without an injecting fire),
 ``FireSourceModeConflict_abort`` (the default ``source_mode = overwrite`` with
 Rayleigh damping of theta, which it would discard), ``FireEngineUnknown_abort``
-(an ``erf.fire.engine`` that is not an engine),
+(an ``erf.fire.engine`` that is not an engine), ``FireRestartRegridLevel0_abort``
+and ``FireRestartMoreRanks_abort`` (a fire restart that re-makes the level-0
+grids, which tripped a grid-ratio or VisMF assertion part-way through),
+``FireBoxRatio_abort``, ``FireBoxRatio5_abort`` and ``DustBoxRatio_abort``
+(boxes whose x,y lengths the grid ratio does not divide: 20 cells with
+``amr.max_grid_size = 8`` chop into 7 + 7 + 6; the advice is a blocking factor
+for the ratio 4 and a ``max_grid_size`` for 5, which no AMReX blocking factor
+can be a multiple of),
 ``DustRoadFileMissing_abort`` (a missing road file, which left every rank but
 the IO rank waiting in a broadcast), ``DustTransportBins_abort`` (separately
 transported bins, which the single dust scalar cannot hold) and
@@ -887,6 +894,18 @@ run on an empty action file and appends the line while the run polls, and
 ``FireSuppression_restart_levelset`` and ``FireSuppression_restart_farsite``
 run ``run_restart.sh``, which restarts with a line under construction and
 requires the straight run's fire plotfile in every field.
+
+``FireRestart_coupled`` (MPI builds, not Windows) runs ``run_coupled_restart.sh``
+in ``FireRestart`` on nine boxes over two ranks: the coupled deck with lagged
+coupling and Kessler moisture straight to step 40, to step 23 with a
+checkpoint, and restarted from it. The atmosphere plotfile (theta and the water
+vapour included) and the fire plotfile at step 40 must equal the straight run's
+at zero tolerance, and the first restarted step must inject the straight run's
+nonzero sensible flux. The lagged sensible and latent fluxes are held by the
+coupling layer and saved in the checkpoint; a restart that did not read them
+back would inject no fire heat or vapour in its first step. A fourth run without
+fire feedback must differ from the straight run in theta and the water vapour,
+so the comparison can see both fluxes.
 
 ``FirePrecipSource`` (MPI builds, not Windows) runs ``run_precip.sh`` on one
 rank: five 40-step runs of a passive grass fire under Kessler rain from a cold

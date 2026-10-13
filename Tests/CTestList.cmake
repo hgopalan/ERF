@@ -1557,6 +1557,33 @@ function(add_test_fire_script TEST_NAME SUITE_DIR SCRIPT)
     )
 endfunction(add_test_fire_script)
 
+# Fire deck that writes a checkpoint at step 1 on WRITE_NRANKS ranks and restarts
+# from it on RESTART_NRANKS with RESTART_OPTIONS; passes only when the restart
+# stops with EXPECTED_MESSAGE.
+function(add_test_fire_restart_abort TEST_NAME SUITE_DIR INPUT_FILE WRITE_NRANKS RESTART_NRANKS EXPECTED_MESSAGE RESTART_OPTIONS)
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+    set(MPI_WRITE "\"${MPIEXEC_EXECUTABLE}\" ${MPIEXEC_NUMPROC_FLAG} ${WRITE_NRANKS} ${MPIEXEC_PREFLAGS}")
+    set(MPI_RESTART "\"${MPIEXEC_EXECUTABLE}\" ${MPIEXEC_NUMPROC_FLAG} ${RESTART_NRANKS} ${MPIEXEC_PREFLAGS}")
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    set(write_log "${CURRENT_TEST_BINARY_DIR}/write.log")
+    set(common "erf.plot_int_1=-1 erf.plot_int_2=-1 erf.fire_plot_int=-1 amrex.call_addr2line=0")
+    set(test_command sh -c "rm -rf ${CURRENT_TEST_BINARY_DIR}/chk_abort* && ${MPI_WRITE} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=1 erf.check_int=1 erf.check_file=chk_abort ${common} > ${write_log} 2>&1 && ${MPI_RESTART} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=2 erf.restart=chk_abort00001 erf.check_int=-1 ${common} ${RESTART_OPTIONS} 2>&1 | tee ${test_log}")
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 600
+        PROCESSORS ${RESTART_NRANKS}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        PASS_REGULAR_EXPRESSION "${EXPECTED_MESSAGE}"
+        ATTACHED_FILES_ON_FAIL "${test_log};${write_log}"
+    )
+endfunction(add_test_fire_restart_abort)
+
 # Fire start-up check: add_test_abort on one deck of a fire suite under Exec/RegTests
 function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
     add_test_abort(${TEST_NAME} ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR} ${INPUT_FILE}
@@ -2582,6 +2609,32 @@ add_test_fire_abort(FireMrfExcessNoFlux_abort FireRestart           inputs_level
 # not an engine stops the run naming the key and the engines there are
 add_test_fire_abort(FireEngineUnknown_abort   FireRestart           inputs_levelset_straight
     "erf.fire.engine = .lsfire. is not one of .native." "erf.fire.engine=lsfire")
+# 20 cells with max_grid_size 8 and blocking factor 1 chop into 7 + 7 + 6, none a
+# multiple of the grid ratio: the run stops naming the box. For the power-of-2 ratio
+# 4 the advice is a blocking factor; for 5 (the default ratio), which no AMReX
+# blocking factor can be a multiple of, it is a max_grid_size
+add_test_fire_abort(FireBoxRatio_abort        FireRestart           inputs_levelset_straight
+    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*Set amr.blocking_factor_x"
+    "amr.max_grid_size_x=8 amr.max_grid_size_y=8")
+add_test_fire_abort(FireBoxRatio5_abort       FireRestart           inputs_levelset_straight
+    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*which 5 is not, so set the blocking factor to 1"
+    "erf.fire.grid_ratio=5 amr.max_grid_size_x=8 amr.max_grid_size_y=8")
+# a restart that re-makes the level-0 grids stops before the fire grid is built or
+# any checkpoint field is read; the fire used to trip its grid-ratio check or VisMF's
+# BoxArray check part-way through. Both triggers: erf.regrid_level_0_on_restart, and
+# a restart on more ranks than the checkpoint has level-0 boxes (one box, two ranks)
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_restart_abort(FireRestartRegridLevel0_abort FireRestart inputs_levelset_straight 1 1
+    "the fire model .its fire grid is built from the run's level boxes"
+    "erf.regrid_level_0_on_restart=1 amr.max_grid_size_x=8 amr.max_grid_size_y=8")
+add_test_fire_restart_abort(FireRestartMoreRanks_abort FireRestart inputs_levelset_straight 1 2
+    "the fire model .its fire grid is built from the run's level boxes" "")
+# the lagged fire flux the coupling layer saves in the checkpoint: a restarted coupled
+# run gives the atmosphere and fire plotfiles of a straight run at zero tolerance, on
+# nine boxes over two ranks (a restart that dropped the flux injects no fire heat in
+# its first step)
+add_test_fire_script(FireRestart_coupled     FireRestart           run_coupled_restart.sh NRANKS 2)
+endif()
 # the fire grid on a refined level (erf.fire.anchor_level, the finest level by default):
 # the same front as a single-level run at that resolution, the level-0 heat budget after
 # average-down (and its loss with the fire on the coarser level), restart, and a restart
@@ -2842,6 +2895,10 @@ set_tests_properties(DustWarningOnce PROPERTIES
     FAIL_REGULAR_EXPRESSION "threshold_A_coeff is read only.*threshold_A_coeff is read only")
 add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight
     "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")
+# the same chop on the dust grid, with the fire off so the dust check is the one reached
+add_test_fire_abort(DustBoxRatio_abort        FireRestart           inputs_dust_straight
+    "DUST. Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*Set amr.blocking_factor_x"
+    "erf.fire.enable=false amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 add_test_fire_abort(DustZrefMismatch_abort    FireRestart           inputs_dust_straight
     "must equal erf.most.zref" "erf.most.zref=12.0")
 # October 2026 audit: a missing road file used to hang every rank but the IO rank in

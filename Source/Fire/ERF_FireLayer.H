@@ -128,6 +128,27 @@ public:
     void verify_prerequisites(const ERF& erf, int lev) override;
 
     /**
+     * @brief The run's end for the reach estimate, and the check that the
+     *        ignition marked a cell unless it is deferred or absent on purpose
+     *        (a timed perimeter polygon, an ignition schedule, threshold
+     *        ignition, or a prescribed heat flux without a front).
+     */
+    void start_run(amrex::Real stop_time, int max_step, int steps_per_coarse_step) override;
+
+    /// The native engine's checkpoint (ERF_FireCheckpoint.cpp).
+    void write_checkpoint(const std::string& checkpointname) const override;
+    /// Restore it on a restart (ERF_FireCheckpoint.cpp); aborts when the checkpoint
+    /// holds the fire on another level or region.
+    void read_checkpoint(const std::string& restart_chkfile, int max_level, int step) override;
+    /// The fire plotfile (WriteFirePlotfile, ERF_FirePlotfile.cpp).
+    void write_plotfile(const std::string& plotfile_prefix, amrex::Real time, int step) const override;
+
+    const amrex::MultiFab* level_set() const override { return fire_phi.get(); }
+    const amrex::MultiFab* reference_wind() const override { return fire_wind_ref.get(); }
+    amrex::Real reference_wind_height() const override { return m_params.sampled_wind_ht(); }
+    const amrex::MultiFab* heat_release() const override { return fire_heat_flux.get(); }
+
+    /**
      * @brief Set the native engine up on the fire grid the coupler built.
      *
      * Called from FireCoupler::initialize() in ERF::InitData_post(), after the

@@ -16,7 +16,7 @@
 
 set -u
 
-EXE=${1:?usage: [MPIRUN="mpirun -np 8"] run_restart.sh /path/to/erf_exec [extra args]}
+EXE=${1:?usage: [MPIRUN="mpirun -np 4"] run_restart.sh /path/to/erf_exec [extra args]}
 shift || true
 
 run() {

@@ -32,7 +32,9 @@ coupled to ERF the same way.
 * **The fire engine** (``FireEngine`` in ``ERF_FireEngine.H``) is the fire
   model itself: it advances the front on the fire grid and reports, after
   each step, the sensible and latent heat flux into the air on the fire grid
-  [W/m²], averaged over its step. :cpp:`erf.fire.engine` selects it; the only
+  [W/m²], averaged over its step. It writes its own checkpoint and fire
+  plotfile, and offers the level set, the reference wind and the heat release
+  to the other surface models (the dust layer reads them). :cpp:`erf.fire.engine` selects it; the only
   engine so far is ``"native"``, ERF's own model (``Source/Fire``, the
   ``FireLayer`` class), which every other section of the fire pages
   describes.
@@ -53,6 +55,39 @@ inputs (:cpp:`erf.fire.grid_ratio`, :cpp:`erf.fire.anchor_level`,
 the same for every engine, except that :cpp:`erf.fire.heat_open_fraction`
 needs the engine to report which part of each column its structures block;
 the native engine does, from its structure map.
+
+Adding a fire engine
+~~~~~~~~~~~~~~~~~~~~
+
+``Source/FireCoupling/ERF_FireEngineTemplate.H`` is the starting point for a
+new fire model. It declares every method a fire engine provides, each with a
+comment on what ERF hands it, what ERF expects back and when it is called. It
+holds declarations only: nothing in it has a body, no input selects it and
+nothing creates one, so it adds no code to a run. ``ERF_FireCoupler.cpp``
+checks at compile time that it declares every method ``FireEngine`` requires
+(the pure virtual ones), and ``override`` checks the signature of every method
+it declares; the optional methods are kept in it by hand.
+
+To add an engine:
+
+#. Copy the template into the new model's own folder, rename the class, and
+   write the method bodies in a ``.cpp`` file there. Delete the optional
+   methods the engine does not provide; their defaults then apply.
+#. Read the model's inputs under its own prefix (``erf.fire.<engine>.*``),
+   so they never mix with another engine's keys.
+#. Add the engine's name to the names :cpp:`erf.fire.engine` accepts (the
+   ``one_of`` check of ``engine`` in ``Source/Fire/ERF_FireParams.H``), and a
+   branch that creates the engine to the selector in ``ERF::initializeFire``.
+#. Run the ``FireCoupler`` unit tests (``Tests/Unit/Fire/ERF_GTestFireCoupler.cpp``,
+   whose stand-in engine is the smallest engine that works) and the coupled
+   restart check ``Exec/RegTests/FireRestart/run_coupled_restart.sh``, passing
+   ``erf.fire.engine=<name>`` and the engine's own inputs after the executable
+   (``FireParams`` still parses and checks the deck's native-engine keys,
+   whichever engine runs).
+
+The engine owns its fire physics and its own state, including its checkpoint
+and plotfile; the coupling layer does the rest, as described above. The
+native engine (``Source/Fire``, ``FireLayer``) is the complete example.
 
 Wind extraction
 ---------------

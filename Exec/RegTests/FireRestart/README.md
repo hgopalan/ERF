@@ -15,6 +15,27 @@ printed digit.
 ./run_restart.sh /path/to/erf_exec
 ```
 
+`run_coupled_restart.sh` (CTest `FireRestart_coupled`, two ranks) compares whole
+plotfiles instead. It runs the coupled deck with Kessler moisture on nine boxes
+straight to step 40, to step 23 with a checkpoint, and restarted from it, and
+requires the atmosphere plotfile (theta and the water vapour included) and the
+fire plotfile at step 40 to equal the straight run's at zero tolerance, and the
+first restarted step to inject the straight run's nonzero sensible flux. The
+lagged coupling injects the fire's sensible and latent fluxes of the step
+before; the coupling layer saves both in the checkpoint, and a restart that did
+not read them back would inject no fire heat or vapour in its first step. A
+fourth run with `erf.fire.fire_atm_feedback = 0` must differ in theta and the
+water vapour, so the comparison can see both fluxes.
+
+```
+MPIRUN="mpirun -np 2" sh run_coupled_restart.sh /path/to/erf_exec
+```
+
+It runs on 2 to 9 ranks: with more ranks than its nine boxes AMReX cuts the
+boxes further and the box-count check fails. The column stays far from
+saturation (relative humidity near 2%), so Kessler makes no cloud water or
+rain here, and their state across a restart is not exercised.
+
 ## The scenario
 
 The FireRosComparison grass fire: 2 x 2 km, 20 x 20 x 30 cells, FM1 at 6%
