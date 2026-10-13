@@ -262,8 +262,9 @@ for propagation; ``ERF_FireWindAdjust``, ``ERF_FuelWindHeight`` and
 ``ERF_FireHeatFlux`` for the heat release; ``ERF_AlbiniSpotting``, ``ERF_ScottSpottingTable``,
 ``ERF_CrownFire`` and ``ERF_FireAcceleration`` for the behaviour extensions;
 ``ERF_FireEnginePrerequisites`` for its start-up checks;
-and ``ERF_FireDiagnostics``, ``ERF_FireStatsOutput``, ``ERF_FirePlotfile``
-and ``ERF_FirePlotfileCatalog`` for output. The fire module is compiled when
+``ERF_FireDiagnostics``, ``ERF_FireStatsOutput``, ``ERF_FirePlotfile``
+and ``ERF_FirePlotfileCatalog`` for output; and ``ERF_FireCheckpoint`` for
+its checkpoint. The fire module is compiled when
 ``ERF_ENABLE_FIRE`` is on, which is the CMake default.
 
 Tests

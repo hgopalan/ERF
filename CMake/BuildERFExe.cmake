@@ -459,6 +459,7 @@ function(build_erf_lib erf_lib_name)
       ${SRC_DIR}/Fire/ERF_TerrainSlope.cpp
       ${SRC_DIR}/Fire/ERF_Rothermel.cpp
       ${SRC_DIR}/Fire/ERF_FireLayer.cpp
+      ${SRC_DIR}/Fire/ERF_FireCheckpoint.cpp
       ${SRC_DIR}/Fire/ERF_FireSuppression.cpp
       ${SRC_DIR}/Fire/ERF_Fire.cpp
       ${SRC_DIR}/Fire/ERF_FirePlotfile.cpp

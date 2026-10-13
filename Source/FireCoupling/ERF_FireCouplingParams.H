@@ -33,6 +33,9 @@ struct FireCouplingParams
     bool        inject_latent         = true;
     /// erf.fire.source_mode: overwrite or add to the theta and vapour sources
     std::string source_mode           = "overwrite";
+    /// erf.fire.source_mode was given in the deck (the default overwrite must be chosen explicitly
+    /// when another theta source would be discarded)
+    bool        source_mode_given     = false;
     /// erf.fire.heat_open_fraction: place the heat by the engine's open fraction
     bool        heat_open_fraction    = false;
     /// erf.fire.heat_tendency_density: density factor of the theta tendency

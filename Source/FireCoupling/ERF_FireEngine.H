@@ -72,11 +72,17 @@ struct FireFluxes
  * The coupling calls, in this order:
  * - verify_prerequisites() once at start-up, after its own checks of the
  *   ERF configuration and before it builds the fire grid;
- * - initialize() once, with the fire grid built;
+ * - initialize() once, with the fire grid built, then start_run();
+ * - read_checkpoint() on a restart, right after start_run();
  * - advance() then fill_fluxes() once per step of the fire grid's level,
  *   after that level's dycore;
  * - smoke_heat_per_kg(), heat_open_fraction_atm() and roof_height_atm() when
- *   it injects the lagged fluxes, at every Runge-Kutta stage of the next step.
+ *   it injects the lagged fluxes, at every Runge-Kutta stage of the next step;
+ * - write_plotfile() and write_checkpoint() when ERF writes its own.
+ *
+ * The getters at the end (level set, reference wind, heat release) are what
+ * other surface models read from the fire, the dust layer today; an engine
+ * that has none returns nullptr and those couplings do nothing.
  */
 class FireEngine
 {
@@ -113,6 +119,15 @@ public:
                              const SurfaceLayer* surface_layer,
                              const amrex::MultiFab* z_phys_nd_atm) = 0;
 
+    /**
+     * @brief Start-up after initialize(), once the run's end is known
+     *
+     * @param[in] stop_time              ERF's stop_time [s] (numeric_limits max when unset)
+     * @param[in] max_step               ERF's max_step, counting level-0 steps (negative when unset)
+     * @param[in] steps_per_coarse_step  Steps of the fire grid's level per level-0 step
+     */
+    virtual void start_run (amrex::Real stop_time, int max_step, int steps_per_coarse_step) = 0;
+
     /// Advance the fire over one step of its level.
     virtual void advance (const FireForcing& forcing) = 0;
 
@@ -142,6 +157,43 @@ public:
      */
     virtual const amrex::MultiFab* heat_open_fraction_atm () const { return nullptr; }
     virtual const amrex::MultiFab* roof_height_atm () const { return nullptr; }
+
+    /**
+     * @brief Write the engine's own state to the checkpoint directory
+     *
+     * Everything the engine carries from one step to the next, under
+     * checkpointname/Level_<lev>/ of the fire grid's level. The coupling
+     * writes its lagged fluxes itself (FireCoupler::write_checkpoint).
+     */
+    virtual void write_checkpoint (const std::string& checkpointname) const = 0;
+
+    /**
+     * @brief Restore the engine's state from a checkpoint on a restart
+     *
+     * @param[in] restart_chkfile  The checkpoint directory
+     * @param[in] max_level        ERF's max_level (the levels to look for the fire state on)
+     * @param[in] step             The step count of the fire grid's level at the checkpoint
+     */
+    virtual void read_checkpoint (const std::string& restart_chkfile, int max_level, int step) = 0;
+
+    /**
+     * @brief Write the engine's plotfile of the fire grid
+     *
+     * @param[in] plotfile_prefix  erf.fire_plot_file (the step is appended)
+     * @param[in] time             Simulation time [s]
+     * @param[in] step             Level-0 step number
+     */
+    virtual void write_plotfile (const std::string& plotfile_prefix, amrex::Real time, int step) const = 0;
+
+    /// Level set on the fire grid, negative where burned; nullptr if the engine has none.
+    virtual const amrex::MultiFab* level_set () const { return nullptr; }
+    /// Wind (u, v) [m/s] the engine sampled at reference_wind_height() on the fire grid; nullptr if none.
+    virtual const amrex::MultiFab* reference_wind () const { return nullptr; }
+    /// Height above ground [m] of reference_wind().
+    virtual amrex::Real reference_wind_height () const { return amrex::Real(0.0); }
+    /// Heat released by the fire on the fire grid [W/m2], before any partition into
+    /// sensible and latent flux; nullptr if the engine has none.
+    virtual const amrex::MultiFab* heat_release () const { return nullptr; }
 };
 
 #endif

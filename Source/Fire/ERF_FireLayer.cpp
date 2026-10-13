@@ -13,6 +13,7 @@
 #include <ERF_HostFabView.H>
 #include <fstream>
 #include <sstream>
+#include <ERF_FirePlotfile.H>
 #include <limits>
 #include <array>
 #include <iomanip>
@@ -106,6 +107,44 @@ amrex::Long count_burning_cells (const amrex::MultiFab& phi)
 void FireLayer::verify_prerequisites(const ERF& erf, int lev)
 {
     verify_native_fire_prerequisites(erf, lev, m_params);
+}
+
+void FireLayer::start_run(Real stop_time, int max_step, int steps_per_coarse_step)
+{
+    // For the reach estimate at ignition
+    set_run_end(stop_time, max_step, steps_per_coarse_step);
+
+    // Verify that at least one cell was marked during fire initialization,
+    // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at
+    // erf.fire.ignition.polygon_time > 0 (spin-up first) or a timed
+    // ignition schedule, either of which legitimately leaves the domain
+    // unburned at t = 0.
+    // A run driven only by erf.fire.prescribed_heat.flux has no front at
+    // all, by design.
+    const bool deferred_ignition =
+        (m_params.ignition.has_polygon() && m_params.ignition.polygon_time > 0.0)
+        || !m_params.ignition.ignition_schedule_file.empty()
+        || m_params.ignition.threshold_enable
+        || (m_params.prescribed_heat.flux > 0.0);
+    if (const MultiFab* phi = get_levelset(); phi && !deferred_ignition) {
+        Real phi_min = phi->min(0);
+        if (!(phi_min < 0.0_rt)) {
+            const Geometry& gf = get_fire_geom();
+            std::ostringstream msg;
+            msg << "[FIRE] Fire initialization failed: no cells were marked as burned. "
+                << "Check ignition parameters (ignition_x, ignition_y, ignition_r";
+            for (const auto& f : m_params.ignition.polygon_files) { msg << ", " << f; }
+            msg << "): the fire grid "
+                << "on level " << m_lev << " covers x " << gf.ProbLo(0) << " to " << gf.ProbHi(0)
+                << " m, y " << gf.ProbLo(1) << " to " << gf.ProbHi(1) << " m.";
+            amrex::Abort(msg.str());
+        }
+    }
+}
+
+void FireLayer::write_plotfile(const std::string& plotfile_prefix, Real time, int step) const
+{
+    WriteFirePlotfile(plotfile_prefix, *this, time, step);
 }
 
 void FireLayer::initialize(const ERF& erf,

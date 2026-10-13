@@ -269,7 +269,9 @@ stable.
 Checkpoint and restart
 ----------------------
 
-The atmospheric checkpoint carries the fire state as ``FirePhi``,
+The atmospheric checkpoint carries the fire state, written by the fire
+engine (the native engine's list follows) and, for the lagged flux buffers,
+by the coupling layer (:ref:`sec:FireCoupling`), as ``FirePhi``,
 ``FireArrivalTime``, ``FireHeatFlux``, ``FireFuelLoad``, ``FireFuelMC``,
 ``FireDispAccum``, the lagged flux buffers ``FireQAtmPrev`` and
 ``FireQLatAtmPrev`` that the next step injects, with crown fire
@@ -279,10 +281,12 @@ diagnostics ``FireHeatLoad``, ``FirePeakIntensity`` and
 ``FireSuppressionMask``, ``FireSuppressionFactor``,
 ``FireSuppressionProgress`` and ``FireSuppressionFailed`` with the action
 state in ``FireSuppression`` (:ref:`sec:FireSuppression`). On restart the
-fire layer is initialised from the inputs first, so a spatial fuel map,
+fire engine is initialised from the inputs first, so a spatial fuel map,
 firebreaks, a hybrid weight, a structure mask or a suppression action file
 must still be available, and the checkpointed fields are then read over the
-initial ones. Diagnostics are recomputed on the first step.
+initial ones: the engine's first, then the lagged fluxes. A checkpoint that
+holds the fire on another level or region than the run's aborts. Diagnostics
+are recomputed on the first step.
 
 References
 ----------

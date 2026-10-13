@@ -79,7 +79,6 @@
 // Forward declarations
 class SurfaceLayer;
 class ERF;
-class FireLayer;
 struct FireDustCoupling;
 
 class DustLayer
@@ -454,8 +453,6 @@ public:
                                  bool is_final = false);
 
 private:
-    friend void apply_fire_dust_coupling(
-        DustLayer& dust_layer, const FireLayer& fire_layer, const FireDustCoupling& coupling);
 
     DustGrid                              m_dg;
 

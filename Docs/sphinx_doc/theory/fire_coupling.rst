@@ -32,7 +32,9 @@ coupled to ERF the same way.
 * **The fire engine** (``FireEngine`` in ``ERF_FireEngine.H``) is the fire
   model itself: it advances the front on the fire grid and reports, after
   each step, the sensible and latent heat flux into the air on the fire grid
-  [W/m²], averaged over its step. :cpp:`erf.fire.engine` selects it; the only
+  [W/m²], averaged over its step. It writes its own checkpoint and fire
+  plotfile, and offers the level set, the reference wind and the heat release
+  to the other surface models (the dust layer reads them). :cpp:`erf.fire.engine` selects it; the only
   engine so far is ``"native"``, ERF's own model (``Source/Fire``, the
   ``FireLayer`` class), which every other section of the fire pages
   describes.
