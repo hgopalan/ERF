@@ -321,13 +321,18 @@ FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level,
     // The lagged fluxes, on the level of the fire grid. A checkpoint without them
     // (no fire state at all, or written before the fluxes were checkpointed): the
     // buffers keep their zero, said once.
+    // decided on the I/O rank and broadcast, so every rank takes the same branch
+    // into the collective reads below
     int chk_lev = -1;
-    for (int l = 0; l <= max_level; ++l) {
-        if (amrex::FileExists(restart_chkfile + "/Level_" + std::to_string(l) + "/FireQAtmPrev_H")) {
-            chk_lev = l;
-            break;
+    if (ParallelDescriptor::IOProcessor()) {
+        for (int l = 0; l <= max_level; ++l) {
+            if (amrex::FileExists(restart_chkfile + "/Level_" + std::to_string(l) + "/FireQAtmPrev_H")) {
+                chk_lev = l;
+                break;
+            }
         }
     }
+    ParallelDescriptor::Bcast(&chk_lev, 1, ParallelDescriptor::IOProcessorNumber());
     if (chk_lev < 0) {
         amrex::Print() << "[FIRE] Checkpoint has no lagged fire fluxes; the first restarted step injects none.\n";
         return;

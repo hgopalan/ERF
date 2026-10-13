@@ -2208,9 +2208,14 @@ ERF::InitData_post ()
                 {
                     amrex::Real wind_ref_ht = m_fire_coupler->engine().reference_wind_height();
                     m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
-                    // only for an engine that hands over a reference wind
+                    // an engine that hands over no reference wind cannot feed the dust u*
                     if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust &&
-                        m_fire_coupler->engine().reference_wind() != nullptr) {
+                        m_fire_coupler->engine().reference_wind() == nullptr) {
+                        amrex::Print() << "[FIRE-DUST] WARNING: the fire engine (" << m_fire_coupler->engine().name()
+                                       << ") hands over no reference wind; erf.fire_dust_wind_to_dust is switched off\n";
+                        m_fire_dust_coupling.fire_wind_to_dust = false;
+                    }
+                    if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust) {
                     amrex::Real zref_given = wind_ref_ht;
                     if (pp.query("fire_dust_wind_zref", zref_given) &&
                         std::abs(zref_given - wind_ref_ht) > 1.0e-6 * wind_ref_ht) {

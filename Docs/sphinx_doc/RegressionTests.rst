@@ -847,7 +847,9 @@ zero), ``FireStickKeyNoStick_abort`` and ``FireSuppressionKeyNoEnable_abort``
 (the MRF fire thermal excess without an injecting fire),
 ``FireSourceModeConflict_abort`` (the default ``source_mode = overwrite`` with
 Rayleigh damping of theta, which it would discard), ``FireEngineUnknown_abort``
-(an ``erf.fire.engine`` that is not an engine),
+(an ``erf.fire.engine`` that is not an engine), ``FireRestartRegridLevel0_abort``
+and ``FireRestartMoreRanks_abort`` (a fire restart that re-makes the level-0
+grids, which tripped a grid-ratio or VisMF assertion part-way through),
 ``DustRoadFileMissing_abort`` (a missing road file, which left every rank but
 the IO rank waiting in a broadcast), ``DustTransportBins_abort`` (separately
 transported bins, which the single dust scalar cannot hold) and

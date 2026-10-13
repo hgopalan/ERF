@@ -12,7 +12,7 @@
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_FileSystem.H>
 #include <AMReX_ParallelDescriptor.H>
-#include <random>
+#include "../ERF_GTestTempDir.H"
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -453,16 +453,13 @@ void TheRainIsHandedOverOnlyWhenAsked ()
     EXPECT_EQ(eng->precip_ncomp, 1);
 }
 
-/// A clean checkpoint directory with the level directory VisMF writes into,
-/// named per process (the same test runs in several CTest entries at once)
+/// A fresh checkpoint directory with the level directory VisMF writes into, under
+/// the system temporary directory and named per process (the same test runs in
+/// several CTest entries at once; erf_gtest_temp_path)
 std::string make_chk_dir (const std::string& stem)
 {
-    int tag = 0;
-    if (ParallelDescriptor::IOProcessor()) { std::random_device rd; tag = static_cast<int>(rd() % 1000000000u); }
-    ParallelDescriptor::Bcast(&tag, 1, ParallelDescriptor::IOProcessorNumber());
-    const std::string name = stem + "_" + std::to_string(tag);
+    const std::string name = erf_gtest_temp_path(stem).string();
     if (ParallelDescriptor::IOProcessor()) {
-        if (FileSystem::Exists(name)) { FileSystem::RemoveAll(name); }
         UtilCreateDirectory(name + "/Level_0", 0755);
     }
     ParallelDescriptor::Barrier();
@@ -477,6 +474,7 @@ void TheCheckpointRestoresTheLaggedFluxes ()
     step(*cpl, *lev);
     const std::string chk = make_chk_dir("fire_coupler_chk");
     cpl->write_checkpoint(chk);
+    ParallelDescriptor::Barrier();   // the headers are written by one rank
     EXPECT_EQ(eng->n_write_chk, 1) << "the coupler writes the engine's state with its own";
 
     // a fresh coupler and engine read it back: the engine first, then the fluxes,
@@ -508,15 +506,18 @@ void TheCheckpointRestoresTheLaggedFluxes ()
         MultiFab::Copy(valid, a, 0, 0, 1, 0);
         VisMF::Write(valid, MultiFabFileFullPrefix(0, old, "Level_", which ? "FireQLatAtmPrev" : "FireQAtmPrev"));
     }
+    ParallelDescriptor::Barrier();
     StandInEngine* eng4 = nullptr;
     auto cpl4 = make_coupler(*lev, coupling("lagged", false), eng4);
     cpl4->read_checkpoint(old, 0, 0);
-    {
-        const MultiFab& a = *cpl->get_Q_atm_prev();
+    for (int which : {0, 1}) {
+        const MultiFab& a = which ? *cpl->get_Q_lat_atm_prev()  : *cpl->get_Q_atm_prev();
+        const MultiFab& b = which ? *cpl4->get_Q_lat_atm_prev() : *cpl4->get_Q_atm_prev();
         MultiFab d(a.boxArray(), a.DistributionMap(), 1, a.nGrowVect());
         MultiFab::Copy(d, a, 0, 0, 1, a.nGrowVect());
-        MultiFab::Subtract(d, *cpl4->get_Q_atm_prev(), 0, 0, 1, a.nGrowVect());
-        EXPECT_EQ(d.norm0(0, 1, a.nGrowVect()), 0.0_rt) << "ghost columns refilled from a checkpoint without them";
+        MultiFab::Subtract(d, b, 0, 0, 1, a.nGrowVect());
+        EXPECT_EQ(d.norm0(0, 1, a.nGrowVect()), 0.0_rt)
+            << (which ? "latent" : "sensible") << " ghost columns refilled from a checkpoint without them";
     }
 
     // a checkpoint without them (no fire state): the fluxes stay zero

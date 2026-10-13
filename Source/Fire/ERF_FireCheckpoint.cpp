@@ -14,8 +14,9 @@
  * @file ERF_FireCheckpoint.cpp
  * @brief The native fire engine's checkpoint: what FireLayer writes and reads
  *
- * Every field and scalar the native engine carries from one step to the next,
- * under the directory of the level the fire grid refines. The coupling's own
+ * Every field and scalar the native engine carries from one step to the next:
+ * fields under Level_<lev> of the level the fire grid refines, the text files
+ * FireState (and, with suppression, FireSuppression) at the top. The coupling's own
  * state (the lagged fluxes) is written by FireCoupler::write_checkpoint. The
  * file names and the FireState text file are those ERF wrote before the engine
  * owned its checkpoint, so earlier checkpoints restart unchanged.

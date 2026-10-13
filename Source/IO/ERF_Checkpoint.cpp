@@ -1303,10 +1303,13 @@ ERF::ReadCheckpointFile ()
 #ifdef ERF_ENABLE_FIRE
         // The fire grid is built from the level's boxes (which must divide by
         // erf.fire.grid_ratio) and its state is read onto them; the re-made boxes
-        // tripped the grid-ratio check or VisMF's BoxArray check instead.
+        // tripped the grid-ratio check or VisMF's BoxArray check instead. Refused
+        // whichever level the fire grid is on: only level 0 is re-made, but no
+        // restart of a fire on a finer level with level 0 re-made has been tested.
         if (m_fire_coupler) {
             unsupported.push_back("the fire model (its fire grid is built from the run's level "
-                                  "boxes and its state is still read onto them)");
+                                  "boxes and its state is still read onto them; refused whichever "
+                                  "level the fire grid is on)");
         }
 #endif
 
