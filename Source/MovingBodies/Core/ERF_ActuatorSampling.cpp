@@ -439,6 +439,77 @@ mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom, bool over_all_ra
     return b;
 }
 
+void
+min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& regions, std::vector<Real>& dz)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(regions.size() % 6 == 0, "min_cell_heights: six bounds per region");
+    const int n = static_cast<int>(regions.size() / 6);
+    const Real dz0 = static_cast<Real>(geom.CellSize(2));
+    dz.assign(n, dz0);
+    if (n == 0 || z_phys_nd == nullptr) { return; }
+    const Real big = std::numeric_limits<Real>::max();
+    const auto plo = geom.ProbLoArray();
+    const auto dxi = geom.InvCellSizeArray();
+    const Box& domain = geom.Domain();
+    std::vector<Real> found(n, big);
+    for (int r = 0; r < n; ++r) {
+        const Real* b = &regions[static_cast<std::size_t>(6 * r)];
+        if (b[0] > b[3] || b[1] > b[4] || b[2] > b[5]) { continue; }
+        // per direction across, the node index ranges of the cells the region touches: one range, or
+        // two in a periodic direction whose range crosses the seam
+        std::array<std::vector<std::array<int,2>>,2> ranges;
+        for (int d = 0; d < 2; ++d) {
+            const int dlo = domain.smallEnd(d), dhi = domain.bigEnd(d), nc = dhi - dlo + 1;
+            const int clo = static_cast<int>(std::floor((b[d]   - plo[d]) * dxi[d]));
+            const int chi = static_cast<int>(std::floor((b[d+3] - plo[d]) * dxi[d]));
+            if (geom.isPeriodic(d)) {
+                const int len = chi + 2 - clo;   // nodes clo .. chi + 1
+                if (len >= nc) {
+                    ranges[d].push_back({{dlo, dhi + 1}});
+                } else {
+                    const int a = dlo + (((clo - dlo) % nc) + nc) % nc;
+                    const int e = a + len - 1;
+                    if (e <= dhi + 1) {
+                        ranges[d].push_back({{a, e}});
+                    } else {
+                        ranges[d].push_back({{a, dhi + 1}});
+                        ranges[d].push_back({{dlo, e - nc}});
+                    }
+                }
+            } else {
+                const int a = std::max(clo, dlo), e = std::min(chi + 1, dhi + 1);
+                if (a <= e) { ranges[d].push_back({{a, e}}); }
+            }
+        }
+        const Real zl = b[2], zh = b[5];
+        ReduceOps<ReduceOpMin> ops;
+        ReduceData<Real> data(ops);
+        using T = typename decltype(data)::Type;
+        for (MFIter mfi(*z_phys_nd, false); mfi.isValid(); ++mfi) {
+            const Box nbx = mfi.validbox();
+            Array4<Real const> const& znd = z_phys_nd->const_array(mfi);
+            for (const auto& ri : ranges[0]) {
+                for (const auto& rj : ranges[1]) {
+                    // the spacing from each node to the one above it, both in this box
+                    Box sbx(IntVect(ri[0], rj[0], nbx.smallEnd(2)), IntVect(ri[1], rj[1], nbx.bigEnd(2) - 1), nbx.ixType());
+                    sbx &= nbx;
+                    if (!sbx.ok()) { continue; }
+                    ops.eval(sbx, data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> T
+                    {
+                        const Real z0 = znd(i,j,k), z1 = znd(i,j,k+1);
+                        return {(z1 > zl && z0 < zh) ? z1 - z0 : big};
+                    });
+                }
+            }
+        }
+        found[r] = amrex::get<0>(data.value(ops));
+    }
+    ParallelDescriptor::ReduceRealMin(found.data(), n);
+    for (int r = 0; r < n; ++r) {
+        if (found[r] < big && found[r] > Real(0.0)) { dz[r] = found[r]; }
+    }
+}
+
 bool
 points_covered_by (const BoxArray& ba, const Geometry& geom, const std::vector<Real>& pos, Real reach, std::string& first_outside,
                    CoverZ z, const ZBounds* zb)

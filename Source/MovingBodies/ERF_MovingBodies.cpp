@@ -1114,7 +1114,23 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
     for (const std::string& m : m_turbine_mode) { any_turbine_force = any_turbine_force || (m != "none"); }
     if (any_turbine_force) {
         const auto& turbs = m_driver->turbines();
-        const Real dx_min = std::min(geom.CellSize(0), std::min(geom.CellSize(1), geom.CellSize(2)));
+        // the cells an actuator line's tip sweeps are physical cells: on a terrain-following or
+        // stretched mesh the shortest under the rotor (hub +- tip radius), from z_phys_nd, not the
+        // nominal dz (a collective: every rank takes part, each rotor's bounds from its owner)
+        std::vector<Real> dz_rotor(nturb, static_cast<Real>(geom.CellSize(2)));
+        bool any_alm = false;
+        for (const std::string& m : m_turbine_mode) { any_alm = any_alm || (m == "alm"); }
+        if (any_alm && z_phys_nd != nullptr) {
+            const std::vector<Real> regions = turbine_table(6, false, [this, &turbs] (int i, Real* row) {
+                if (m_turbine_mode[i] != "alm") {
+                    for (int d = 0; d < 3; ++d) { row[d] = Real(1.0); row[d+3] = Real(0.0); }   // empty: no line
+                    return;
+                }
+                const Real r_tip = erf_actuator::tip_radius(turbs[i]);
+                for (int d = 0; d < 3; ++d) { row[d] = turbs[i].hub_pos[d] - r_tip; row[d+3] = turbs[i].hub_pos[d] + r_tip; }
+            });
+            erf_actuator::min_cell_heights(z_phys_nd, geom, regions, dz_rotor);
+        }
         for (int i = 0; i < nturb; ++i) {
             if (m_turbine_mode[i] == "none" || !m_driver->is_owner(i)) { continue; }
             if (!m_axis_checked) {
@@ -1140,6 +1156,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
             if (m_turbine_mode[i] == "alm") {
                 // the line's force must not jump over cells between two steps: the tip, the
                 // fastest point, may sweep at most alm_max_tip_cells cells per ERF step
+                const Real dx_min = std::min({static_cast<Real>(geom.CellSize(0)), static_cast<Real>(geom.CellSize(1)), dz_rotor[i]});
                 const Real cells = erf_actuator::tip_cells_per_step(turbs[i], m_dt, dx_min);
                 if (cells > m_in.alm_max_tip_cells) {
                     const Real r_tip = erf_actuator::tip_radius(turbs[i]);

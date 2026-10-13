@@ -275,10 +275,6 @@ Known limits
   ERF prints no warning when this happens: compare the "divergence after" lines
   with that constant. A refined level on a terrain-fitted mesh must also span
   the full height, or the FFT preconditioner aborts.
-- The actuator line's tip-travel limit (``alm_max_tip_cells``) counts cells of
-  the computational grid; on a terrain-fitted mesh the cells over high ground
-  are shorter (42 m instead of 50 m over the Askervein summit), so a tip that
-  passes the check can cross a little more than one physical cell per step.
 
 Release notes
 -------------

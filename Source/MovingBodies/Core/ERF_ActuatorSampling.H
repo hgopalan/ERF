@@ -154,6 +154,21 @@ struct ZBounds {
  */
 ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& geom, bool over_all_ranks = true);
 
+/**
+ * The smallest physical cell height (the spacing of z_phys_nd's nodes along a column) in each of a
+ * set of regions: region r is the box regions[6r .. 6r+2] (x, y, z low) to regions[6r+3 .. 6r+5]
+ * (high), in metres. Every node column whose cells touch the region across (with a periodic x or y
+ * wrapping across the seam) counts, with the spacings whose span overlaps the region's heights. On a
+ * flat uniform mesh (ERF fills z_phys_nd with k dz there) that is dz to rounding. A region with a low
+ * end above its high end or one no spacing overlaps gets the nominal dz, as does every region when
+ * z_phys_nd is null (outside ERF, which always allocates it). A collective: the same on every rank.
+ *
+ * @param[in] regions 6*n bounds (m)
+ * @param[out] dz n heights (m)
+ */
+void min_cell_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                       const std::vector<amrex::Real>& regions, std::vector<amrex::Real>& dz);
+
 bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
                         const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,
                         CoverZ z = CoverZ::Reach, const ZBounds* zb = nullptr);

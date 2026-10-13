@@ -15,6 +15,7 @@
 //   (from mesh_z_bounds, exact on a flat uniform mesh), or over the whole height without the bounds.
 // - wrap_periodic: a point a few ulps below a non-zero prob_lo lands on prob_lo, not on prob_hi.
 // - terrain_heights: the bilinear k = 0 node surface.
+// - min_cell_heights: the shortest physical cell (z_phys_nd node spacing) under a region.
 
 #include <algorithm>
 #include <array>
@@ -414,6 +415,79 @@ TEST(ActuatorSampling, TheMeshsZBoundsAreItsGroundAndSpacingExtremes)
     EXPECT_NEAR(b.ground_hi, 4.0 * nx, 1.0e-4);
     EXPECT_NEAR(b.dz_lo, (H - Real(4.0 * nx)) / nz, 1.0e-3);
     EXPECT_NEAR(b.dz_hi, H / nz, 1.0e-3);
+}
+
+// min_cell_heights: the shortest physical cell under a region, from z_phys_nd's node spacing; over a
+// hill the cells are shorter than the nominal dz, so a rotor over the summit counts more cells than
+// one over the flat; the nominal dz on a uniform-dz mesh, for an empty region, and on every rank
+TEST(ActuatorSampling, TheShortestCellUnderARegionIsPhysical)
+{
+    MeshSpec m; m.stretch = 1.0; m.hill = 100.0; m.max_grid = {{4, 5, 3}};   // split in z too
+    Fields f(m, false);
+    const Real dz0 = m.H / m.nz;
+    // the reference: every column whose node lies in [ilo, ihi] x [jlo, jhi], every spacing overlapping [zl, zh]
+    auto brute = [&](int ilo, int ihi, int jlo, int jhi, Real zl, Real zh) {
+        Real best = 1.0e30;
+        for (int i = std::max(ilo, 0); i <= std::min(ihi, m.nx); ++i) {
+            for (int j = std::max(jlo, 0); j <= std::min(jhi, m.ny); ++j) {
+                for (int k = 0; k < m.nz; ++k) {
+                    const Real z0 = m.z_node(i, j, k), z1 = m.z_node(i, j, k + 1);
+                    if (z1 > zl && z0 < zh) { best = std::min(best, z1 - z0); }
+                }
+            }
+        }
+        return best;
+    };
+    // the summit (the hill's top at x = 0, y = Ly / 4) and a low corner (x = Lx / 2, y = 3 Ly / 4)
+    const Real r = 120.0, zc = 200.0;
+    const std::vector<Real> regions{
+        -r, Real(0.25) * m.Ly - r, zc - r, r, Real(0.25) * m.Ly + r, zc + r,
+        Real(0.5) * m.Lx - r, Real(0.75) * m.Ly - r, zc - r, Real(0.5) * m.Lx + r, Real(0.75) * m.Ly + r, zc + r,
+        1.0, 1.0, 1.0, 0.0, 0.0, 0.0};
+    std::vector<Real> dz;
+    erf_actuator::min_cell_heights(f.znd.get(), f.geom, regions, dz);
+    ASSERT_EQ(dz.size(), 3u);
+    auto node = [](Real x, Real d) { return static_cast<int>(std::floor(x / d)); };
+    const Real want0 = brute(node(-r, m.dx()), node(r, m.dx()) + 1, node(Real(0.25) * m.Ly - r, m.dy()),
+                             node(Real(0.25) * m.Ly + r, m.dy()) + 1, zc - r, zc + r);
+    const Real want1 = brute(node(Real(0.5) * m.Lx - r, m.dx()), node(Real(0.5) * m.Lx + r, m.dx()) + 1,
+                             node(Real(0.75) * m.Ly - r, m.dy()), node(Real(0.75) * m.Ly + r, m.dy()) + 1, zc - r, zc + r);
+    const Real tol = (sizeof(Real) == 8) ? Real(1.0e-9) : Real(1.0e-4);
+    EXPECT_NEAR(dz[0], want0, tol);
+    EXPECT_NEAR(dz[1], want1, tol);
+    // closed form: the highest node column, x = 0 and y = 200 m (or 300 m), stands h = 100 (0.5 + 0.5 sin(0.4 pi))
+    // = 97.553 m high, so its cells are (400 - h) / 8 = 37.80590 m, against the nominal 50 m
+    EXPECT_NEAR(dz[0], Real(37.8058968), Real(1.0e-4));
+    EXPECT_LT(dz[0], Real(0.8) * dz0);
+    EXPECT_GT(dz[0], Real(0.0));
+    EXPECT_GT(dz[1], dz[0] + Real(5.0)); // away from the summit the cells are taller
+    EXPECT_DOUBLE_EQ(dz[2], dz0);        // an empty region
+    // periodic in x: a region beyond the domain's lower x face finds the columns of its image near the
+    // upper face (nodes nx - 3 to nx - 1); without the periodicity it lies outside and gets the nominal dz
+    const std::array<int,3> periodic{{1, 0, 0}};
+    const amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)}, {AMREX_D_DECL(m.Lx, m.Ly, m.H)});
+    const amrex::Geometry pgeom(f.geom.Domain(), &rb, 0, periodic.data());
+    const std::vector<Real> beyond{Real(-2.5) * m.dx(), Real(0.25) * m.Ly - r, zc - r,
+                                   Real(-1.5) * m.dx(), Real(0.25) * m.Ly + r, zc + r};
+    std::vector<Real> pdz;
+    erf_actuator::min_cell_heights(f.znd.get(), pgeom, beyond, pdz);
+    ASSERT_EQ(pdz.size(), 1u);
+    EXPECT_NEAR(pdz[0], brute(m.nx - 3, m.nx - 1, node(Real(0.25) * m.Ly - r, m.dy()), node(Real(0.25) * m.Ly + r, m.dy()) + 1,
+                              zc - r, zc + r), tol);
+    EXPECT_LT(pdz[0], dz0);
+    erf_actuator::min_cell_heights(f.znd.get(), f.geom, beyond, pdz);
+    EXPECT_DOUBLE_EQ(pdz[0], dz0);
+    // a flat uniform mesh as ERF builds it, z_phys_nd = k dz with an inexact dz (400 m / 7): dz to rounding
+    MeshSpec mf = m; mf.hill = 0.0; mf.nz = 7;
+    Fields flat(mf, false);
+    const Real dzf = mf.H / mf.nz;
+    erf_actuator::min_cell_heights(flat.znd.get(), flat.geom, regions, dz);
+    ASSERT_EQ(dz.size(), 3u);
+    for (const Real v : dz) { EXPECT_NEAR(v, dzf, Real(1.0e-4) * dzf); }
+    // a null z_phys_nd (outside ERF): the nominal dz
+    Fields nominal(m, true);
+    erf_actuator::min_cell_heights(nominal.znd.get(), nominal.geom, regions, dz);
+    for (const Real v : dz) { EXPECT_DOUBLE_EQ(v, dz0); }
 }
 
 // A point a few ulps below a non-zero prob_lo wraps to lo + (len - tiny), which rounds onto prob_hi, owned by
