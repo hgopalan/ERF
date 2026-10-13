@@ -69,9 +69,10 @@ at startup, aborting with a message that names the input to change:
 - no domain decomposition in the vertical (:cpp:`amr.max_grid_size_z` at least
   the number of vertical cells), so every rank owns full columns;
 - :cpp:`erf.dust.grid_ratio` of at least 1, with every atmosphere box length in
-  x and y divisible by it (set :cpp:`amr.blocking_factor_x` and
-  :cpp:`amr.blocking_factor_y` to a multiple of it; a :cpp:`amr.max_grid_size`
-  alone does not fix the lengths AMReX chops a domain into);
+  x and y divisible by it (the inputs to change are those of the fire grid
+  ratio, :ref:`sec:Fire`: a blocking factor that is a multiple of a power-of-2
+  ratio, or a :cpp:`amr.max_grid_size` that is a multiple of any other ratio
+  and divides the domain's cell count);
 - a distribution mapping the same size as the box array, a domain whose
   z index starts at 0 and a positive domain height.
 

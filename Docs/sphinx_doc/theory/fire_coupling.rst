@@ -64,21 +64,26 @@ new fire model. It declares every method a fire engine provides, each with a
 comment on what ERF hands it, what ERF expects back and when it is called. It
 holds declarations only: nothing in it has a body, no input selects it and
 nothing creates one, so it adds no code to a run. ``ERF_FireCoupler.cpp``
-checks at compile time that it still declares every method ``FireEngine``
-requires, so the template follows the interface as the interface changes.
+checks at compile time that it declares every method ``FireEngine`` requires
+(the pure virtual ones), and ``override`` checks the signature of every method
+it declares; the optional methods are kept in it by hand.
 
 To add an engine:
 
 #. Copy the template into the new model's own folder, rename the class, and
-   write the method bodies in a ``.cpp`` file there.
+   write the method bodies in a ``.cpp`` file there. Delete the optional
+   methods the engine does not provide; their defaults then apply.
 #. Read the model's inputs under its own prefix (``erf.fire.<engine>.*``),
    so they never mix with another engine's keys.
-#. Add the engine's name to the names :cpp:`erf.fire.engine` accepts, and a
+#. Add the engine's name to the names :cpp:`erf.fire.engine` accepts (the
+   ``one_of`` check of ``engine`` in ``Source/Fire/ERF_FireParams.H``), and a
    branch that creates the engine to the selector in ``ERF::initializeFire``.
 #. Run the ``FireCoupler`` unit tests (``Tests/Unit/Fire/ERF_GTestFireCoupler.cpp``,
    whose stand-in engine is the smallest engine that works) and the coupled
-   restart check ``Exec/RegTests/FireRestart/run_coupled_restart.sh`` with
-   the new engine.
+   restart check ``Exec/RegTests/FireRestart/run_coupled_restart.sh``, passing
+   ``erf.fire.engine=<name>`` and the engine's own inputs after the executable
+   (``FireParams`` still parses and checks the deck's native-engine keys,
+   whichever engine runs).
 
 The engine owns its fire physics and its own state, including its checkpoint
 and plotfile; the coupling layer does the rest, as described above. The

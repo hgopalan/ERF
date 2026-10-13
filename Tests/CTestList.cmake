@@ -2610,10 +2610,15 @@ add_test_fire_abort(FireMrfExcessNoFlux_abort FireRestart           inputs_level
 add_test_fire_abort(FireEngineUnknown_abort   FireRestart           inputs_levelset_straight
     "erf.fire.engine = .lsfire. is not one of .native." "erf.fire.engine=lsfire")
 # 20 cells with max_grid_size 8 and blocking factor 1 chop into 7 + 7 + 6, none a
-# multiple of the grid ratio 4: the run stops naming the box and the blocking factor
+# multiple of the grid ratio: the run stops naming the box. For the power-of-2 ratio
+# 4 the advice is a blocking factor; for 5 (the default ratio), which no AMReX
+# blocking factor can be a multiple of, it is a max_grid_size
 add_test_fire_abort(FireBoxRatio_abort        FireRestart           inputs_levelset_straight
-    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells"
+    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*Set amr.blocking_factor_x"
     "amr.max_grid_size_x=8 amr.max_grid_size_y=8")
+add_test_fire_abort(FireBoxRatio5_abort       FireRestart           inputs_levelset_straight
+    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*which 5 is not, so keep the blocking factor at 1"
+    "erf.fire.grid_ratio=5 amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 # a restart that re-makes the level-0 grids stops before the fire grid is built or
 # any checkpoint field is read; the fire used to trip its grid-ratio check or VisMF's
 # BoxArray check part-way through. Both triggers: erf.regrid_level_0_on_restart, and
@@ -2892,7 +2897,7 @@ add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_
     "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")
 # the same chop on the dust grid, with the fire off so the dust check is the one reached
 add_test_fire_abort(DustBoxRatio_abort        FireRestart           inputs_dust_straight
-    "DUST. Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells"
+    "DUST. Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells.*Set amr.blocking_factor_x"
     "erf.fire.enable=false amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 add_test_fire_abort(DustZrefMismatch_abort    FireRestart           inputs_dust_straight
     "must equal erf.most.zref" "erf.most.zref=12.0")

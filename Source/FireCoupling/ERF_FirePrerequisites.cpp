@@ -11,6 +11,32 @@
 
 using namespace amrex;
 
+namespace {
+
+// What to change when a box's x or y length is not a multiple of the grid ratio C.
+// AMReX accepts only power-of-2 blocking factors, so the advice depends on C. With
+// blocking factor 1 AMReX cuts a length of n cells into the fewest near-equal
+// pieces no longer than max_grid_size (20 cells with max_grid_size 8 become
+// 7 + 7 + 6), and splits further when there are more ranks than boxes.
+std::string box_ratio_advice (int C)
+{
+    const std::string c = std::to_string(C);
+    if ((C & (C - 1)) == 0) {
+        return "Set amr.blocking_factor_x and amr.blocking_factor_y to a multiple of " + c
+             + ", with amr.max_grid_size_x, amr.max_grid_size_y and the domain's x,y cell "
+               "counts multiples of it too.";
+    }
+    return "AMReX blocking factors must be powers of 2, which " + c + " is not, so keep "
+           "the blocking factor at 1 and choose amr.max_grid_size_x and amr.max_grid_size_y "
+           "so the boxes come out as multiples of " + c + ": AMReX cuts a length of n cells "
+           "into the fewest near-equal pieces no longer than max_grid_size, so a max_grid_size "
+           "that is a multiple of " + c + " and divides n works (n = 40 and max_grid_size = 20 "
+           "give 20 + 20), and one box in x,y always does. With more ranks than boxes AMReX "
+           "cuts the boxes further, so use at least as many boxes as ranks.";
+}
+
+} // namespace
+
 int fire_anchor_level(int anchor_level, int finest_level)
 {
     const int lev = (anchor_level < 0) ? finest_level : anchor_level;
@@ -126,12 +152,8 @@ void verify_fire_prerequisites(const ERF& erf,
         grid_ratio >= 1,
         "[FIRE] Fire grid_ratio requires value >= 1. Set: erf.fire.grid_ratio >= 1");
 
-    // Check 9: All boxes divisible by grid_ratio in x,y.
-    //
-    // A max_grid_size that is a multiple of the ratio is not enough: AMReX chops a
-    // length into near-equal pieces in units of the blocking factor, so 20 cells
-    // with max_grid_size 8 and blocking factor 1 become 7 + 7 + 6. A blocking
-    // factor in x and y that is a multiple of the ratio makes every piece one.
+    // Check 9: All boxes divisible by grid_ratio in x,y (box_ratio_advice says
+    // which inputs to change).
     int C = grid_ratio;
     for (int i = 0; i < ba.size(); ++i) {
         const Box& b = ba[i];
@@ -141,11 +163,8 @@ void verify_fire_prerequisites(const ERF& erf,
             Abort("[FIRE] Box sizes not divisible by grid_ratio: box " + std::to_string(i)
                   + " of level " + std::to_string(lev) + " is " + std::to_string(nx) + " x "
                   + std::to_string(ny) + " cells, and every x,y box length on that level must "
-                  "be divisible by erf.fire.grid_ratio = " + std::to_string(C) + ". Set "
-                  "amr.blocking_factor_x and amr.blocking_factor_y to a multiple of "
-                  + std::to_string(C) + " (and amr.max_grid_size_x, amr.max_grid_size_y and the "
-                  "domain's x,y cell counts to multiples of it); a max_grid_size alone does not "
-                  "fix the lengths AMReX chops a domain into.");
+                  "be divisible by erf.fire.grid_ratio = " + std::to_string(C) + ". "
+                  + box_ratio_advice(C));
         }
     }
 

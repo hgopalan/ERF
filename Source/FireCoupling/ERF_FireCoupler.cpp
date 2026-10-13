@@ -17,9 +17,11 @@
 
 using namespace amrex;
 
-// The template for new engines declares every method FireEngine requires: a
-// method added to the interface and missing there makes the template abstract.
-// Compile time only; no FireEngineTemplate is ever created.
+// The template for new engines declares every method FireEngine requires: a pure
+// virtual method added to the interface and missing there makes the template
+// abstract. Optional methods (with a default body) are not caught here; the
+// interface asks for them to be added to the template by hand. Compile time
+// only; no FireEngineTemplate is ever created.
 static_assert(!std::is_abstract_v<FireEngineTemplate>,
               "ERF_FireEngineTemplate.H must declare every pure virtual method of FireEngine");
 

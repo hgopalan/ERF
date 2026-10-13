@@ -24,6 +24,9 @@ class SurfaceLayer;
  * ERF_FireSurfaceHeight.H).
  *
  * The native engine is FireLayer (erf.fire.engine = native, the default).
+ * ERF_FireEngineTemplate.H declares every method below for new engines: a
+ * method added to FireEngine is declared there too (a pure virtual one that is
+ * missing fails the build; an optional one does not).
  */
 
 /**

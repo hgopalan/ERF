@@ -14,15 +14,21 @@
  *
  * To start a new engine:
  *  1. Copy this file into the new model's own folder, rename the class and the
- *     include guard, and write the bodies in a .cpp file there.
+ *     include guard, and write the bodies in a .cpp file there. Delete the
+ *     declarations of the optional methods the engine does not provide (their
+ *     defaults in FireEngine then apply); a declaration left without a body
+ *     fails to link.
  *  2. Read the model's inputs under its own prefix (erf.fire.<engine>.*), not
  *     under the native engine's keys.
- *  3. Add the engine's name to the names erf.fire.engine accepts, and a branch
- *     creating the engine to the selector in ERF::initializeFire.
+ *  3. Add the engine's name to the names erf.fire.engine accepts (the one_of
+ *     check of "engine" in Source/Fire/ERF_FireParams.H), and a branch creating
+ *     the engine to the selector in ERF::initializeFire.
  *  4. Run the FireCoupler unit tests (Tests/Unit/Fire/ERF_GTestFireCoupler.cpp,
  *     whose stand-in engine shows the smallest engine that works) and the
  *     coupled restart check (Exec/RegTests/FireRestart/run_coupled_restart.sh)
- *     with the new engine.
+ *     with the new engine: pass erf.fire.engine=<name> after the executable,
+ *     with the engine's own inputs (FireParams still parses and checks the
+ *     deck's native-engine keys, whichever engine runs).
  *
  * What the coupling layer already does for every engine: it builds the fire
  * grid over erf.fire.anchor_level, hands the engine the atmosphere's state
@@ -31,8 +37,10 @@
  * in the checkpoint. An engine owns only its fire physics and its own state.
  *
  * The call order is the one documented on FireEngine (ERF_FireEngine.H).
- * ERF_FireCoupler.cpp checks at compile time that this class still declares
- * every method FireEngine requires, so the template follows the interface.
+ * ERF_FireCoupler.cpp checks at compile time that this class declares every
+ * method FireEngine requires (the pure virtual ones), and override checks the
+ * signature of every method declared here. The optional methods are listed by
+ * hand: a new optional method in FireEngine is added here too.
  */
 class FireEngineTemplate : public FireEngine
 {

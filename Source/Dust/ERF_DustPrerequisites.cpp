@@ -9,6 +9,34 @@
 #include <AMReX_Print.H>
 #include <AMReX_ParmParse.H>
 
+#include <string>
+
+namespace {
+
+// What to change when a box's x or y length is not a multiple of the grid ratio C.
+// AMReX accepts only power-of-2 blocking factors, so the advice depends on C. With
+// blocking factor 1 AMReX cuts a length of n cells into the fewest near-equal
+// pieces no longer than max_grid_size (20 cells with max_grid_size 8 become
+// 7 + 7 + 6), and splits further when there are more ranks than boxes.
+std::string box_ratio_advice (int C)
+{
+    const std::string c = std::to_string(C);
+    if ((C & (C - 1)) == 0) {
+        return "Set amr.blocking_factor_x and amr.blocking_factor_y to a multiple of " + c
+             + ", with amr.max_grid_size_x, amr.max_grid_size_y and the domain's x,y cell "
+               "counts multiples of it too.";
+    }
+    return "AMReX blocking factors must be powers of 2, which " + c + " is not, so keep "
+           "the blocking factor at 1 and choose amr.max_grid_size_x and amr.max_grid_size_y "
+           "so the boxes come out as multiples of " + c + ": AMReX cuts a length of n cells "
+           "into the fewest near-equal pieces no longer than max_grid_size, so a max_grid_size "
+           "that is a multiple of " + c + " and divides n works (n = 40 and max_grid_size = 20 "
+           "give 20 + 20), and one box in x,y always does. With more ranks than boxes AMReX "
+           "cuts the boxes further, so use at least as many boxes as ranks.";
+}
+
+} // namespace
+
 void verify_dust_prerequisites(const ERF&          erf,
                                const SurfaceLayer* surface_layer,
                                const DustParams&   dust_params)
@@ -80,18 +108,13 @@ void verify_dust_prerequisites(const ERF&          erf,
         amrex::Box box = ba_atm[i];
         int box_nx = box.length(0);
         int box_ny = box.length(1);
-        // a max_grid_size that is a multiple of the ratio is not enough: AMReX chops
-        // a length into near-equal pieces in units of the blocking factor
         if (box_nx % dust_params.grid_ratio != 0 || box_ny % dust_params.grid_ratio != 0) {
-            const std::string C = std::to_string(dust_params.grid_ratio);
             amrex::Abort("[DUST] Box sizes not divisible by grid_ratio: box " + std::to_string(i)
                          + " of level 0 is " + std::to_string(box_nx) + " x " + std::to_string(box_ny)
                          + " cells, and every atmospheric x,y box length must be divisible by "
-                         "erf.dust.grid_ratio = " + C + ". Set amr.blocking_factor_x and "
-                         "amr.blocking_factor_y to a multiple of " + C + " (and "
-                         "amr.max_grid_size_x, amr.max_grid_size_y and the domain's x,y cell "
-                         "counts to multiples of it), or change erf.dust.grid_ratio; a "
-                         "max_grid_size alone does not fix the lengths AMReX chops a domain into.");
+                         "erf.dust.grid_ratio = " + std::to_string(dust_params.grid_ratio) + ". "
+                         + box_ratio_advice(dust_params.grid_ratio)
+                         + " Or change erf.dust.grid_ratio.");
         }
     }
 

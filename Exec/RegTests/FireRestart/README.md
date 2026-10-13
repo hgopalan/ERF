@@ -16,14 +16,16 @@ printed digit.
 ```
 
 `run_coupled_restart.sh` (CTest `FireRestart_coupled`, two ranks) compares whole
-plotfiles instead. It runs the coupled deck on nine boxes straight to step 40, to
-step 23 with a checkpoint, and restarted from it, and requires the atmosphere and
-fire plotfiles at step 40 to equal the straight run's at zero tolerance. The
-lagged coupling injects the fire heat flux of the step before; the coupling layer
-saves that flux in the checkpoint, and a restart that did not read it back would
-inject no fire heat in its first step. A fourth run with
-`erf.fire.fire_atm_feedback = 0` must differ in theta, so the comparison can see
-the fire heat at all.
+plotfiles instead. It runs the coupled deck with Kessler moisture on nine boxes
+straight to step 40, to step 23 with a checkpoint, and restarted from it, and
+requires the atmosphere plotfile (theta and the water vapour included) and the
+fire plotfile at step 40 to equal the straight run's at zero tolerance, and the
+first restarted step to inject the straight run's nonzero sensible flux. The
+lagged coupling injects the fire's sensible and latent fluxes of the step
+before; the coupling layer saves both in the checkpoint, and a restart that did
+not read them back would inject no fire heat or vapour in its first step. A
+fourth run with `erf.fire.fire_atm_feedback = 0` must differ in theta and the
+water vapour, so the comparison can see both fluxes.
 
 ```
 MPIRUN="mpirun -np 2" sh run_coupled_restart.sh /path/to/erf_exec
