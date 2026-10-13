@@ -1346,6 +1346,12 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # The shifted sampling points must be covered like the nodes, and the rings and spreading are
   # unchanged, so the same three checks and a box-parity twin apply.
   add_test_openfast_adm(OpenFAST_ADM_Upstream OpenFAST_ADM_Upstream "plt00010")
+  # The same with a nacelle drag point: its drag needs the velocity at the hub, not one diameter ahead, which
+  # the turbine's owner samples as one more point of its exchange. The plotfile and the nacelle column of
+  # T1_erf.csv must match the golds of the code that sampled the hub separately on every rank, and the
+  # source must equal minus the load with the nacelle's drag.
+  add_test_openfast_adm(OpenFAST_ADM_UpstreamNacelle OpenFAST_ADM_UpstreamNacelle "plt00010"
+      "T1_erf.csv" "load_x" "T1_erf.csv" "time;nacelle_x;load_x" 8)
   add_test_box_parity(OpenFASTADM_Upstream_BoxParity OpenFAST_ADM_Upstream "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
@@ -1377,8 +1383,12 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
           ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
   endfunction()
   add_test_disk_corrected_old_update()
+  # With the domain cut into three 20-cell boxes in x (amr.max_grid_size_x = 24) the turbine is owned by rank 1, so the corrected free stream
+  # in the checkpoint's state file comes from a rank other than the I/O rank that writes the file.
   add_test_restart_parity(OpenFAST_ADM_DiskCorrected_Restart OpenFAST_ADM_DiskCorrected 5 10
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
       DATALOG "T1_correction.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
 
@@ -1456,9 +1466,12 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
 
   # The same case checkpointed at step 5 and restarted to step 10: the relaxed correction comes
   # back from the checkpoint, so the plotfile and the correction log must equal the straight
-  # run's exactly.
+  # run's exactly. With three 20-cell boxes in x (amr.max_grid_size_x = 24) the turbine is owned by rank 1, which writes the correction's
+  # and the node loads' checkpoint files and reads them back.
   add_test_restart_parity(OpenFAST_ALM_FLLC_Restart OpenFAST_ALM_FLLC_Restart 5 10
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
       DATALOG "T1_fllc.csv T1_erf.csv T1_flow.csv T1_stats.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
 
@@ -1482,38 +1495,94 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG_SIGDIGITS 10 OVERRUN)
 
   # Two stub turbines as actuator disks, the second two diameters downstream of the first: each
-  # runs in its own OpenFAST instance on its owner rank (both on rank 0 here) and writes its own
-  # logs; the integrated source must equal minus the farm's total load, and the downstream
-  # turbine's sampled flow log is the gold.
+  # runs in its own OpenFAST instance on its owner rank (T1 on rank 0, T2 on rank 1, which owns none,
+  # although both bases stand on rank 0's box) and writes its own logs; the integrated source must equal minus the farm's total load,
+  # and the downstream turbine's sampled flow log is the gold.
   add_test_openfast_adm(OpenFAST_ADM_TwoTurbines OpenFAST_ADM_TwoTurbines "plt00010" "T2_flow.csv" "load_x" "moving_bodies/total_load.csv")
 
-  # The farm checkpointed at step 5 and restarted to step 10 on two ranks, so turbine T2 is owned (and
-  # its logs written) by rank 1, not the I/O rank that trims the logs: after a first run that went on
-  # past the checkpoint, every turbine's logs must still drop the rows written after it.
+  # The farm checkpointed at step 5 and restarted to step 10 on two ranks with three 20-cell boxes in x (amr.max_grid_size_x = 24), so
+  # turbine T1 is owned (and its logs and checkpoint files written) by rank 1, not the I/O rank that
+  # trims the logs, and T2 by rank 0: after a first run that went on past the checkpoint, every
+  # turbine's logs must still drop the rows written after it.
   add_test_restart_parity(OpenFAST_ADM_TwoTurbines_Restart OpenFAST_ADM_TwoTurbines 5 10
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
       CHK_NRANKS 2 RESTART_NRANKS 2
-      DATALOG "T1_erf.csv T2_erf.csv T2_flow.csv T2_correction.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
+      DATALOG "T1_erf.csv T1_flow.csv T1_stats.csv T1_correction.csv T2_erf.csv T2_flow.csv T2_correction.csv moving_bodies/momentum_source.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
 
+  # The same farm checkpointed on two ranks (T1 owned by rank 1, T2 by rank 0) and restarted on one,
+  # which owns both and reads the files rank 1 wrote: the owners are chosen again from the restart's
+  # boxes. The FFT solution differs at roundoff between the rank counts, hence the tolerances.
+  add_test_restart_parity(OpenFAST_ADM_TwoTurbines_RestartOnOneRank OpenFAST_ADM_TwoTurbines 5 10
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
+      CHK_NRANKS 2 RESTART_NRANKS 1
+      DATALOG "T1_erf.csv T1_stats.csv T1_correction.csv T2_erf.csv T2_flow.csv T2_correction.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 8)
+
+  # Which rank owns which turbine, as the tests above rely on, and the rule that gives it: each case's deck run
+  # for one step on two ranks must end normally (exit code 0) and print the owners (Tests/RunExpectExit.cmake).
+  # With three 20-cell boxes in x (amr.max_grid_size_x = 24) rank 1's box holds the most of T1's footprint; with the default 30-cell boxes both bases
+  # stand on rank 0's box, and T2 goes to rank 1, which owns no turbine yet. A second turbine whose OpenFAST
+  # model steps with another dt (stub_turbine_dt002.fst) goes to the rank without a turbine; on one rank the
+  # two cannot be kept apart and the lockstep check stops the run.
+  function(add_test_moving_bodies_owners TEST_NAME CASE NRANKS OPTIONS REGEX)
+      set(_dir ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+      file(MAKE_DIRECTORY ${_dir})
+      file(GLOB _files "${TEST_SOURCE_ROOT}/${CASE}/*")
+      file(COPY ${_files} DESTINATION "${_dir}/")
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      separate_arguments(_opts UNIX_COMMAND "${OPTIONS}")
+      separate_arguments(_pre UNIX_COMMAND "${MPIEXEC_PREFLAGS}")
+      set(_cmd ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NRANKS} ${_pre} ${TEST_EXE} ${_dir}/${CASE}.i
+               max_step=1 erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 amrex.call_addr2line=0 ${_opts})
+      add_test(NAME ${TEST_NAME}
+          COMMAND ${CMAKE_COMMAND}
+              "-DCHECK_COMMAND=${_cmd}"
+              "-DEXPECTED_RESULT=0"
+              "-DEXPECTED_REGEX=${REGEX}"
+              -P ${PROJECT_SOURCE_DIR}/Tests/RunExpectExit.cmake)
+      set_tests_properties(${TEST_NAME} PROPERTIES
+          LABELS "regression;moving-bodies" TIMEOUT 600 PROCESSORS ${NRANKS} WORKING_DIRECTORY "${_dir}/")
+  endfunction()
+  add_test_moving_bodies_owners(MovingBodies_Owners_TwoTurbines OpenFAST_ADM_TwoTurbines 2 "amr.max_grid_size_x=24"
+      "T1: owned by rank 1 .*T2: owned by rank 0 .*STEP 1 ends")
+  add_test_moving_bodies_owners(MovingBodies_Owners_FLLC OpenFAST_ALM_FLLC_Restart 2 "amr.max_grid_size_x=24"
+      "T1: owned by rank 1 .*STEP 1 ends")
+  add_test_moving_bodies_owners(MovingBodies_Owners_DiskCorrected OpenFAST_ADM_DiskCorrected 2 "amr.max_grid_size_x=24"
+      "T1: owned by rank 1 .*STEP 1 ends")
+  add_test_moving_bodies_owners(MovingBodies_Owners_Balanced OpenFAST_ADM_TwoTurbines 2 ""
+      "T1: owned by rank 0 .*T2: owned by rank 1 .*STEP 1 ends")
+  # three turbines (dt 0.01, 0.02, 0.01) on two ranks: balance alone would put the third on rank 1 with the
+  # second; the time steps keep it on rank 0 with the first
+  add_test_moving_bodies_owners(MovingBodies_MixedTimeSteps_TwoRanks OpenFAST_ADM_TwoTurbines 2
+      "erf.moving_bodies.T2.fst_file=stub_turbine_dt002.fst \"erf.moving_bodies.bodies=T1 T2 T3\" erf.moving_bodies.T3.type=openfast_turbine erf.moving_bodies.T3.mode=adm erf.moving_bodies.T3.fst_file=stub_turbine.fst \"erf.moving_bodies.T3.base_pos=1710. 600. 0.\" erf.moving_bodies.T3.num_force_points_blade=20 erf.moving_bodies.T3.num_points_t=16 erf.moving_bodies.T3.epsilon=2.0 erf.moving_bodies.T3.output_root=T3"
+      "T2: owned by rank 1 [(]footprint radius 120 m, OpenFAST dt 0[.]02 s[)].*T3: owned by rank 0 [(]footprint radius 120 m, OpenFAST dt 0[.]01 s[)].*STEP 1 ends")
+  # the box-parity split layout of the farm (MovingBodies_Owners_* guard the restart layouts above)
+  add_test_moving_bodies_owners(MovingBodies_Owners_BoxParity OpenFAST_ADM_TwoTurbines 2
+      "amr.max_grid_size_x=24 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
+      "T1: owned by rank 0 .*T2: owned by rank 1 .*STEP 1 ends")
+
   # The farm on one rank (both turbines owned by rank 0, one box) against two ranks with the
-  # domain split (one turbine per rank): the ownership must not change the answer.
+  # domain cut into three 20-cell boxes in x (amr.max_grid_size_x = 24) (T1 owned by rank 0, T2 by rank 1): the ownership must not change
+  # the answer, nor the logs, statistics and correction T2's owner writes, nor the farm's totals,
+  # which the I/O rank gathers from both owners.
   add_test_box_parity(OpenFASTADM_TwoTurbines_BoxParity OpenFAST_ADM_TwoTurbines "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
-      SPLIT_OPTIONS "amr.max_grid_size_x=32 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
-      DATALOG "T2_flow.csv"
+      SPLIT_OPTIONS "amr.max_grid_size_x=24 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
+      DATALOG "T2_flow.csv T2_erf.csv T2_stats.csv T2_correction.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 8)
 
   # The farm with a kernel width per turbine (T1 2 cells, T2 1 cell): T2's flow log against its gold,
-  # the source against minus the farm's total load, and the one-box against the split run (one turbine
-  # per rank).
+  # the source against minus the farm's total load, and the one-box against the split run (three 20-cell
+  # boxes in x: one turbine per rank).
   add_test_openfast_adm(OpenFAST_ADM_TwoWidths OpenFAST_ADM_TwoWidths "plt00010" "T2_flow.csv" "load_x" "moving_bodies/total_load.csv")
   # A turbine and a prescribed-Ct disk behind it, each with its own width: the disk's log against its
   # gold and the source against minus the total load of both.
   add_test_openfast_adm(OpenFAST_ADM_DiskAndTurbine OpenFAST_ADM_DiskAndTurbine "plt00010" "D2_disk.csv" "load_x" "moving_bodies/total_load.csv")
   add_test_box_parity(OpenFASTADM_TwoWidths_BoxParity OpenFAST_ADM_TwoWidths "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
-      SPLIT_OPTIONS "amr.max_grid_size_x=32 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
+      SPLIT_OPTIONS "amr.max_grid_size_x=24 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
       DATALOG "T2_flow.csv"
       DATALOG_SIGDIGITS 8)
 
@@ -2359,6 +2428,9 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   set(_mb_cases ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies)
   add_test_abort(MovingBodies_AnchorLevelAboveFinest ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
       "anchor_level = 1 is not a level of this run" "erf.moving_bodies.anchor_level=1")
+  # two turbines whose OpenFAST models step with different dt on one rank, which steps them together
+  add_test_abort(MovingBodies_MixedTimeSteps_OneRank ${_mb_cases}/OpenFAST_ADM_TwoTurbines OpenFAST_ADM_TwoTurbines.i
+      "use different time steps [(]25 vs 50 substeps per ERF step[)]" "erf.moving_bodies.T2.fst_file=stub_turbine_dt002.fst")
   add_test_abort(MovingBodies_StopTimeNotWholeSteps ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
       "steps of erf[.]fixed_dt = 0[.]5.*not a whole" "stop_time=4.75 max_step=-1")
   # on two levels the stop time must be a whole number of level-0 steps, which ERF cuts, not of the
@@ -2393,6 +2465,7 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   add_test_abort(MovingBodies_ALMTipTravelLimit ${_mb_cases}/OpenFAST_ALM_Uniform OpenFAST_ALM_Uniform.i
       "the blade tip sweeps 0[.]9[0-9]* cells per step.*use erf[.]fixed_dt <= 0[.]0054" "erf.moving_bodies.alm_max_tip_cells=0.01")
   foreach(_t MovingBodies_AnchorLevelAboveFinest MovingBodies_StopTimeNotWholeSteps MovingBodies_CtDiskDensityMismatch
+             MovingBodies_MixedTimeSteps_OneRank
              MovingBodies_FinerLevelOverTheBodies MovingBodies_FPETrapsRefused MovingBodies_CorrectionRelaxOutOfRange
              MovingBodies_ALMTipTravelLimit MovingBodies_StopTimeNotWholeCoarseSteps MovingBodies_AnchorLevelMissingAtStart
              MovingBodies_MaxStepEndsTheRunFirst MovingBodies_NacelleKernelTooNarrow MovingBodies_TowerWidthWithoutTower)

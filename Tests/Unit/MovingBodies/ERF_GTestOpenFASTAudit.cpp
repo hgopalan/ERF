@@ -284,3 +284,47 @@ TEST(OpenFASTAudit, OverlapDensityAndFacing)
     // still air: nothing to judge
     EXPECT_TRUE(erf_openfast::audit_facing(t, {{0.0, 0.0, 0.0}}).empty());
 }
+
+// The overlap audit of the discs alone (as the I/O rank gets them from the owners) is the audit of
+// the turbines; the text a non-I/O owner sends is what report_audit prints; and the rotor radius
+// read before OpenFAST starts (for the owner's footprint) comes from TipRad, or the stub's
+// rotor_radius, or is negative when the files give none.
+TEST(OpenFASTAudit, DiscsTextsAndTheRadiusBeforeOpenFASTStarts)
+{
+    std::vector<erf_openfast::TurbineState> farm{rotor("T1", {{800.0, 800.0, 150.0}}, 120.0, 10),
+                                                 rotor("T2", {{800.0, 1000.0, 150.0}}, 120.0, 10)};
+    std::vector<erf_openfast::RotorDisc> discs;
+    for (const auto& t : farm) { discs.push_back({t.name, t.hub_pos, t.hub_axis, Real(120.0)}); }
+    const auto a = erf_openfast::audit_overlap(farm);
+    const auto b = erf_openfast::audit_overlap(discs);
+    ASSERT_EQ(a.size(), 1u);
+    ASSERT_EQ(b.size(), 1u);
+    EXPECT_EQ(a[0].message, b[0].message);
+    discs[1].hub = {{800.0, 1520.0, 150.0}};
+    EXPECT_TRUE(erf_openfast::audit_overlap(discs).empty());
+    bool fatal = false;
+    const std::string text = erf_openfast::format_audit("T1 (model and geometry)", a, fatal);
+    EXPECT_TRUE(fatal);
+    EXPECT_EQ(text, "OpenFAST input audit for T1 (model and geometry): 1 finding(s)\n  ERROR: " + a[0].message + "\n");
+    fatal = false;
+    erf_openfast::format_audit("T2", {{false, "a note"}}, fatal);
+    EXPECT_FALSE(fatal);
+
+    const auto dir = scratch_dir("radius");
+    write(dir, "ed.dat", "------- ELASTODYN INPUT FILE -------\n      120.97   TipRad      - The distance from the rotor apex to the blade tip (meters)\n");
+    const std::string fst = write(dir, "model.fst", "------- OpenFAST INPUT FILE -------\n\"ed.dat\"    EDFile      - ElastoDyn input file\n");
+    EXPECT_NEAR(erf_openfast::model_rotor_radius(fst), Real(120.97), Real(1.0e-4));
+    const std::string stub = write(dir, "stub.fst", "dt = 0.01\nrotor_radius = 63.0\nhub_height = 90.0\n");
+    EXPECT_NEAR(erf_openfast::model_rotor_radius(stub), Real(63.0), Real(1.0e-6));
+    const std::string none = write(dir, "none.fst", "dt = 0.01\n");
+    EXPECT_LT(erf_openfast::model_rotor_radius(none), Real(0.0));
+    EXPECT_LT(erf_openfast::model_rotor_radius((dir / "missing.fst").string()), Real(0.0));
+    // the time step: DT of an OpenFAST primary file, the stub's dt, or negative
+    const std::string dt_fst = write(dir, "dt.fst", "------- OpenFAST INPUT FILE -------\n         60   TMax        - Total run time (s)\n"
+                                                    "      0.005   DT          - Recommended module time step (s)\n");
+    EXPECT_NEAR(erf_openfast::model_time_step(dt_fst), Real(0.005), Real(1.0e-9));
+    const std::string stub_dt = write(dir, "stub_dt.fst", "num_blades = 3\ndt = 0.02\n");
+    EXPECT_NEAR(erf_openfast::model_time_step(stub_dt), Real(0.02), Real(1.0e-9));
+    EXPECT_LT(erf_openfast::model_time_step(write(dir, "nodt.fst", "num_blades = 3\n")), Real(0.0));
+    EXPECT_LT(erf_openfast::model_time_step((dir / "missing.fst").string()), Real(0.0));
+}

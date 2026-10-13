@@ -2035,7 +2035,7 @@ ERF::InitData_post ()
     if (moving_bodies && !moving_bodies->ground_set()) {
         const int lev = moving_bodies->anchor_level();
         moving_bodies->set_ground((lev <= finest_level) ? z_phys_nd[lev].get() : nullptr, Geom(std::min(lev, finest_level)),
-                                  t_new[0], finest_level);
+                                  grids[std::min(lev, finest_level)], dmap[std::min(lev, finest_level)], t_new[0], finest_level);
     }
 #endif
 

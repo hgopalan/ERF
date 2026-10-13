@@ -97,18 +97,19 @@ wrap_periodic (const std::vector<Real>& pos, const Geometry& geom)
 }
 
 void
-sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
-                 const MultiFab* z_phys_nd, const Geometry& geom,
-                 const std::vector<Real>& pos, std::vector<Real>& vel)
+sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
+                       const MultiFab* z_phys_nd, const Geometry& geom,
+                       const std::vector<Real>& wpos, std::vector<Real>& vel, std::vector<int>& cnt)
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(wpos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(U.nGrow() >= 1 && V.nGrow() >= 1 && W.nGrow() >= 1,
                                      "sample_velocity needs one filled ghost cell on the velocities");
     check_layout(U, &V, 1, "sample_velocity: V");
     check_layout(U, &W, 1, "sample_velocity: W");
     check_layout(U, z_phys_nd, 1, "sample_velocity: z_phys_nd");
-    const int npts = static_cast<int>(pos.size() / 3);
+    const int npts = static_cast<int>(wpos.size() / 3);
     vel.assign(3 * static_cast<std::size_t>(npts), Real(0.0));
+    cnt.assign(static_cast<std::size_t>(npts), 0);
     if (npts == 0) { return; }
 
     const Box& domain = geom.Domain();
@@ -120,10 +121,9 @@ sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
     const int khi = domain.bigEnd(2);
     const int ihi = domain.bigEnd(0), jhi = domain.bigEnd(1);
     const bool has_znd = (z_phys_nd != nullptr);
-    const std::vector<Real> wpos = wrap_periodic(pos, geom);
 
-    Gpu::DeviceVector<Real> d_pos(pos.size());
-    Gpu::DeviceVector<Real> d_vel(pos.size(), Real(0.0));
+    Gpu::DeviceVector<Real> d_pos(wpos.size());
+    Gpu::DeviceVector<Real> d_vel(wpos.size(), Real(0.0));
     Gpu::DeviceVector<int>  d_cnt(npts, 0);
     Gpu::copyAsync(Gpu::hostToDevice, wpos.begin(), wpos.end(), d_pos.begin());
     Real* p_pos = d_pos.data();
@@ -186,10 +186,20 @@ sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
         });
     }
     Gpu::streamSynchronize();
-
-    std::vector<int> cnt(npts, 0);
     Gpu::copy(Gpu::deviceToHost, d_vel.begin(), d_vel.end(), vel.begin());
     Gpu::copy(Gpu::deviceToHost, d_cnt.begin(), d_cnt.end(), cnt.begin());
+}
+
+void
+sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
+                 const MultiFab* z_phys_nd, const Geometry& geom,
+                 const std::vector<Real>& pos, std::vector<Real>& vel)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
+    const int npts = static_cast<int>(pos.size() / 3);
+    std::vector<int> cnt;
+    sample_velocity_local(U, V, W, z_phys_nd, geom, wrap_periodic(pos, geom), vel, cnt);
+    if (npts == 0) { return; }
     ParallelDescriptor::ReduceRealSum(vel.data(), static_cast<int>(vel.size()));
     ParallelDescriptor::ReduceIntSum(cnt.data(), npts);
 
@@ -391,7 +401,7 @@ terrain_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vec
 }
 
 ZBounds
-mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom)
+mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom, bool over_all_ranks)
 {
     const int kground = geom.Domain().smallEnd(2);
     const Real big = std::numeric_limits<Real>::max();
@@ -416,13 +426,15 @@ mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom)
     b.ground_hi = amrex::get<1>(r);
     b.dz_lo = amrex::get<2>(r);
     b.dz_hi = amrex::get<3>(r);
-    ParallelDescriptor::ReduceRealMin(b.ground_lo);
-    ParallelDescriptor::ReduceRealMax(b.ground_hi);
-    ParallelDescriptor::ReduceRealMin(b.dz_lo);
-    ParallelDescriptor::ReduceRealMax(b.dz_hi);
     int all = 1;
     for (MFIter mfi(z_phys_nd, false); mfi.isValid(); ++mfi) { all = (mfi.validbox().smallEnd(2) == kground) ? all : 0; }
-    ParallelDescriptor::ReduceIntMin(all);
+    if (over_all_ranks) {
+        ParallelDescriptor::ReduceRealMin(b.ground_lo);
+        ParallelDescriptor::ReduceRealMax(b.ground_hi);
+        ParallelDescriptor::ReduceRealMin(b.dz_lo);
+        ParallelDescriptor::ReduceRealMax(b.dz_hi);
+        ParallelDescriptor::ReduceIntMin(all);
+    }
     b.all_ground = (all != 0);
     return b;
 }

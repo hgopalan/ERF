@@ -316,6 +316,12 @@ if(ERF_ENABLE_MOVING_BODIES)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSpreading.cpp
   )
+  # Motivation: a turbine's owner must be a rank whose boxes overlap it, and its points, sampled and
+  # spread through messages to the ranks whose boxes they touch only, must give what the global
+  # sampler and spreader give over all the points; a rank no kernel reaches must receive nothing.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestBodyExchange.cpp
+  )
   # Motivation: the prescribed-Ct disk's point areas must sum to the disk area, its forces
   # to -T n with T from the upstream speed, and its inputs must be parsed with their ranges.
   target_sources(${erf_exe_name} PRIVATE
@@ -336,10 +342,10 @@ endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the
   # OpenFAST step, accept only the anelastic solver with a fixed step, refuse a model
-  # without external inflow, and report the same node layout on every rank; with tower
+  # without external inflow, and report the stub's node layout on the owner rank; with tower
   # force points the tower nodes must carry the model's drag for the velocity supplied,
-  # and the tower-shadow check must read TwrShadow; a farm deals its turbines round-robin
-  # over the ranks and runs them as separate instances. The bundled stub library stands in
+  # and the tower-shadow check must read TwrShadow; the turbines' owner ranks are given before
+  # OpenFAST starts, and a farm runs its turbines as separate instances. The bundled stub library stands in
   # for OpenFAST.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTDriver.cpp
@@ -741,10 +747,12 @@ if(ERF_ENABLE_MPI)
   if(ERF_ENABLE_MOVING_BODIES)
     # Motivation: with the domain distributed over ranks, each actuator point is sampled by
     # the one rank owning its cell and summed across ranks; the result must not depend on
-    # the rank count or on which rank holds the point.
+    # the rank count or on which rank holds the point. A turbine's points, sent only to the
+    # ranks whose boxes they touch (BodyExchange), must give the same answers.
     target_sources(${erf_parallel_exe_name} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSampling.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSpreading.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestBodyExchange.cpp
     )
   endif()
   build_erf_exe(${erf_parallel_exe_name} NO_ERF_MAIN)

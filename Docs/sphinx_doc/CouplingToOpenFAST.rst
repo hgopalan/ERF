@@ -190,6 +190,24 @@ whose forcing they describe. The full list, with the prescribed-Ct disk's
 file, is under the input table in :doc:`Inputs <Inputs>`. OpenFAST writes its
 own ``.out`` and summary files next to the ``.fst``.
 
+Running on many ranks
+---------------------
+
+Each turbine is owned by one rank, which alone runs its OpenFAST model and
+writes its logs: a rank whose boxes it stands on, unless that would give one
+rank more turbines than another or mix two OpenFAST time steps, in which case a
+nearby rank with fewer turbines takes it. Its points go only to the ranks whose
+boxes they touch, so a rank far from every turbine samples and spreads nothing
+for it (it still joins two integer reductions per step). The run log names each
+turbine's owner and the ranks it exchanges with. The turbines a rank owns are
+stepped in turn, so they must use the same OpenFAST ``DT`` (turbines of
+different ``DT`` get different ranks whenever there are at least as many ranks
+as distinct ``DT``), and a rank that owns several turbines steps their models
+one after the other: run a farm on at least as many ranks as it has turbines. A check on a turbine's points stops
+the run from its owner's rank, whose message is the one to read. The
+prescribed-Ct disks and the wake lines are still sampled and spread by every
+rank, with sums over all ranks.
+
 Restarting
 ----------
 
@@ -215,7 +233,8 @@ Tests
    ctest -L moving-bodies            # the canonical cases and the start-up aborts
    ctest -L restart-parity -R "OpenFAST|MovingBodies"
    ctest -L box-parity -R "OpenFAST|Actuator"
-   Tests/Unit/erf_unit_tests --gtest_filter='OpenFAST*:Actuator*:FLLC*:WakeLines*:RunningStats*:PrescribedCtDisk.*:MovingBodiesInputs.*'
+   Tests/Unit/erf_unit_tests --gtest_filter='OpenFAST*:Actuator*:BodyExchange.*:FLLC*:WakeLines*:RunningStats*:PrescribedCtDisk.*:MovingBodiesInputs.*'
+   ctest -L parallel -R "Actuator|BodyExchange"   # the same exchanges on 1, 2 and 4 ranks
 
 These CTests run on the stub library (``-DERF_OPENFAST_USE_STUB=ON``); their
 golds hold the stub's loads. With a real OpenFAST the same decks run, but the
@@ -265,7 +284,8 @@ terrain-fitted meshes), the OpenFAST turbine driver with lockstep stepping,
 restart and a start-up audit of the model and geometry, actuator disk and
 actuator line modes with tower and nacelle forces, the filtered lifting-line
 correction, upstream and corrected-disk sampling, prescribed-Ct disks,
-multi-turbine farms with round-robin ownership, wake lines and running
+multi-turbine farms whose turbines are owned by ranks they stand on where the
+balance allows and whose points go only to the ranks their kernels reach, wake lines and running
 statistics, turbulent inflow from precursor planes or cell perturbations,
 the anchor level on multi-level grids, bodies on terrain, the canonical
 cases with golds, box-parity and restart-parity tests, the OpenFAST-stub CI

@@ -60,6 +60,8 @@ jobs:
           -DERF_ENABLE_ALL_WARNINGS:BOOL=ON \
           -DERF_ENABLE_FCOMPARE:BOOL=ON \
           -DERF_TEST_NRANKS:STRING=2 \
+          -DERF_PARALLEL_TEST_ALLOW_OVERSUBSCRIBE:BOOL=ON \
+          '-DERF_PARALLEL_TEST_NRANKS:STRING=1;2;4' \
           ${{github.workspace}};
 
     - name: Compile and Link
@@ -86,7 +88,7 @@ jobs:
 
     - name: Actuator and OpenFAST Unit Tests
       run: |
-        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:WakeLines.*:RunningStats.*:PrescribedCtDisk.*:OpenFAST*:FLLC.*:MovingBodiesInputs.*'
+        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:BodyExchange.*:WakeLines.*:RunningStats.*:PrescribedCtDisk.*:OpenFAST*:FLLC.*:MovingBodiesInputs.*'
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Moving-Bodies Regression Tests
@@ -106,7 +108,7 @@ jobs:
 
     - name: Actuator Parallel Unit Tests
       run: |
-        ctest -R "erf_parallel_tests[.](ActuatorSampling|ActuatorSpreading)" --output-on-failure --no-tests=error
+        ctest -R "erf_parallel_tests[.](ActuatorSampling|ActuatorSpreading|BodyExchange)" --output-on-failure --no-tests=error
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Upload backtraces from failed tests

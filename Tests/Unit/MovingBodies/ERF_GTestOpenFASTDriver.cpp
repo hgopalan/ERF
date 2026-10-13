@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_REAL.H>
 
@@ -221,6 +222,7 @@ TEST(OpenFASTDriver, InitReportsTheStubNodeLayout)
     const auto dir = scratch_dir("layout");
     const std::string fst = write_stub_deck(dir, d);
     erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
+    driver.set_owners({0});
     driver.init(0.05, 1.0);
     ASSERT_TRUE(driver.initialized());
     // the node layout is known before the first solution, so the flow can be sampled at it
@@ -268,6 +270,7 @@ TEST(OpenFASTDriver, SteppingPastTheOpenFASTStopTimeAborts)
     const auto dir = scratch_dir("tmax");
     const std::string fst = write_stub_deck(dir, d);
     erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
+    driver.set_owners({0});
     driver.init(0.05, 0.1);   // two ERF steps of five OpenFAST steps each fit before TMax
     driver.set_uniform_velocity({{10.0, 0.0, 0.0}});
     driver.solution0();
@@ -294,6 +297,7 @@ TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
     int index_ref = 0;
     {
         erf_openfast::OpenFASTDriver a(std::vector<MovingBodyInputs>{one_turbine(fst, dir)});
+        a.set_owners({0});
         a.init(0.05, 1.0);
         a.set_uniform_velocity(vel);
         a.solution0();
@@ -311,6 +315,7 @@ TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
 
     // the stub's turbines are re-allocated by the second driver, so the first is gone by now
     erf_openfast::OpenFASTDriver b(std::vector<MovingBodyInputs>{one_turbine(fst, dir)});
+    b.set_owners({0});
     b.restart(prefix, 0.05, true);
     EXPECT_TRUE(b.initialized());
     EXPECT_TRUE(b.solved0());
@@ -341,6 +346,7 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
     const std::string fst = write_stub_deck(dir, d);
     erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
     const double u_inf = 10.0;
+    driver.set_owners({0});
     driver.init(0.05, 1.0);
     driver.set_uniform_velocity({{static_cast<Real>(u_inf), 0.0, 0.0}});
     driver.solution0();
@@ -420,6 +426,7 @@ TEST(OpenFASTDriver, TowerNodesCarryTheCylinderDragForAPrescribedVelocity)
     MovingBodyInputs b = one_turbine(fst, dir);
     b.num_force_points_tower = 10;
     erf_openfast::OpenFASTDriver driver({b});
+    driver.set_owners({0});
     driver.init(0.05, 1.0);
     const std::array<Real,3> wind{{10.0, -2.0, 0.0}};
     driver.set_uniform_velocity(wind);
@@ -462,6 +469,7 @@ TEST(OpenFASTDriver, TowerNodesCarryTheCylinderDragForAPrescribedVelocity)
     MovingBodyInputs b0 = one_turbine(fst, dir);
     b0.num_force_points_tower = 0;
     erf_openfast::OpenFASTDriver bare({b0});
+    bare.set_owners({0});
     bare.init(0.05, 1.0);
     EXPECT_EQ(bare.turbines()[0].num_force_nodes, 1 + d.num_blades * 6);
     EXPECT_EQ(bare.tower_force(bare.turbines()[0])[0], Real(0.0));
@@ -488,28 +496,38 @@ TEST(OpenFASTDriver, TowerShadowCheckReadsTwrShadowFromTheAeroDynFile)
     EXPECT_TRUE(erf_openfast::check_tower_shadow_off(write("stub.fst", "dt = 0.01\n")).empty());
 }
 
-// A farm: turbine i is owned by rank i modulo the rank count, every rank computes the same
-// assignment, and on one rank two turbines run as two OpenFAST instances with their own
-// identities, positions, loads and logs.
-TEST(OpenFASTDriver, TurbinesAreDealtRoundRobinOverTheRanks)
+// A farm: the owners come from the caller (MovingBodies chooses them from the boxes) before
+// OpenFAST starts, a turbine owned by no rank of the run is refused, and on one rank two turbines
+// run as two OpenFAST instances with their own identities, positions, loads and logs.
+TEST(OpenFASTDriver, OwnersAreGivenBeforeOpenFASTStarts)
 {
-    // one rank: everything on rank 0; more ranks than turbines: one turbine per rank; fewer:
-    // the deal wraps around
-    for (int i = 0; i < 5; ++i) { EXPECT_EQ(erf_openfast::owner_rank_for(i, 1), 0); }
-    EXPECT_EQ(erf_openfast::owner_rank_for(0, 8), 0);
-    EXPECT_EQ(erf_openfast::owner_rank_for(1, 8), 1);
-    EXPECT_EQ(erf_openfast::owner_rank_for(7, 8), 7);
-    EXPECT_EQ(erf_openfast::owner_rank_for(8, 8), 0);
-    EXPECT_EQ(erf_openfast::owner_rank_for(9, 8), 1);
-    // every turbine has a valid rank and, up to the rank count, a distinct one
-    for (int np = 1; np <= 6; ++np) {
-        std::vector<int> seen(np, 0);
-        for (int i = 0; i < np; ++i) {
-            const int r = erf_openfast::owner_rank_for(i, np);
-            ASSERT_GE(r, 0); ASSERT_LT(r, np);
-            ++seen[r];
-        }
-        for (int r = 0; r < np; ++r) { EXPECT_EQ(seen[r], 1) << "np " << np << " rank " << r; }
+    StubDeck d;
+    const auto dir = scratch_dir("owners");
+    const std::string fst = write_stub_deck(dir, d);
+    {
+        erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
+        EXPECT_FALSE(driver.owners_set());
+        const std::string msg = erf_gtest::abort_message([&] { driver.init(0.05, 1.0); });
+        EXPECT_NE(msg.find("set_owners() first"), std::string::npos) << msg;
+        EXPECT_FALSE(driver.initialized());
+    }
+    {
+        erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
+        const std::string msg = erf_gtest::abort_message([&] { driver.set_owners({amrex::ParallelDescriptor::NProcs()}); });
+        EXPECT_NE(msg.find("not a rank of this run"), std::string::npos) << msg;
+        const std::string count = erf_gtest::abort_message([&] { driver.set_owners({0, 0}); });
+        EXPECT_NE(count.find("one owner rank per turbine"), std::string::npos) << count;
+    }
+    {
+        // the owner given is the owner kept, and the local OpenFAST index counts the owned turbines in order
+        erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
+        driver.set_owners({0});
+        EXPECT_TRUE(driver.owners_set());
+        EXPECT_EQ(driver.turbines()[0].owner_rank, 0);
+        EXPECT_EQ(driver.turbines()[0].tid_local, 0);
+        driver.init(0.05, 1.0);
+        const std::string again = erf_gtest::abort_message([&] { driver.set_owners({0}); });
+        EXPECT_NE(again.find("already initialised"), std::string::npos) << again;
     }
 }
 
@@ -524,6 +542,7 @@ TEST(OpenFASTDriver, TwoTurbinesRunAsTwoInstancesWithTheirOwnLoads)
     b.base_pos = {{1230.0, 500.0, 0.0}};
     b.output_root = (dir / "T2").string();
     erf_openfast::OpenFASTDriver driver({a, b});
+    driver.set_owners({0, 0});
     driver.init(0.05, 1.0);
     ASSERT_EQ(driver.turbines().size(), 2u);
     // on the single rank of this test both are owned here, as two OpenFAST instances

@@ -69,6 +69,18 @@ std::vector<AuditFinding> audit_geometry (const TurbineState& t, const MovingBod
 /** Two rotors whose swept discs intersect (fatal). */
 std::vector<AuditFinding> audit_overlap (const std::vector<TurbineState>& turbs);
 
+/** A rotor's swept disc: its turbine's name, hub (m), unit shaft axis and tip radius (m). */
+struct RotorDisc
+{
+    std::string name;
+    std::array<amrex::Real,3> hub;
+    std::array<amrex::Real,3> axis;
+    amrex::Real tip_radius;
+};
+
+/** The same from the discs alone, which every turbine's owner can send where the audit is printed. */
+std::vector<AuditFinding> audit_overlap (const std::vector<RotorDisc>& discs);
+
 /**
  * ERF's density at the hub against the model's: they must agree within the relative tolerance
  * (fatal), since the loads OpenFAST computes with its density are put into a flow of ERF's.
@@ -80,6 +92,23 @@ std::vector<AuditFinding> audit_facing (const TurbineState& t, const std::array<
 
 /** Print every finding under a heading for the body; sets any_fatal when one is fatal. */
 void report_audit (const std::string& name, const std::vector<AuditFinding>& findings, bool& any_fatal);
+
+/** The text report_audit() prints, for a rank that is not the I/O rank to send there; sets any_fatal when a finding is fatal. */
+std::string format_audit (const std::string& name, const std::vector<AuditFinding>& findings, bool& any_fatal);
+
+/**
+ * The rotor radius (m) the model's files give before OpenFAST starts: TipRad of the ElastoDyn file
+ * the primary file names (EDFile), or the bundled stub's rotor_radius; negative when neither gives
+ * one. MovingBodies widens a turbine's footprint by it when choosing the turbine's owner rank.
+ */
+amrex::Real model_rotor_radius (const std::string& fst_file);
+
+/**
+ * The time step (s) the model's primary file gives before OpenFAST starts: its DT, or the bundled
+ * stub's dt; negative when it gives none. MovingBodies gives turbines of different time steps to
+ * different ranks where it can, since a rank steps the turbines it owns together.
+ */
+amrex::Real model_time_step (const std::string& fst_file);
 
 } // namespace erf_openfast
 

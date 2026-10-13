@@ -84,17 +84,8 @@ check_tower_shadow_off (const std::string& fst_file)
            "velocities, so AeroDyn's tower-shadow correction counts it twice: set TwrShadow = 0";
 }
 
-int
-owner_rank_for (int turbine_index, int nprocs)
-{
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(turbine_index >= 0 && nprocs >= 1, "owner_rank_for: a non-negative turbine index and at least one rank");
-    return turbine_index % nprocs;
-}
-
 OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 {
-    const int nprocs = ParallelDescriptor::NProcs();
-    int i = 0;
     for (const MovingBodyInputs& b : bodies) {
         TurbineState t;
         t.name = b.name;
@@ -107,13 +98,24 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
             const std::string err = check_induction(b.fst_file, b.sampling == "disk");
             if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
         }
-        t.owner_rank = owner_rank_for(i, nprocs);
-        if (t.owner_rank == ParallelDescriptor::MyProc()) {
-            t.tid_local = m_num_local++;
-        }
         m_turb.push_back(t);
-        ++i;
     }
+}
+
+void
+OpenFASTDriver::set_owners (const std::vector<int>& owners)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::set_owners: the turbines are already initialised");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(owners.size() == m_turb.size(), "OpenFASTDriver::set_owners: one owner rank per turbine");
+    m_num_local = 0;
+    for (std::size_t i = 0; i < m_turb.size(); ++i) {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(owners[i] >= 0 && owners[i] < ParallelDescriptor::NProcs(),
+                                         "OpenFASTDriver::set_owners: an owner is not a rank of this run");
+        m_turb[i].owner_rank = owners[i];
+        // OpenFAST numbers the instances of a process from 0, in turbine order
+        m_turb[i].tid_local = (owners[i] == ParallelDescriptor::MyProc()) ? m_num_local++ : -1;
+    }
+    m_owners_set = true;
 }
 
 OpenFASTDriver::~OpenFASTDriver ()
@@ -196,6 +198,7 @@ void
 OpenFASTDriver::init (double dt_cfd, double t_max)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::init called twice");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_owners_set, "OpenFASTDriver::init: set_owners() first");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
     allocate();
@@ -231,10 +234,9 @@ OpenFASTDriver::init (double dt_cfd, double t_max)
             }
             t.time_index = 0;
             finish_setup(t, dt_cfd);
+            // the owner keeps the node velocities; still air until the flow is supplied
+            t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
         }
-        broadcast_state(t);
-        // every rank keeps the node velocities; still air until the flow is supplied
-        t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
     }
     check_lockstep();
     m_initialized = true;
@@ -244,6 +246,7 @@ void
 OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::restart after init or restart");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_owners_set, "OpenFASTDriver::restart: set_owners() first");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
     allocate();
@@ -260,11 +263,8 @@ OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
             fast_check(err_stat, err_msg, "FAST_ExtInfw_Restart for " + t.name + " from " + root + ".chkp");
             t.time_index = n_t_global;
             finish_setup(t, dt_cfd);
-        }
-        broadcast_state(t);
-        // the velocities OpenFAST restored at its nodes, so the diagnostics continue from them
-        t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
-        if (is_owner(i)) {
+            // the velocities OpenFAST restored at its nodes, so the diagnostics continue from them
+            t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
             for (int nd = 0; nd < t.num_vel_nodes; ++nd) {
                 t.node_vel[3*nd]   = t.from_cfd.u[nd];
                 t.node_vel[3*nd+1] = t.from_cfd.v[nd];
@@ -273,7 +273,6 @@ OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
             // the logs continue; a restart in a clean directory starts them with a header
             open_diagnostics(t, false);
         }
-        ParallelDescriptor::Bcast(t.node_vel.data(), static_cast<int>(t.node_vel.size()), t.owner_rank);
     }
     check_lockstep();
     m_initialized = true;
@@ -311,7 +310,6 @@ OpenFASTDriver::solution0 ()
             pull_from_fast(t);
             open_diagnostics(t, true);
         }
-        broadcast_state(t);
     }
     m_solved0 = true;
 }
@@ -320,6 +318,7 @@ void
 OpenFASTDriver::set_uniform_velocity (const std::array<Real,3>& vel)
 {
     for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
+        if (!is_owner(i)) { continue; }
         std::vector<Real> uvw(3 * static_cast<std::size_t>(m_turb[i].num_vel_nodes));
         for (int nd = 0; nd < m_turb[i].num_vel_nodes; ++nd) {
             for (int d = 0; d < 3; ++d) { uvw[3*nd+d] = vel[d]; }
@@ -332,10 +331,10 @@ void
 OpenFASTDriver::set_node_velocities (int i, const std::vector<Real>& uvw)
 {
     TurbineState& t = m_turb[i];
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(is_owner(i), "OpenFASTDriver::set_node_velocities: only the owner of " + t.name + " holds its nodes");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(uvw.size()) == 3 * t.num_vel_nodes,
                                      "OpenFASTDriver::set_node_velocities: one u,v,w triple per velocity node of " + t.name);
     t.node_vel = uvw;
-    if (!is_owner(i)) { return; }
     for (int nd = 0; nd < t.num_vel_nodes; ++nd) {
         t.from_cfd.u[nd] = static_cast<float>(uvw[3*nd]);
         t.from_cfd.v[nd] = static_cast<float>(uvw[3*nd+1]);
@@ -374,9 +373,7 @@ OpenFASTDriver::step ()
         }
     }
     for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
-        TurbineState& t = m_turb[i];
-        if (is_owner(i)) { pull_from_fast(t); }
-        broadcast_state(t);
+        if (is_owner(i)) { pull_from_fast(m_turb[i]); }
     }
 }
 
@@ -401,7 +398,8 @@ OpenFASTDriver::check_lockstep () const
             Abort("OpenFAST turbines " + m_turb[i].name + " and the first one owned by this rank use different "
                   "time steps (" + std::to_string(m_turb[i].num_substeps) + " vs " + std::to_string(nsub) +
                   " substeps per ERF step): OpenFAST steps all the turbines of a process together, so their "
-                  "DT must be equal; set the same DT in the .fst files or give each turbine its own rank");
+                  "DT must be equal; set the same DT in the .fst files, or run on at least as many ranks as there are "
+                  "distinct DTs (the owners keep turbines of different DTs apart whenever the ranks allow)");
         }
     }
 }
@@ -482,33 +480,6 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
     }
 }
 
-void
-OpenFASTDriver::broadcast_state (TurbineState& t)
-{
-    if (ParallelDescriptor::NProcs() == 1) { return; }
-    const int root = t.owner_rank;
-    int sizes[8] = {t.num_blades, t.num_blade_elem, t.num_tower_elem, t.num_vel_nodes,
-                    t.num_force_nodes, t.num_substeps, t.time_index, t.num_force_pts_tower};
-    ParallelDescriptor::Bcast(sizes, 8, root);
-    t.num_blades = sizes[0]; t.num_blade_elem = sizes[1]; t.num_tower_elem = sizes[2];
-    t.num_vel_nodes = sizes[3]; t.num_force_nodes = sizes[4]; t.num_substeps = sizes[5];
-    t.time_index = sizes[6]; t.num_force_pts_tower = sizes[7];
-    ParallelDescriptor::Bcast(&t.dt_fast, 1, root);
-    t.vel_pos.resize(3 * t.num_vel_nodes);
-    t.force_pos.resize(3 * t.num_force_nodes);
-    t.force.resize(3 * t.num_force_nodes);
-    t.force_vel.resize(3 * t.num_force_nodes);
-    t.chord.resize(t.num_force_nodes);
-    if (!t.vel_pos.empty())   { ParallelDescriptor::Bcast(t.vel_pos.data(),   static_cast<int>(t.vel_pos.size()),   root); }
-    if (!t.force_pos.empty()) { ParallelDescriptor::Bcast(t.force_pos.data(), static_cast<int>(t.force_pos.size()), root); }
-    if (!t.force.empty())     { ParallelDescriptor::Bcast(t.force.data(),     static_cast<int>(t.force.size()),     root); }
-    if (!t.force_vel.empty()) { ParallelDescriptor::Bcast(t.force_vel.data(), static_cast<int>(t.force_vel.size()), root); }
-    if (!t.chord.empty())     { ParallelDescriptor::Bcast(t.chord.data(),     static_cast<int>(t.chord.size()),     root); }
-    ParallelDescriptor::Bcast(t.hub_pos.data(), 3, root);
-    ParallelDescriptor::Bcast(t.hub_axis.data(), 3, root);
-    ParallelDescriptor::Bcast(&t.rotor_speed, 1, root);
-}
-
 std::array<Real,3>
 OpenFASTDriver::thrust (const TurbineState& t) const
 {
@@ -554,6 +525,7 @@ void
 OpenFASTDriver::set_restored_loads (int i, const std::vector<Real>& force, const std::vector<Real>& node_vel)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(i >= 0 && i < static_cast<int>(m_turb.size()), "set_restored_loads: no such turbine");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(is_owner(i), "set_restored_loads: only the owner of a turbine holds its nodes");
     TurbineState& t = m_turb[i];
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(force.size() == 3 * static_cast<std::size_t>(t.num_force_nodes) &&
                                      node_vel.size() == 3 * static_cast<std::size_t>(t.num_vel_nodes),

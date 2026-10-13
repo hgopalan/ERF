@@ -241,22 +241,30 @@ audit_geometry (const TurbineState& t, const MovingBodyInputs& b, const KernelWi
 std::vector<AuditFinding>
 audit_overlap (const std::vector<TurbineState>& turbs)
 {
+    std::vector<RotorDisc> discs;
+    for (const auto& t : turbs) { discs.push_back({t.name, t.hub_pos, t.hub_axis, erf_actuator::tip_radius(t)}); }
+    return audit_overlap(discs);
+}
+
+std::vector<AuditFinding>
+audit_overlap (const std::vector<RotorDisc>& discs)
+{
     std::vector<AuditFinding> f;
-    for (std::size_t i = 0; i < turbs.size(); ++i) {
-        const Real Ri = erf_actuator::tip_radius(turbs[i]);
-        for (std::size_t j = i + 1; j < turbs.size(); ++j) {
-            const Real Rj = erf_actuator::tip_radius(turbs[j]);
+    for (std::size_t i = 0; i < discs.size(); ++i) {
+        const Real Ri = discs[i].tip_radius;
+        for (std::size_t j = i + 1; j < discs.size(); ++j) {
+            const Real Rj = discs[j].tip_radius;
             Real d2 = 0.0, along = 0.0;
             for (int c = 0; c < 3; ++c) {
-                const Real dd = turbs[j].hub_pos[c] - turbs[i].hub_pos[c];
+                const Real dd = discs[j].hub[c] - discs[i].hub[c];
                 d2 += dd * dd;
-                along += dd * turbs[i].hub_axis[c];
+                along += dd * discs[i].axis[c];
             }
             // the discs intersect when the hubs are closer across the axis than the two radii and
             // closer along it than half of them (a rotor right behind another counts too)
             const Real lateral = std::sqrt(std::max(d2 - along * along, Real(0.0)));
             if (lateral < Ri + Rj && std::abs(along) < Real(0.5) * (Ri + Rj)) {
-                f.push_back({true, "the swept discs of " + turbs[i].name + " and " + turbs[j].name + " overlap: hubs " + fmt(lateral) +
+                f.push_back({true, "the swept discs of " + discs[i].name + " and " + discs[j].name + " overlap: hubs " + fmt(lateral) +
                                    " m apart across the axis and " + fmt(std::abs(along)) + " m along it, tip radii " + fmt(Ri) + " and " + fmt(Rj) + " m"});
             }
         }
@@ -295,14 +303,54 @@ audit_facing (const TurbineState& t, const std::array<Real,3>& u_hub)
     return f;
 }
 
+std::string
+format_audit (const std::string& name, const std::vector<AuditFinding>& findings, bool& any_fatal)
+{
+    std::string text = "OpenFAST input audit for " + name + ": " + std::to_string(findings.size()) + " finding(s)\n";
+    for (const auto& f : findings) {
+        text += std::string("  ") + (f.fatal ? "ERROR: " : "note: ") + f.message + "\n";
+        if (f.fatal) { any_fatal = true; }
+    }
+    return text;
+}
+
 void
 report_audit (const std::string& name, const std::vector<AuditFinding>& findings, bool& any_fatal)
 {
-    Print() << "OpenFAST input audit for " << name << ": " << findings.size() << " finding(s)\n";
-    for (const auto& f : findings) {
-        Print() << "  " << (f.fatal ? "ERROR: " : "note: ") << f.message << "\n";
-        if (f.fatal) { any_fatal = true; }
+    Print() << format_audit(name, findings, any_fatal);
+}
+
+Real
+model_rotor_radius (const std::string& fst_file)
+{
+    Real r = -1.0;
+    const std::string ed = openfast_module_path(fst_file, "EDFile");
+    if (!ed.empty() && to_real(openfast_value(ed, "TipRad"), r) && r > Real(0.0)) { return r; }
+    // the bundled stub's deck: "rotor_radius = R"
+    std::ifstream in(fst_file);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string key, eq, value;
+        if ((ls >> key >> eq >> value) && key == "rotor_radius" && eq == "=" && to_real(value, r) && r > Real(0.0)) { return r; }
     }
+    return Real(-1.0);
+}
+
+Real
+model_time_step (const std::string& fst_file)
+{
+    Real dt = -1.0;
+    if (to_real(openfast_value(fst_file, "DT"), dt) && dt > Real(0.0)) { return dt; }
+    // the bundled stub's deck: "dt = DT"
+    std::ifstream in(fst_file);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string key, eq, value;
+        if ((ls >> key >> eq >> value) && key == "dt" && eq == "=" && to_real(value, dt) && dt > Real(0.0)) { return dt; }
+    }
+    return Real(-1.0);
 }
 
 } // namespace erf_openfast

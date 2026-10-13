@@ -22,13 +22,6 @@ namespace erf_openfast {
 int substep_count (double dt_cfd, double dt_fast, std::string& err);
 
 /**
- * The MPI rank that owns turbine i of a farm: the turbines are dealt round-robin over the
- * ranks, so a farm of up to nprocs turbines has one OpenFAST instance per rank and a larger
- * one spreads evenly. Every rank computes the same assignment.
- */
-int owner_rank_for (int turbine_index, int nprocs);
-
-/**
  * Whether the OpenFAST model computes its own rotor induction. When ERF puts the rotor's
  * loads into the flow, the velocities it samples already contain the induction, so AeroDyn's
  * wake model must be off (Wake_Mod = 0, or WakeMod = 0 in older AeroDyn files). Reads the
@@ -53,8 +46,9 @@ std::string check_induction (const std::string& fst_file, bool want_off);
 std::string check_tower_shadow_off (const std::string& fst_file);
 
 /**
- * One OpenFAST turbine. Sizes and node data are valid on every rank after init(); the ExtInfw
- * buffers are only allocated on the owner rank, which is the only rank that calls OpenFAST.
+ * One OpenFAST turbine. Every rank holds its inputs (name, files, base) and its owner rank; the
+ * sizes, the node data and the ExtInfw buffers live on the owner rank alone, which is the only
+ * rank that calls OpenFAST. On the other ranks the sizes stay zero and the node arrays empty.
  */
 struct TurbineState
 {
@@ -78,7 +72,7 @@ struct TurbineState
     int num_tower_elem{0};             //!< structural (velocity) nodes on the tower
     int num_vel_nodes{0};
     int num_force_nodes{0};
-    // node data on every rank (hub first, then blades root to tip, then tower base to top)
+    // node data, on the owner rank (hub first, then blades root to tip, then tower base to top)
     std::vector<amrex::Real> vel_pos;    //!< 3*num_vel_nodes velocity-node positions (m)
     std::vector<amrex::Real> force_pos;  //!< 3*num_force_nodes force-node positions (m)
     std::vector<amrex::Real> force;      //!< 3*num_force_nodes forces on the structure, as OpenFAST reports them (N)
@@ -97,11 +91,11 @@ struct TurbineState
 
 /**
  * Drives one or more OpenFAST turbines through the ExtInfw C API. Each turbine is owned by one
- * MPI rank (owner_rank_for), which alone runs its OpenFAST instance; after every step the node
- * positions and forces are broadcast so every rank can use them. A farm therefore costs each
- * rank only the turbines it owns, and the result does not depend on the rank count. The caller
- * hands it the flow velocity at the velocity nodes each step (sampled from ERF's flow, or the
- * prescribed velocity) and spreads the forces it returns.
+ * MPI rank (set_owners(), chosen by MovingBodies: erf_actuator::choose_owners), which
+ * alone runs its OpenFAST instance and alone holds its node positions and forces; nothing is
+ * broadcast. A farm therefore costs each rank only the turbines it owns, and the result does not
+ * depend on which rank owns which turbine. The owner hands it the flow velocity at the velocity nodes each step
+ * (sampled from ERF's flow, or the prescribed velocity) and spreads the forces it returns.
  */
 class OpenFASTDriver
 {
@@ -109,14 +103,20 @@ public:
     explicit OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies);
     ~OpenFASTDriver ();
 
+    /**
+     * The owner rank of every turbine (the same on every rank), before init() or restart(): each
+     * rank allocates OpenFAST instances for the turbines it owns only.
+     */
+    void set_owners (const std::vector<int>& owners);
+    bool owners_set () const { return m_owners_set; }
+
     OpenFASTDriver (const OpenFASTDriver&) = delete;
     OpenFASTDriver& operator= (const OpenFASTDriver&) = delete;
 
     /**
-     * Allocate and initialise every turbine and broadcast the node layout, so the caller can
-     * sample the flow at the velocity nodes before the first solution. Aborts when a model does
-     * not take external inflow (CompInflow must be 2) or when dt_cfd is not a whole multiple of
-     * the model's dt.
+     * Allocate and initialise the turbines this rank owns, so their owners can sample the flow at
+     * the velocity nodes before the first solution. Aborts when a model does not take external
+     * inflow (CompInflow must be 2) or when dt_cfd is not a whole multiple of the model's dt.
      * @param dt_cfd the fixed ERF step
      * @param t_max the OpenFAST stop time
      */
@@ -134,15 +134,15 @@ public:
     void create_checkpoint (const std::string& prefix) const;
 
     /**
-     * Run OpenFAST's first solution with the node velocities set so far, then broadcast the
-     * positions and forces and open the diagnostics files. Must follow init() and precede step().
+     * Run OpenFAST's first solution of every owned turbine with the node velocities set so far and
+     * open its diagnostics files. Must follow init() and precede step().
      */
     void solution0 ();
 
-    /** Set the same velocity at every velocity node of every turbine. */
+    /** Set the same velocity at every velocity node of every turbine this rank owns. */
     void set_uniform_velocity (const std::array<amrex::Real,3>& vel);
 
-    /** Set the velocity at each velocity node of turbine i (3*num_vel_nodes values, node order). */
+    /** Set the velocity at each velocity node of turbine i (3*num_vel_nodes values, node order); its owner only. */
     void set_node_velocities (int i, const std::vector<amrex::Real>& uvw);
 
     /** Record the nacelle drag of turbine i (the force on the structure, N) for the diagnostics. */
@@ -156,7 +156,7 @@ public:
      */
     void set_restored_loads (int i, const std::vector<amrex::Real>& force, const std::vector<amrex::Real>& node_vel);
 
-    /** Advance every turbine by one ERF step (num_substeps OpenFAST steps) and broadcast. */
+    /** Advance every turbine this rank owns by one ERF step (num_substeps OpenFAST steps). */
     void step ();
     //! substeps per ERF step of the turbines this rank owns (-1 when it owns none)
     int local_substeps () const;
@@ -195,12 +195,12 @@ public:
 private:
     std::vector<TurbineState> m_turb;
     bool m_initialized{false};
+    bool m_owners_set{false};
     bool m_solved0{false};
     int m_num_local{0};
 
     void fast_check (int err_stat, const char* err_msg, const std::string& where) const;
     void pull_from_fast (TurbineState& t);
-    void broadcast_state (TurbineState& t);
     void allocate ();
     void finish_setup (TurbineState& t, double dt_cfd);
     void open_diagnostics (const TurbineState& t, bool truncate) const;

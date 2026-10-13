@@ -35,8 +35,9 @@ OpenFAST 5; the interface is the same in 4.2). Every ERF step:
 The models are initialised at start-up, so their inputs are checked then, but
 OpenFAST's first solution is taken at the first step, once the flow exists to be
 sampled at the nodes. Each turbine is owned by one MPI rank, which is the only rank that calls
-OpenFAST; the node positions and forces are broadcast afterwards so that every
-rank sees the same turbine. The OpenFAST model must set ``CompInflow = 2``
+OpenFAST and the only rank that holds the turbine's node positions and loads;
+each point goes from there only to the ranks whose boxes it touches (see
+"Farms" below). The OpenFAST model must set ``CompInflow = 2``
 (external inflow) so that the velocities come from ERF rather than from
 InflowWind.
 
@@ -49,10 +50,13 @@ faces, bilinearly in the horizontal between the four surrounding columns and
 linearly in the physical height within each column, using the face heights of
 ``z_phys_nd`` on a stretched or terrain-following mesh. A field linear in
 ``x``, ``y`` and the physical height is therefore reproduced exactly, on every
-mesh type. Every MPI rank samples the nodes whose containing cell lies in one
-of its boxes, reading neighbours from the ghost cells, and the values are
-summed across ranks, so the result does not depend on the domain
-decomposition; a node outside the domain aborts the run with its coordinates.
+mesh type. A node is sampled by the rank whose box holds its containing cell,
+reading neighbours from the ghost cells, so the result does not depend on the
+domain decomposition; a node outside the domain aborts the run with its
+coordinates. An OpenFAST turbine's owner sends each of its nodes to the ranks
+whose boxes may hold it and gets the velocity back from the one that does; the
+prescribed-Ct disks and the wake lines, which every rank knows, are sampled by
+every rank at once and the values summed across ranks.
 
 Force spreading and momentum source
 -----------------------------------
@@ -79,7 +83,10 @@ differs from the point loads': the whole rotor's torque by 0.4 % at 40 m and
 visited over the faces within three widths of it, and again as its periodic
 images, so a kernel wraps across a periodic boundary and the cost grows with
 the number of points and the cube of their widths, not with the mesh. Faces on a non-periodic domain
-boundary get no source. The sources are computed once per step, from the
+boundary get no source. The normalisation of a turbine's kernel is the sum of
+the parts the ranks its kernel reaches compute on their own boxes, added by
+the turbine's owner in rank order and sent back with the force; a disk's is
+summed across all ranks. The sources are computed once per step, from the
 velocities sampled at the start of the step (the disks) or from the OpenFAST
 step just taken (the turbines), and added to the momentum right-hand side in
 every stage of the step, before the anelastic projection, which removes their
@@ -550,18 +557,63 @@ Farms
 
 Any number of bodies can be listed in ``erf.moving_bodies.bodies``; each has
 its own input block, its own diagnostics files (``<output_root>_*.csv``) and,
-for an OpenFAST turbine, its own OpenFAST instance. Turbine ``i`` (in the
-order of the list) is owned by MPI rank ``i`` modulo the number of ranks, so a
-farm of up to as many turbines as ranks runs one OpenFAST instance per rank
-and a larger one spreads evenly; only the owner rank calls OpenFAST, and the
-node positions, loads and velocities are broadcast after every step so that
-every rank samples and spreads for every body. The result does not depend on
-the rank count or on which rank owns which turbine. OpenFAST keeps a single
-step counter for all the turbines of a process, so the turbines a rank owns
-are stepped in turn, one OpenFAST time step at a time; they must therefore
-use the same OpenFAST ``DT`` (the run aborts at start-up otherwise), and the
-stub enforces the same order. All bodies share one
-spreading width and their forces are spread onto the same momentum sources.
+for an OpenFAST turbine, its own OpenFAST instance.
+
+**Which rank owns a turbine.** Each OpenFAST turbine is owned by one MPI rank,
+chosen at start-up (and again on a restart, from that run's boxes), turbines
+taken in the order of the list. Its footprint is the column of cells under its
+base, widened by the rotor radius its model files give (``TipRad`` of the
+ElastoDyn file, or the stub's ``rotor_radius``) and two cells. The candidates
+are the least loaded ranks whose turbines step with the same OpenFAST ``DT``
+(or own none). If one of them has boxes of the anchor level under the
+footprint, the turbine goes there (to the one holding the most of it, then the
+lowest); otherwise it goes to the candidate whose boxes come nearest. So the
+turbines spread over the ranks as evenly as dealing them out would (one per
+rank while there are as many ranks as turbines), they stand on their owner's
+boxes wherever that costs no balance, and turbines of different time steps
+share a rank only when there are more time steps than ranks (an empty rank is
+kept for each time step that has none yet). Only the owner calls
+OpenFAST, holds the turbine's nodes and loads, applies the sampling corrections
+and the FLLC, and writes the turbine's logs, statistics and checkpoint files.
+The run log names each owner, with the footprint radius and time step it read.
+
+**What goes where.** Every step the owner sends each node to sample only to the
+ranks whose boxes may hold its cell, and each point it spreads only to the
+ranks whose boxes lie within the reach of its kernel; those ranks send back the
+velocity at the node, then their part of the kernel's normalisation, and get
+the force over the whole normalisation in return. A rank whose boxes no point
+of a turbine reaches never receives any of its data (it still takes part in the
+two integer reductions of each step and in the gathers below). To know whom to expect
+messages from, every rank keeps each turbine's envelope: a box of space that
+holds its points and their kernels' reach, widened by its tip radius and two
+cells so that a turning blade or a yawing rotor stays inside. Each exchange
+starts with one integer reduction over all ranks that says whether some
+turbine's points have left its envelope; only then are the envelopes widened
+and shared, which a turbine that stays in place does in its first step only
+(once for the points it samples and, when its kernels reach farther than the
+margin, again for the points it spreads). The run log
+lists, for each turbine, the ranks it exchanges with. Every turbine's numbers
+are gathered in four places only, a few numbers per turbine each: the
+farm's totals in ``total_load.csv`` (at the diagnostic steps), the checkpoint's
+``state`` file (at each checkpoint), and the start-up audit and the wake lines'
+geometry (once).
+
+The result does not depend on which rank owns which turbine: on one or two
+ranks it is the value that sampling and spreading every point on every rank,
+with sums across all ranks, gives (bit for bit, but for the sign of an exact
+zero); with more ranks the kernels' normalisations can differ in the last bits,
+since the owner adds the ranks' parts in rank order and an MPI reduction may
+not. The checks on a turbine's points (coverage, the tip's travel, the hub
+axis, a kernel that reaches no face) run on its owner, so on several ranks
+their abort message comes from that rank.
+
+OpenFAST keeps a single step counter for all the turbines of a process, so
+the turbines a rank owns are stepped in turn, one OpenFAST time step at a
+time; they must therefore use the same OpenFAST ``DT``. The owners are chosen
+so that this holds whenever there are at least as many ranks as distinct time
+steps (see above); the run aborts at start-up otherwise. The stub enforces the
+same order. Each body is spread with its own
+widths, and all the forces go onto the same momentum sources.
 ``<diagnostics_dir>/total_load.csv`` records the sum of every body's load on
 the structure (the turbines' thrust, tower and nacelle forces and the disks'
 thrust) and the turbines' total aerodynamic power, at the times of the turbine
@@ -577,8 +629,12 @@ a ``state`` file with the step count, the time the bodies started, OpenFAST's
 stop time, the anchor level and its step, one record of every body's placing
 and forcing inputs, and each turbine's OpenFAST time index,
 each OpenFAST turbine's own checkpoint ``<name>.chkp``, written through
-``FAST_CreateCheckpoint`` by the rank that owns the turbine, the wake
-lines' running sums and the bodies' statistics. On a restart the
+``FAST_CreateCheckpoint`` by the rank that owns the turbine, with the
+turbine's node loads (``<name>_nodes.dat``) and lifting-line correction
+(``<name>_fllc.dat``) written by that rank too, the wake lines' running sums
+and the bodies' statistics. A restart may run on another number of ranks: the
+owners are chosen again from its boxes, and each reads its turbines' files
+(tested with the stub library, from two ranks to one). On a restart the
 turbines are restored with ``FAST_ExtInfw_Restart`` instead of being
 initialised, ERF checks that the time index OpenFAST reports is the one its
 own checkpoint expects, and the run continues with the next step; the

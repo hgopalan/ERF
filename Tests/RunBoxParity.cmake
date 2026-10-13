@@ -114,17 +114,8 @@ endif()
 # compared numerically, not byte for byte: they print six significant digits, and a planar sum
 # reduces in a different order for each decomposition, so a value near a rounding boundary can
 # print a different last digit without anything being wrong.
+# DATALOG names one file or several separated by spaces; each is compared on its own.
 if(NOT "${DATALOG}" STREQUAL "")
-    foreach(dir "${REF_DIR}" "${SPLIT_DIR}")
-        if(NOT EXISTS "${dir}/${DATALOG}")
-            message(FATAL_ERROR "RunBoxParity.cmake: no data log ${dir}/${DATALOG}")
-        endif()
-    endforeach()
-    file(STRINGS "${REF_DIR}/${DATALOG}" ref_log)
-    list(LENGTH ref_log ref_lines)
-    if(ref_lines LESS 2)
-        message(FATAL_ERROR "RunBoxParity.cmake: data log ${DATALOG} has ${ref_lines} lines; the comparison would be trivial")
-    endif()
     include("${CMAKE_CURRENT_LIST_DIR}/CompareDataLogs.cmake")
     # datprecision in Source/ERF.H, and a couple of units of the last digit of tolerance.
     # Station time series (Source/IO/ERF_StationSampler.cpp) print more digits, so the
@@ -132,13 +123,26 @@ if(NOT "${DATALOG}" STREQUAL "")
     if("${DATALOG_SIGDIGITS}" STREQUAL "")
         set(DATALOG_SIGDIGITS 6)
     endif()
-    # Values below 10^DATALOG_ZERO_EXPONENT count as zero (a symmetric flow's lateral velocity
-    # on the centreline is roundoff that no number of significant digits can compare).
-    erf_compare_data_logs("${REF_DIR}/${DATALOG}" "${SPLIT_DIR}/${DATALOG}" ${DATALOG_SIGDIGITS} 2 logs_agree log_message
-                          "${DATALOG_ZERO_EXPONENT}")
-    if(NOT logs_agree)
-        message(FATAL_ERROR "RunBoxParity.cmake: data log ${DATALOG} differs between the single-box "
-                            "and split runs: ${log_message}")
-    endif()
-    message(STATUS "RunBoxParity: data log ${DATALOG} agrees (${ref_lines} lines)")
+    separate_arguments(_datalogs UNIX_COMMAND "${DATALOG}")
+    foreach(_log IN LISTS _datalogs)
+        foreach(dir "${REF_DIR}" "${SPLIT_DIR}")
+            if(NOT EXISTS "${dir}/${_log}")
+                message(FATAL_ERROR "RunBoxParity.cmake: no data log ${dir}/${_log}")
+            endif()
+        endforeach()
+        file(STRINGS "${REF_DIR}/${_log}" ref_log)
+        list(LENGTH ref_log ref_lines)
+        if(ref_lines LESS 2)
+            message(FATAL_ERROR "RunBoxParity.cmake: data log ${_log} has ${ref_lines} lines; the comparison would be trivial")
+        endif()
+        # Values below 10^DATALOG_ZERO_EXPONENT count as zero (a symmetric flow's lateral velocity
+        # on the centreline is roundoff that no number of significant digits can compare).
+        erf_compare_data_logs("${REF_DIR}/${_log}" "${SPLIT_DIR}/${_log}" ${DATALOG_SIGDIGITS} 2 logs_agree log_message
+                              "${DATALOG_ZERO_EXPONENT}")
+        if(NOT logs_agree)
+            message(FATAL_ERROR "RunBoxParity.cmake: data log ${_log} differs between the single-box "
+                                "and split runs: ${log_message}")
+        endif()
+        message(STATUS "RunBoxParity: data log ${_log} agrees (${ref_lines} lines)")
+    endforeach()
 endif()
