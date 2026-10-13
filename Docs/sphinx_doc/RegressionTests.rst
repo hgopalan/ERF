@@ -850,6 +850,9 @@ Rayleigh damping of theta, which it would discard), ``FireEngineUnknown_abort``
 (an ``erf.fire.engine`` that is not an engine), ``FireRestartRegridLevel0_abort``
 and ``FireRestartMoreRanks_abort`` (a fire restart that re-makes the level-0
 grids, which tripped a grid-ratio or VisMF assertion part-way through),
+``FireBoxRatio_abort`` and ``DustBoxRatio_abort`` (boxes whose x,y lengths the
+grid ratio does not divide: 20 cells with ``amr.max_grid_size = 8`` chop into
+7 + 7 + 6),
 ``DustRoadFileMissing_abort`` (a missing road file, which left every rank but
 the IO rank waiting in a broadcast), ``DustTransportBins_abort`` (separately
 transported bins, which the single dust scalar cannot hold) and
@@ -889,6 +892,15 @@ run on an empty action file and appends the line while the run polls, and
 ``FireSuppression_restart_levelset`` and ``FireSuppression_restart_farsite``
 run ``run_restart.sh``, which restarts with a line under construction and
 requires the straight run's fire plotfile in every field.
+
+``FireRestart_coupled`` (MPI builds, not Windows) runs ``run_coupled_restart.sh``
+in ``FireRestart`` on nine boxes over two ranks: the coupled deck with lagged
+coupling straight to step 40, to step 23 with a checkpoint, and restarted from
+it. The atmosphere and fire plotfiles at step 40 must equal the straight run's
+at zero tolerance. The lagged fire flux is held by the coupling layer and saved
+in the checkpoint; a restart that did not read it back would inject no fire heat
+in its first step. A fourth run without fire feedback must differ from the
+straight run in theta, so the comparison can see the fire heat.
 
 ``FirePrecipSource`` (MPI builds, not Windows) runs ``run_precip.sh`` on one
 rank: five 40-step runs of a passive grass fire under Kessler rain from a cold

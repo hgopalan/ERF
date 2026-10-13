@@ -2609,6 +2609,11 @@ add_test_fire_abort(FireMrfExcessNoFlux_abort FireRestart           inputs_level
 # not an engine stops the run naming the key and the engines there are
 add_test_fire_abort(FireEngineUnknown_abort   FireRestart           inputs_levelset_straight
     "erf.fire.engine = .lsfire. is not one of .native." "erf.fire.engine=lsfire")
+# 20 cells with max_grid_size 8 and blocking factor 1 chop into 7 + 7 + 6, none a
+# multiple of the grid ratio 4: the run stops naming the box and the blocking factor
+add_test_fire_abort(FireBoxRatio_abort        FireRestart           inputs_levelset_straight
+    "Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells"
+    "amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 # a restart that re-makes the level-0 grids stops before the fire grid is built or
 # any checkpoint field is read; the fire used to trip its grid-ratio check or VisMF's
 # BoxArray check part-way through. Both triggers: erf.regrid_level_0_on_restart, and
@@ -2619,6 +2624,11 @@ add_test_fire_restart_abort(FireRestartRegridLevel0_abort FireRestart inputs_lev
     "erf.regrid_level_0_on_restart=1 amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 add_test_fire_restart_abort(FireRestartMoreRanks_abort FireRestart inputs_levelset_straight 1 2
     "the fire model .its fire grid is built from the run's level boxes" "")
+# the lagged fire flux the coupling layer saves in the checkpoint: a restarted coupled
+# run gives the atmosphere and fire plotfiles of a straight run at zero tolerance, on
+# nine boxes over two ranks (a restart that dropped the flux injects no fire heat in
+# its first step)
+add_test_fire_script(FireRestart_coupled     FireRestart           run_coupled_restart.sh NRANKS 2)
 endif()
 # the fire grid on a refined level (erf.fire.anchor_level, the finest level by default):
 # the same front as a single-level run at that resolution, the level-0 heat budget after
@@ -2880,6 +2890,10 @@ set_tests_properties(DustWarningOnce PROPERTIES
     FAIL_REGULAR_EXPRESSION "threshold_A_coeff is read only.*threshold_A_coeff is read only")
 add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight
     "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")
+# the same chop on the dust grid, with the fire off so the dust check is the one reached
+add_test_fire_abort(DustBoxRatio_abort        FireRestart           inputs_dust_straight
+    "DUST. Box sizes not divisible by grid_ratio: box 0 of level 0 is 7 x 7 cells"
+    "erf.fire.enable=false amr.max_grid_size_x=8 amr.max_grid_size_y=8")
 add_test_fire_abort(DustZrefMismatch_abort    FireRestart           inputs_dust_straight
     "must equal erf.most.zref" "erf.most.zref=12.0")
 # October 2026 audit: a missing road file used to hang every rank but the IO rank in

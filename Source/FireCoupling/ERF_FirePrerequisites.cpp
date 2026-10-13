@@ -126,17 +126,27 @@ void verify_fire_prerequisites(const ERF& erf,
         grid_ratio >= 1,
         "[FIRE] Fire grid_ratio requires value >= 1. Set: erf.fire.grid_ratio >= 1");
 
-    // Check 9: All boxes divisible by grid_ratio in x,y
+    // Check 9: All boxes divisible by grid_ratio in x,y.
+    //
+    // A max_grid_size that is a multiple of the ratio is not enough: AMReX chops a
+    // length into near-equal pieces in units of the blocking factor, so 20 cells
+    // with max_grid_size 8 and blocking factor 1 become 7 + 7 + 6. A blocking
+    // factor in x and y that is a multiple of the ratio makes every piece one.
     int C = grid_ratio;
     for (int i = 0; i < ba.size(); ++i) {
         const Box& b = ba[i];
         int nx = b.length(0);
         int ny = b.length(1);
-        std::string msg = std::string("[FIRE] Box sizes not divisible by grid_ratio. ")
-                        + "Adjust amr.max_grid_size_x and amr.max_grid_size_y so all x,y lengths "
-                          "of the boxes on level " + std::to_string(lev) + " are divisible by "
-                        + std::to_string(C);
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE((nx % C == 0 && ny % C == 0), msg.c_str());
+        if (nx % C != 0 || ny % C != 0) {
+            Abort("[FIRE] Box sizes not divisible by grid_ratio: box " + std::to_string(i)
+                  + " of level " + std::to_string(lev) + " is " + std::to_string(nx) + " x "
+                  + std::to_string(ny) + " cells, and every x,y box length on that level must "
+                  "be divisible by erf.fire.grid_ratio = " + std::to_string(C) + ". Set "
+                  "amr.blocking_factor_x and amr.blocking_factor_y to a multiple of "
+                  + std::to_string(C) + " (and amr.max_grid_size_x, amr.max_grid_size_y and the "
+                  "domain's x,y cell counts to multiples of it); a max_grid_size alone does not "
+                  "fix the lengths AMReX chops a domain into.");
+        }
     }
 
     // Check 10: DistributionMapping size matches grid size

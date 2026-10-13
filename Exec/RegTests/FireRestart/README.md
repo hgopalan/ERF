@@ -15,6 +15,20 @@ printed digit.
 ./run_restart.sh /path/to/erf_exec
 ```
 
+`run_coupled_restart.sh` (CTest `FireRestart_coupled`, two ranks) compares whole
+plotfiles instead. It runs the coupled deck on nine boxes straight to step 40, to
+step 23 with a checkpoint, and restarted from it, and requires the atmosphere and
+fire plotfiles at step 40 to equal the straight run's at zero tolerance. The
+lagged coupling injects the fire heat flux of the step before; the coupling layer
+saves that flux in the checkpoint, and a restart that did not read it back would
+inject no fire heat in its first step. A fourth run with
+`erf.fire.fire_atm_feedback = 0` must differ in theta, so the comparison can see
+the fire heat at all.
+
+```
+MPIRUN="mpirun -np 2" sh run_coupled_restart.sh /path/to/erf_exec
+```
+
 ## The scenario
 
 The FireRosComparison grass fire: 2 x 2 km, 20 x 20 x 30 cells, FM1 at 6%

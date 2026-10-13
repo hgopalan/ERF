@@ -80,12 +80,18 @@ void verify_dust_prerequisites(const ERF&          erf,
         amrex::Box box = ba_atm[i];
         int box_nx = box.length(0);
         int box_ny = box.length(1);
+        // a max_grid_size that is a multiple of the ratio is not enough: AMReX chops
+        // a length into near-equal pieces in units of the blocking factor
         if (box_nx % dust_params.grid_ratio != 0 || box_ny % dust_params.grid_ratio != 0) {
-            std::string msg5 = std::string("[DUST] Box sizes not divisible by grid_ratio. ")
-                             + "All atmospheric box x,y sizes must be divisible by grid_ratio="
-                             + std::to_string(dust_params.grid_ratio)
-                             + ". Adjust grid_ratio or amr.max_grid_size_x and amr.max_grid_size_y.";
-            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, msg5.c_str());
+            const std::string C = std::to_string(dust_params.grid_ratio);
+            amrex::Abort("[DUST] Box sizes not divisible by grid_ratio: box " + std::to_string(i)
+                         + " of level 0 is " + std::to_string(box_nx) + " x " + std::to_string(box_ny)
+                         + " cells, and every atmospheric x,y box length must be divisible by "
+                         "erf.dust.grid_ratio = " + C + ". Set amr.blocking_factor_x and "
+                         "amr.blocking_factor_y to a multiple of " + C + " (and "
+                         "amr.max_grid_size_x, amr.max_grid_size_y and the domain's x,y cell "
+                         "counts to multiples of it), or change erf.dust.grid_ratio; a "
+                         "max_grid_size alone does not fix the lengths AMReX chops a domain into.");
         }
     }
 

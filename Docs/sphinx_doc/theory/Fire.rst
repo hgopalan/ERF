@@ -82,7 +82,12 @@ atmospheric column :math:`(\lfloor i/C \rfloor + i_0, \lfloor j/C \rfloor + j_0)
 The constraints on the fire grid's level:
 
 - the x and y lengths of every box on that level must be divisible by the
-  ratio (set ``amr.max_grid_size`` and ``amr.blocking_factor`` accordingly);
+  ratio. Set ``amr.blocking_factor_x`` and ``amr.blocking_factor_y`` to a
+  multiple of it, with ``amr.max_grid_size`` and the domain's cell counts in x
+  and y multiples of it too: AMReX chops a domain into near-equal boxes in
+  units of the blocking factor, so 20 cells with ``amr.max_grid_size = 8`` and
+  a blocking factor of 1 become 7 + 7 + 6. The run stops at start-up naming
+  the first box that fails;
 - no box on that level may be split in z (``amr.max_grid_size_z`` at least
   the number of vertical cells), and a refinement box must reach the domain
   top, since the fire model interpolates through whole columns;
