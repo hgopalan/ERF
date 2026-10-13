@@ -31,7 +31,6 @@
 #endif
 
 #ifdef ERF_ENABLE_FIRE
-#include "ERF_FirePlotfile.H"
 #include "ERF_FirePrerequisites.H"
 #include <sstream>
 #endif
@@ -2209,7 +2208,9 @@ ERF::InitData_post ()
                 {
                     amrex::Real wind_ref_ht = m_fire_coupler->engine().reference_wind_height();
                     m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
-                    if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust) {
+                    // only for an engine that hands over a reference wind
+                    if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust &&
+                        m_fire_coupler->engine().reference_wind() != nullptr) {
                     amrex::Real zref_given = wind_ref_ht;
                     if (pp.query("fire_dust_wind_zref", zref_given) &&
                         std::abs(zref_given - wind_ref_ht) > 1.0e-6 * wind_ref_ht) {
@@ -3330,8 +3331,8 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
     // Contracts between the fire inputs and the solver inputs, checked here
     // where ReadParameters() has filled solverChoice and before any level is
     // built (the grid-dependent checks stay in verify_fire_prerequisites and
-    // verify_native_fire_prerequisites). They read the coupling inputs only
-    // (FireCouplingParams), whichever engine runs.
+    // verify_native_fire_prerequisites). Besides erf.fire.enable they read the
+    // coupling inputs only (FireCouplingParams), whichever engine runs.
     const FireCouplingParams fire_coupling = m_fire_params.coupling_params();
     if (m_fire_params.enable) {
         // The smoke tracer is a transported scalar: without the scalar

@@ -1558,6 +1558,30 @@ function(add_test_fire_script TEST_NAME SUITE_DIR SCRIPT)
 endfunction(add_test_fire_script)
 
 # Fire start-up check: add_test_abort on one deck of a fire suite under Exec/RegTests
+# Fire deck that writes a checkpoint at step 1 and restarts from it with
+# RESTART_OPTIONS; passes only when the restart stops with EXPECTED_MESSAGE.
+function(add_test_fire_restart_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RESTART_OPTIONS)
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+    set(MPI_COMMANDS "\"${MPIEXEC_EXECUTABLE}\" ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}")
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    set(common "erf.plot_int_1=-1 erf.plot_int_2=-1 erf.fire_plot_int=-1 amrex.call_addr2line=0")
+    set(test_command sh -c "${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=1 erf.check_int=1 erf.check_file=chk_abort ${common} > ${CURRENT_TEST_BINARY_DIR}/write.log 2>&1 && ${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=2 erf.restart=chk_abort00001 erf.check_int=-1 ${common} ${RESTART_OPTIONS} 2>&1 | tee ${test_log}")
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 600
+        PROCESSORS 1
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        PASS_REGULAR_EXPRESSION "${EXPECTED_MESSAGE}"
+        ATTACHED_FILES_ON_FAIL "${test_log}"
+    )
+endfunction(add_test_fire_restart_abort)
+
 function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
     add_test_abort(${TEST_NAME} ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR} ${INPUT_FILE}
                    "${EXPECTED_MESSAGE}" "${RUNTIME_OPTIONS}")
@@ -2582,6 +2606,14 @@ add_test_fire_abort(FireMrfExcessNoFlux_abort FireRestart           inputs_level
 # not an engine stops the run naming the key and the engines there are
 add_test_fire_abort(FireEngineUnknown_abort   FireRestart           inputs_levelset_straight
     "erf.fire.engine = .lsfire. is not one of .native." "erf.fire.engine=lsfire")
+# a restart that re-makes the level-0 grids (erf.regrid_level_0_on_restart, or more
+# ranks than the checkpoint has level-0 boxes) stops before any grid is rebuilt; the
+# fire used to trip its grid-ratio check or VisMF's BoxArray check part-way through
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_restart_abort(FireRestartRegridLevel0_abort FireRestart inputs_levelset_straight
+    "the fire model .its fire grid is built from the run's level boxes"
+    "erf.regrid_level_0_on_restart=1 amr.max_grid_size_x=8 amr.max_grid_size_y=8")
+endif()
 # the fire grid on a refined level (erf.fire.anchor_level, the finest level by default):
 # the same front as a single-level run at that resolution, the level-0 heat budget after
 # average-down (and its loss with the fire on the coarser level), restart, and a restart

@@ -801,7 +801,6 @@ ERF::WriteCheckpointFile () const
     // engine's in ERF_FireCheckpoint.cpp), then the coupling's lagged fluxes,
     // on the level the fire grid refines
     if (m_fire_coupler) {
-        m_fire_coupler->engine().write_checkpoint(checkpointname);
         m_fire_coupler->write_checkpoint(checkpointname);
     }
 #endif
@@ -1301,6 +1300,15 @@ ERF::ReadCheckpointFile ()
             unsupported.push_back("spectral bin microphysics (its spectrum is still read onto "
                                   "the run's grids)");
         }
+#ifdef ERF_ENABLE_FIRE
+        // The fire grid is built from the level's boxes (which must divide by
+        // erf.fire.grid_ratio) and its state is read onto them; the re-made boxes
+        // tripped the grid-ratio check or VisMF's BoxArray check instead.
+        if (m_fire_coupler) {
+            unsupported.push_back("the fire model (its fire grid is built from the run's level "
+                                  "boxes and its state is still read onto them)");
+        }
+#endif
 
         if (!unsupported.empty()) {
             std::string msg("Restarting with the level-0 grids re-made -- which happens when "

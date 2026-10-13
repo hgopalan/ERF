@@ -135,11 +135,20 @@ public:
                       int step);
 
     /**
-     * @brief Write the coupling's state (the lagged fluxes FireQAtmPrev and
-     *        FireQLatAtmPrev) under checkpointname/Level_<lev>/; the engine
-     *        writes its own (FireEngine::write_checkpoint)
+     * @brief Write the fire to a checkpoint: the engine's state
+     *        (FireEngine::write_checkpoint), then the coupling's lagged fluxes
+     *        (FireQAtmPrev and FireQLatAtmPrev) under checkpointname/Level_<lev>/
      */
     void write_checkpoint (const std::string& checkpointname) const;
+
+    /**
+     * @brief Why a checkpoint's lagged fluxes do not belong to this run's fire
+     *        grid, or an empty string when they do
+     *
+     * @param[in] chk_lev     The level the checkpoint holds them on
+     * @param[in] chk_region  The columns they cover (minimal box of their boxes)
+     */
+    std::string checkpoint_mismatch (int chk_lev, const amrex::Box& chk_region) const;
 
     /**
      * @brief Restore the engine's state, then the lagged fluxes, on a restart
@@ -175,12 +184,8 @@ public:
      *        region. Allocated at initialize, so never null afterwards.
      */
     const amrex::MultiFab* get_Q_atm_prev () const { return m_Q_atm_prev.get(); }
-    /// Mutable access, for checkpoint restart.
-    amrex::MultiFab* get_Q_atm_prev_mut () { return m_Q_atm_prev.get(); }
     /// Latent heat flux [W/m2] of the previous fire step, laid out as get_Q_atm_prev().
     const amrex::MultiFab* get_Q_lat_atm_prev () const { return m_Q_lat_atm_prev.get(); }
-    /// Mutable access, for checkpoint restart.
-    amrex::MultiFab* get_Q_lat_atm_prev_mut () { return m_Q_lat_atm_prev.get(); }
 
 private:
     /// Average the engine's fluxes onto the atmospheric columns for the next step.

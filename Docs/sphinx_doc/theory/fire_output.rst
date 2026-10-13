@@ -269,24 +269,38 @@ stable.
 Checkpoint and restart
 ----------------------
 
-The atmospheric checkpoint carries the fire state, written by the fire
-engine (the native engine's list follows) and, for the lagged flux buffers,
-by the coupling layer (:ref:`sec:FireCoupling`), as ``FirePhi``,
-``FireArrivalTime``, ``FireHeatFlux``, ``FireFuelLoad``, ``FireFuelMC``,
-``FireDispAccum``, the lagged flux buffers ``FireQAtmPrev`` and
-``FireQLatAtmPrev`` that the next step injects, with crown fire
-``FireCrownActive`` and ``FireCrownLoad``, and with the exposure
-diagnostics ``FireHeatLoad``, ``FirePeakIntensity`` and
-``FireEmberLandings``, and with suppression the four fields
-``FireSuppressionMask``, ``FireSuppressionFactor``,
-``FireSuppressionProgress`` and ``FireSuppressionFailed`` with the action
-state in ``FireSuppression`` (:ref:`sec:FireSuppression`). On restart the
-fire engine is initialised from the inputs first, so a spatial fuel map,
-firebreaks, a hybrid weight, a structure mask or a suppression action file
-must still be available, and the checkpointed fields are then read over the
-initial ones: the engine's first, then the lagged fluxes. A checkpoint that
-holds the fire on another level or region than the run's aborts. Diagnostics
-are recomputed on the first step.
+The atmospheric checkpoint carries the fire state under the directory of the
+level the fire grid refines. The fire engine writes its own fields and the
+coupling layer (:ref:`sec:FireCoupling`) writes the lagged flux buffers
+``FireQAtmPrev`` and ``FireQLatAtmPrev`` that the next step injects. The
+native engine writes:
+
+* always: ``FirePhi``, ``FireArrivalTime``, ``FireHeatFlux``,
+  ``FireFlameLength``, ``FireFuelLoad``, ``FireFuelMC``, ``FireDispAccum``,
+  ``FireCrownFractionBurned`` and the text file ``FireState`` (the step and
+  level-set subcycle counters, the heat-flux partition factor, the boundary
+  guard's contact time and reach flag, the start of the next ignition window,
+  the anchor level and the corner of the fire region, and the already
+  reported probes and structures);
+* with crown fire, ``FireCrownActive``, ``FireCrownLoad`` and
+  ``FireCrownRosActive``; with the stick moisture model, ``FireStickMC``;
+  with :cpp:`erf.fire.precip_source = atmosphere`, ``FirePrecipAccumPrev``;
+  with exposure, ``FireHeatLoad``, ``FirePeakIntensity`` and
+  ``FireEmberLandings``; with structure ignition, ``FireStructureState``;
+  with spotting, ``FireAlbiniData``; with the temporal acceleration model,
+  ``FireAccelState``;
+* with suppression, the four fields ``FireSuppressionMask``,
+  ``FireSuppressionFactor``, ``FireSuppressionProgress`` and
+  ``FireSuppressionFailed`` with the action state in ``FireSuppression``
+  (:ref:`sec:FireSuppression`).
+
+On restart the fire engine is initialised from the inputs first, so a
+spatial fuel map, firebreaks, a hybrid weight, a structure mask or a
+suppression action file must still be available, and the checkpointed fields
+are then read over the initial ones: the engine's first, then the lagged
+fluxes. A field missing from an older checkpoint keeps its initial value, and
+a checkpoint that holds the fire on another level or region than the run's
+aborts. Diagnostics not in these lists are recomputed on the first step.
 
 References
 ----------

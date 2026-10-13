@@ -78,7 +78,9 @@ struct FireFluxes
  *   after that level's dycore;
  * - smoke_heat_per_kg(), heat_open_fraction_atm() and roof_height_atm() when
  *   it injects the lagged fluxes, at every Runge-Kutta stage of the next step;
- * - write_plotfile() and write_checkpoint() when ERF writes its own.
+ * - write_plotfile() on the fire plotfile schedule (erf.fire_plot_int,
+ *   erf.fire_plot_per), and write_checkpoint() from FireCoupler::write_checkpoint
+ *   when ERF writes a checkpoint.
  *
  * The getters at the end (level set, reference wind, heat release) are what
  * other surface models read from the fire, the dust layer today; an engine
@@ -162,8 +164,8 @@ public:
      * @brief Write the engine's own state to the checkpoint directory
      *
      * Everything the engine carries from one step to the next, under
-     * checkpointname/Level_<lev>/ of the fire grid's level. The coupling
-     * writes its lagged fluxes itself (FireCoupler::write_checkpoint).
+     * checkpointname/Level_<lev>/ of the fire grid's level. Called by
+     * FireCoupler::write_checkpoint, which then writes the lagged fluxes.
      */
     virtual void write_checkpoint (const std::string& checkpointname) const = 0;
 

@@ -281,6 +281,9 @@ FireCoupler::add_sources (MultiFab& cc_source,
 void
 FireCoupler::write_checkpoint (const std::string& checkpointname) const
 {
+    // The engine's own state first, as read_checkpoint restores it
+    m_engine->write_checkpoint(checkpointname);
+
     // The lagged fluxes injected into the atmosphere on the next step. Without
     // them the first step after a restart injects no fire heat at all.
     if (m_Q_atm_prev) {
@@ -292,9 +295,25 @@ FireCoupler::write_checkpoint (const std::string& checkpointname) const
     }
 }
 
+std::string
+FireCoupler::checkpoint_mismatch (int chk_lev, const Box& chk_region) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_Q_atm_prev, "[FIRE] FireCoupler: set_fire_grid() before the checkpoint");
+    // The fluxes cover the columns of the level's boxes, which form the fire
+    // region (verify_fire_prerequisites, check 7b)
+    const Box run_region = m_Q_atm_prev->boxArray().minimalBox();
+    if (chk_lev == m_lev && chk_region == run_region) { return {}; }
+    std::ostringstream msg;
+    msg << "holds the lagged fire fluxes on level " << chk_lev << " over the columns " << chk_region
+        << ", but this run's fire grid covers the columns " << run_region << " of level " << m_lev
+        << ". Restart with the erf.fire.anchor_level and the refinement the checkpoint was written with.";
+    return msg.str();
+}
+
 void
 FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level, int step)
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_Q_atm_prev, "[FIRE] FireCoupler: set_fire_grid() before the checkpoint");
     // The engine first: the native engine aborts on a checkpoint whose fire grid
     // sits on another level or region, naming its own fields
     m_engine->read_checkpoint(restart_chkfile, max_level, step);
@@ -314,17 +333,12 @@ FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level,
         return;
     }
     // Whatever the engine: the fluxes belong to this run's fire grid, on its
-    // level and over its region
+    // level and over its region (the native engine has already checked its own
+    // fields, so this is the backstop for any other engine)
     const Box chk_region = VisMF(MultiFabFileFullPrefix(chk_lev, restart_chkfile, "Level_", "FireQAtmPrev"))
                                .boxArray().minimalBox();
-    const Box run_region = m_Q_atm_prev->boxArray().minimalBox();
-    if (chk_lev != m_lev || chk_region != run_region) {
-        std::ostringstream msg;
-        msg << "[FIRE] The checkpoint " << restart_chkfile << " holds the lagged fire fluxes on level "
-            << chk_lev << " over the columns " << chk_region << ", but this run's fire grid covers "
-            << run_region << " of level " << m_lev << ". Restart with the erf.fire.anchor_level and the"
-            << " refinement the checkpoint was written with.";
-        amrex::Abort(msg.str());
+    if (const std::string why = checkpoint_mismatch(chk_lev, chk_region); !why.empty()) {
+        amrex::Abort("[FIRE] The checkpoint " + restart_chkfile + " " + why);
     }
     for (const auto& [mf, name] : {std::pair<MultiFab*, const char*>{m_Q_atm_prev.get(), "FireQAtmPrev"},
                                    std::pair<MultiFab*, const char*>{m_Q_lat_atm_prev.get(), "FireQLatAtmPrev"}}) {
