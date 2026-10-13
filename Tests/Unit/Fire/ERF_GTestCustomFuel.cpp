@@ -147,7 +147,7 @@ TEST(CustomFuel, TableIndexResolvesCustomCodesUnderEitherSet)
 // get_fuel_params() switch. Any disagreement would change every existing run.
 TEST(CustomFuel, SlotTableReproducesGetFuelParamsForEveryPublishedCode)
 {
-    const CustomFuelTable none;   // no deck block
+    const CustomFuelTable none{};   // no deck block
 
     for (int fuel_set : {FUEL_SET_ANDERSON13, FUEL_SET_SCOTT_BURGAN40}) {
         const auto tbl = build_fuel_params_slot_table(fuel_set, M_LIVE_OFF, none);
@@ -172,7 +172,7 @@ TEST(CustomFuel, SlotTableReproducesGetFuelParamsForEveryPublishedCode)
 // stray 1000 past validate_map_codes would otherwise spread at GR1's rate.
 TEST(CustomFuel, UndefinedCustomSlotIsNonBurnable)
 {
-    const CustomFuelTable none;
+    const CustomFuelTable none{};
     EXPECT_FALSE(none.active());
     EXPECT_EQ(none.count(), 0);
     EXPECT_FALSE(none.has_code(CUSTOM_FUEL_CODE_BASE));
