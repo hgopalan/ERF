@@ -324,12 +324,18 @@ steps: at every step ERF computes how many cells the blade tip sweeps,
 largest distance of a blade node from the hub axis and, on a terrain-following
 or stretched mesh, ``dz`` the shortest physical cell height (the spacing of
 ``z_phys_nd``'s nodes) in the box of the hub plus and minus the tip radius,
-not the nominal one (the vertical spacing: on a slope the spacing normal to the
-coordinate surfaces is a little shorter, 41.5 m against 42.2 m over the
-Askervein summit), and aborts when it exceeds
+not the nominal one, and aborts when it exceeds
 ``erf.moving_bodies.alm_max_tip_cells`` (1 by default), naming the largest
-``erf.fixed_dt`` that passes. For the IEA 15 MW at rated speed (tip speed
-about 90 m/s) one cell per step means ``dt <= dx / 90``. The check runs every
+``erf.fixed_dt`` that passes. The count is a safe bound rather than an exact
+one: it pairs the full tip speed with the shortest cell anywhere in the box,
+although the shortest cells usually lie at the bottom of the disk where the tip
+moves sideways, and it measures heights vertically, while on a slope the
+spacing normal to the coordinate surfaces is a little shorter (41.5 m against
+42.2 m in the rotor box of the Askervein test). The start-up audit's cells across
+the rotor still use the nominal spacing. For the IEA 15 MW at rated speed (tip
+speed about 95 m/s) one cell per step means
+``dt <= min(dx, dy, dz) / 95``: 0.44 s on the 50 m Askervein mesh, whose cells
+under the rotor are 42.2 m tall. The check runs every
 step because the rotor speed is OpenFAST's to change. The velocities OpenFAST
 receives are still sampled at its structural nodes, and the same ``Wake_Mod = 0``
 requirement and hub-axis check apply as for the disk.

@@ -1167,7 +1167,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                           " m), more than erf.moving_bodies.alm_max_tip_cells = " + std::to_string(m_in.alm_max_tip_cells) +
                           "; use erf.fixed_dt <= " + std::to_string(dt_max * m_input_fixed_dt / m_dt) +
                           " (a step of " + std::to_string(dt_max) + " s on level " + std::to_string(m_anchor) +
-                          ") or finer cells for the actuator line");
+                          ") for the actuator line");
                 }
             }
             // the rotor's points, the tower's loads (OpenFAST's tower force nodes, if the model has

@@ -454,7 +454,11 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
     std::vector<Real> found(n, big);
     for (int r = 0; r < n; ++r) {
         const Real* b = &regions[static_cast<std::size_t>(6 * r)];
-        if (b[0] > b[3] || b[1] > b[4] || b[2] > b[5]) { continue; }
+        // an empty region (low end above high end) or one with a non-finite bound (a diverged hub)
+        // keeps the nominal dz
+        bool finite = true;
+        for (int d = 0; d < 6; ++d) { finite = finite && std::isfinite(b[d]); }
+        if (!finite || b[0] > b[3] || b[1] > b[4] || b[2] > b[5]) { continue; }
         // per direction across, the node index ranges of the cells the region touches: one range, or
         // two in a periodic direction whose range crosses the seam
         std::array<std::vector<std::array<int,2>>,2> ranges;
@@ -497,7 +501,8 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
                     ops.eval(sbx, data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> T
                     {
                         const Real z0 = znd(i,j,k), z1 = znd(i,j,k+1);
-                        return {(z1 > zl && z0 < zh) ? z1 - z0 : big};
+                        // a collapsed or folded cell (z1 <= z0) is not a height to count
+                        return {(z1 > z0 && z1 > zl && z0 < zh) ? z1 - z0 : big};
                     });
                 }
             }

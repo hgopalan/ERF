@@ -160,8 +160,9 @@ ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& 
  * (high), in metres. Every node column whose cells touch the region across (with a periodic x or y
  * wrapping across the seam) counts, with the spacings whose span overlaps the region's heights. On a
  * flat uniform mesh (ERF fills z_phys_nd with k dz there) that is dz to rounding. A region with a low
- * end above its high end or one no spacing overlaps gets the nominal dz, as does every region when
- * z_phys_nd is null (outside ERF, which always allocates it). A collective: the same on every rank.
+ * end above its high end, a non-finite bound, or no positive spacing overlapping it gets the nominal dz
+ * (a folded cell's non-positive spacing is skipped), as does every region when z_phys_nd is null
+ * (outside ERF, which always allocates it). A collective: the same on every rank.
  *
  * @param[in] regions 6*n bounds (m)
  * @param[out] dz n heights (m)

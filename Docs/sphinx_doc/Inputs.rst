@@ -2756,9 +2756,10 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
 |                                                        | one step (rotor speed times tip radius times the bodies' |                          |                          |
 |                                                        | step over the smallest cell size, with the cell height   |                          |                          |
-|                                                        | the shortest physical one under the rotor on a terrain-  |                          |                          |
-|                                                        | following or stretched mesh); the run aborts above it,   |                          |                          |
-|                                                        | naming the largest ``erf.fixed_dt`` that passes          |                          |                          |
+|                                                        | the shortest physical one in the box of the hub plus and |                          |                          |
+|                                                        | minus the tip radius on a terrain-following or stretched |                          |                          |
+|                                                        | mesh); the run aborts above it, naming the largest       |                          |                          |
+|                                                        | ``erf.fixed_dt`` that passes                             |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 The diagnostics files are listed below; they are written every ``diagnostics_int`` steps. The

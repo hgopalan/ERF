@@ -2529,10 +2529,16 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # the actuator-line cases pass the tip-travel limit; this one must not, and must name the step that would
   add_test_abort(MovingBodies_ALMTipTravelLimit ${_mb_cases}/OpenFAST_ALM_Uniform OpenFAST_ALM_Uniform.i
       "the blade tip sweeps 0[.]9[0-9]* cells per step.*use erf[.]fixed_dt <= 0[.]0054" "erf.moving_bodies.alm_max_tip_cells=0.01")
+  # the same line over the 100 m ridge (ztop 600 m, dz 50 m): the cells under the rotor are 50 * 500 / 600 =
+  # 41.67 m tall, so the tip that sweeps 0.93 nominal cells per step sweeps 1.11 physical cells and the run
+  # must stop, naming the physical height (with the nominal 50 m it ran)
+  add_test_abort(MovingBodies_ALMTipTravelPhysicalCells ${_mb_cases}/OpenFAST_ADM_Terrain OpenFAST_ADM_Terrain.i
+      "the blade tip sweeps 1[.]11[0-9]* cells per step.*smallest cell 41[.]66" "erf.moving_bodies.T1.mode=alm erf.moving_bodies.T1.fllc=false")
   foreach(_t MovingBodies_AnchorLevelAboveFinest MovingBodies_StopTimeNotWholeSteps MovingBodies_CtDiskDensityMismatch
              MovingBodies_MixedTimeSteps_OneRank
              MovingBodies_FinerLevelOverTheBodies MovingBodies_FPETrapsRefused MovingBodies_CorrectionRelaxOutOfRange
-             MovingBodies_ALMTipTravelLimit MovingBodies_StopTimeNotWholeCoarseSteps MovingBodies_AnchorLevelMissingAtStart
+             MovingBodies_ALMTipTravelLimit MovingBodies_ALMTipTravelPhysicalCells MovingBodies_StopTimeNotWholeCoarseSteps
+             MovingBodies_AnchorLevelMissingAtStart
              MovingBodies_MaxStepEndsTheRunFirst MovingBodies_NacelleKernelTooNarrow MovingBodies_TowerWidthWithoutTower)
     set_property(TEST ${_t} APPEND PROPERTY LABELS "moving-bodies")
   endforeach()
