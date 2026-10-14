@@ -12,8 +12,9 @@
 
 max_step = 10
 stop_time = 4.0
-erf.fixed_dt = 0.4          # the blade tip (about 96 m/s) moves 38 m per step: 0.77 of a 50 m cell, 0.91 of the
-                            # 42 m-tall cells over the summit; flow CFL about 0.1 (12 m/s at most)
+erf.fixed_dt = 0.4          # the blade tip (about 96 m/s) moves 38 m per step: 0.77 of a 50 m cell, 0.94 of the
+                            # 40.7 m limiting height (42.2 m-tall cells over the summit, their faces sloping);
+                            # flow CFL about 0.1 (12 m/s at most)
 
 # Askervein: the terrain file of Exec/CanonicalTests/Real_Terrain/Askervein (its summit, 125 m, at
 # x = -306 m, y = 282 m), copied next to this deck by the test. Mass inflow 2.7 km upstream of the summit,

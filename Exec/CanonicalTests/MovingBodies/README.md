@@ -58,7 +58,8 @@ whole number of steps (of the single level, and of level 0 of two), a
 prescribed-Ct disk's `air_density` off ERF's density, a finer level over the
 bodies, floating-point traps with a turbine, an out-of-range
 `correction_relax`, an actuator-line tip that sweeps more cells per step
-than `alm_max_tip_cells` allows, a nacelle kernel too narrow for its drag area (correction factor under 0.5),
+than `alm_max_tip_cells` allows (on a flat mesh, over a ridge where the physical cells are shorter, and on a
+stretched mesh where the short cells near the ground count with the share of the tip speed that crosses them), a nacelle kernel too narrow for its drag area (correction factor under 0.5),
 a tower width given without a tower, and two turbines of different OpenFAST time steps on one rank
 (`MovingBodies_MixedTimeSteps_OneRank`). `MovingBodies_Owners_*` and `MovingBodies_MixedTimeSteps_TwoRanks`
 run a deck for one step on two ranks and require it to end normally with the turbines and disks on the ranks the

@@ -1116,9 +1116,9 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         const auto& turbs = m_driver->turbines();
         // the cells an actuator line's tip sweeps are physical cells: on a terrain-following or
         // stretched mesh the height that limits the tip is the smallest over the cells of the disk
-        // of dz over the fraction of the tip speed that can point up or down there (the full speed
-        // at hub height, less towards the top and bottom of the disk), from z_phys_nd, not the
-        // nominal dz (a collective: every rank takes part, each rotor's region from its owner)
+        // of dz over the fraction of the tip speed that can cross the cell there (vertically, less
+        // towards the top and bottom of the disk; sideways across a sloping face), from z_phys_nd,
+        // not the nominal dz (a collective: every rank takes part, each rotor's region from its owner)
         std::vector<Real> dz_rotor(nturb, static_cast<Real>(geom.CellSize(2)));
         bool any_alm = false;
         for (const std::string& m : m_turbine_mode) { any_alm = any_alm || (m == "alm"); }
@@ -1165,7 +1165,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                     const Real dt_max = m_in.alm_max_tip_cells * dx_min / std::max(std::abs(turbs[i].rotor_speed) * r_tip, Real(1.0e-30));
                     Abort("erf.moving_bodies." + turbs[i].name + ": the blade tip sweeps " + std::to_string(cells) +
                           " cells per step (rotor speed " + std::to_string(turbs[i].rotor_speed) + " rad/s, tip radius " +
-                          std::to_string(r_tip) + " m, dt " + std::to_string(m_dt) + " s, limiting cell " + std::to_string(dx_min) +
+                          std::to_string(r_tip) + " m, dt " + std::to_string(m_dt) + " s, limiting cell height " + std::to_string(dx_min) +
                           " m), more than erf.moving_bodies.alm_max_tip_cells = " + std::to_string(m_in.alm_max_tip_cells) +
                           "; use erf.fixed_dt <= " + std::to_string(dt_max * m_input_fixed_dt / m_dt) +
                           " (a step of " + std::to_string(dt_max) + " s on level " + std::to_string(m_anchor) +

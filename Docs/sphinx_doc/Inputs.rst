@@ -2758,8 +2758,9 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | step over the smallest cell size; on a terrain-following |                          |                          |
 |                                                        | or stretched mesh the physical cells the disk sweeps,    |                          |                          |
 |                                                        | each height divided by the share of the tip speed that   |                          |                          |
-|                                                        | can be vertical there); the run aborts above it, naming  |                          |                          |
-|                                                        | the largest ``erf.fixed_dt`` that passes                 |                          |                          |
+|                                                        | can cross it, vertically or across a sloping face); the  |                          |                          |
+|                                                        | run aborts above it, naming the largest ``erf.fixed_dt`` |                          |                          |
+|                                                        | that passes                                              |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 The diagnostics files are listed below; they are written every ``diagnostics_int`` steps. The
