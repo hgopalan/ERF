@@ -13,7 +13,7 @@
 max_step = 10
 stop_time = 4.0
 erf.fixed_dt = 0.4          # the blade tip (about 96 m/s) moves 38 m per step: 0.77 of a 50 m cell, 0.94 of the
-                            # 40.7 m limiting height (42.2 m-tall cells over the summit, their faces sloping);
+                            # 40.7 m limiting height (a 43.9 m cell on a 22 degree flank; 42.2 m at the summit);
                             # flow CFL about 0.1 (12 m/s at most)
 
 # Askervein: the terrain file of Exec/CanonicalTests/Real_Terrain/Askervein (its summit, 125 m, at

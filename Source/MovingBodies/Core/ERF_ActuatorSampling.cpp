@@ -497,6 +497,11 @@ cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector
         }
         const Real zl = b[2], zh = b[5], zc = b[6], rad = b[7], slack = b[8];
         const Real dxi0 = dxi[0], dxi1 = dxi[1];
+        // the domain's node range across; a neighbour beyond it in a non-periodic direction is not
+        // read (a fine level may leave those ghost nodes at a fill value)
+        const int nilo = domain.smallEnd(0), nihi = domain.bigEnd(0) + 1;
+        const int njlo = domain.smallEnd(1), njhi = domain.bigEnd(1) + 1;
+        const bool perx = geom.isPeriodic(0), pery = geom.isPeriodic(1);
         ReduceOps<ReduceOpMin> ops;
         ReduceData<Real> data(ops);
         using T = typename decltype(data)::Type;
@@ -521,17 +526,17 @@ cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector
                         const Real dist = amrex::max(gap - slack, Real(0.0));
                         const Real q = std::sqrt(amrex::max(rad * rad - dist * dist, Real(0.0))) / rad;
                         // the steepest slope G of the cell's two faces (to the neighbouring nodes on
-                        // either side; z_phys_nd's ghost nodes are filled): a tip moving sideways
+                        // either side, inside the domain or across a periodic seam): a tip moving sideways
                         // crosses a sloping face too, at most at (q + G) of the tip speed, and never
                         // faster than the speed normal to the face, sqrt(1 + G^2)
                         Real g2 = 0.0;
                         for (int kk = k; kk <= k + 1; ++kk) {
                             const Real zc0 = znd(i,j,kk);
                             Real gx = 0.0, gy = 0.0;
-                            if (znd.contains(i+1,j,kk)) { gx = amrex::max(gx, std::abs(znd(i+1,j,kk) - zc0)); }
-                            if (znd.contains(i-1,j,kk)) { gx = amrex::max(gx, std::abs(zc0 - znd(i-1,j,kk))); }
-                            if (znd.contains(i,j+1,kk)) { gy = amrex::max(gy, std::abs(znd(i,j+1,kk) - zc0)); }
-                            if (znd.contains(i,j-1,kk)) { gy = amrex::max(gy, std::abs(zc0 - znd(i,j-1,kk))); }
+                            if ((perx || i + 1 <= nihi) && znd.contains(i+1,j,kk)) { gx = amrex::max(gx, std::abs(znd(i+1,j,kk) - zc0)); }
+                            if ((perx || i - 1 >= nilo) && znd.contains(i-1,j,kk)) { gx = amrex::max(gx, std::abs(zc0 - znd(i-1,j,kk))); }
+                            if ((pery || j + 1 <= njhi) && znd.contains(i,j+1,kk)) { gy = amrex::max(gy, std::abs(znd(i,j+1,kk) - zc0)); }
+                            if ((pery || j - 1 >= njlo) && znd.contains(i,j-1,kk)) { gy = amrex::max(gy, std::abs(zc0 - znd(i,j-1,kk))); }
                             gx *= dxi0; gy *= dxi1;
                             g2 = amrex::max(g2, gx * gx + gy * gy);
                         }

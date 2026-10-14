@@ -330,17 +330,24 @@ hub axis ``n``, plus the blades' distance off the rotor plane times ``|n_d|``,
 so the box is thin along the axis. Each cell counts with its height divided by
 the largest share ``q_s`` of the tip speed that can cross it. The tip's vertical
 speed at a height ``z`` of the disk is at most
-``rotor_speed * sqrt(R^2 - (z - z_hub)^2)`` for any yaw, tilt or cone, so
+``rotor_speed * sqrt(R^2 - r_z^2)`` for any yaw, tilt or cone, with ``r_z`` the
+vertical part of the tip's in-plane offset from the hub, so
 ``q = sqrt(R^2 - d^2) / R``, where ``d`` is the distance from the hub height to
-the cell's nearest point less the blades' off-plane distance times ``|n_z|``. A
+the cell's nearest point less the blades' off-plane distance times ``|n_z|``
+(the speed bound holds for the tip's in-plane height, which differs from its
+height by at most that much). A
 tip moving sideways also crosses a sloping face, so with ``G`` the steepest
 slope of the cell's two faces ``q_s = min(sqrt(1 + G^2), q + G)``, at most the
 speed normal to the face; ``dz`` is the smallest height over ``q_s``. On a flat
 mesh a cell at hub height counts in full, so ``dz`` is the plain spacing there;
 on a stretched mesh the short cells near the ground, which the tip crosses
 moving mostly sideways, do not stop a run their height alone would stop; on
-terrain the slopes make the cells count somewhat shorter (40.7 m for the 42.2 m
-cells over the Askervein summit). The start-up audit's cells across the rotor
+terrain the slopes make the cells count somewhat shorter. Every column of the box
+is searched over the whole height of the disk, so the limit can come from a cell
+the tip passes only near hub height: on the Askervein test it is a 43.9 m cell
+on the flank, 132 m across the axis, whose 22 degree faces make it count as
+40.7 m (the summit cells are 42.2 m), and the guard's step is 0.96 of the exact
+one. The start-up audit's cells across the rotor
 still use the nominal spacing. For the IEA 15 MW at rated speed (tip speed about
 95 m/s) one cell per step means ``dt <= min(dx, dy, dz) / 95``: 0.43 s on the
 50 m Askervein mesh. The check runs every

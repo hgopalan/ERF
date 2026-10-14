@@ -643,6 +643,20 @@ TEST(ActuatorSampling, TheTipCellHeightWeighsEachCellByTheTipSpeedThatCrossesIt)
     EXPECT_NEAR(dz[0], Real(24.2571), Real(1.0e-3));
     erf_actuator::min_cell_heights(plane.znd.get(), plane.geom, std::vector<Real>(prow.begin(), prow.begin() + 6), plain);
     EXPECT_NEAR(plain[0], Real(25.0), Real(1.0e-4));   // the plain vertical spacing is not weighted
+    // a region at the domain's high x side (not periodic): the ghost nodes beyond it are not read, so a
+    // fill value there (a fine level can leave one) changes nothing
+    const std::vector<Real> side{1000.0, 300.0, 280.0, 1200.0, 700.0, 400.0, 340.0, 120.0, 0.0};
+    std::vector<Real> clean;
+    erf_actuator::tip_cell_heights(plane.znd.get(), plane.geom, side, clean);
+    for (amrex::MFIter mfi(*plane.znd, false); mfi.isValid(); ++mfi) {
+        auto za = plane.znd->array(mfi);
+        amrex::LoopOnCpu(amrex::grow(mfi.validbox(), 2), [&](int i, int j, int k) {
+            if (i < 0 || i > mp.nx) { za(i,j,k) = Real(1.0e30); }
+        });
+    }
+    erf_actuator::tip_cell_heights(plane.znd.get(), plane.geom, side, dz);
+    EXPECT_EQ(dz[0], clean[0]);
+    EXPECT_GT(dz[0], Real(10.0));
 }
 
 // A point a few ulps below a non-zero prob_lo wraps to lo + (len - tiny), which rounds onto prob_hi, owned by

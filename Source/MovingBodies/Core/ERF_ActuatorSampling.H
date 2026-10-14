@@ -181,7 +181,8 @@ void min_cell_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& 
  * q_s = min(sqrt(1 + G^2), q + G): the full speed normal to the face at most. On a flat mesh a cell at
  * hub height counts its full height; on a stretched mesh the short cells low in the disk, which the tip
  * crosses moving mostly sideways, count less; on terrain the slope makes every cell count somewhat
- * more. Reads z_phys_nd's ghost nodes next to the region (ERF fills them).
+ * more. Reads z_phys_nd's ghost nodes next to the region inside the domain and across a periodic
+ * seam (FillBoundary fills them), never those outside a non-periodic side.
  * Region r is rows[9r .. 9r+8]: the box low (x, y, z), the box high, the hub height, the tip radius R
  * and the slack, in metres. The nominal dz in the same cases as min_cell_heights, and for R <= 0.
  * A collective: the same on every rank.
