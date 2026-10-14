@@ -112,15 +112,21 @@ MoorDyn raised (or a re-enabled trap could fire later in unrelated code), puts
 back the flags raised before and restores the traps with
 ``amrex::setFPExcept``. ``MoorDynSystem::init`` (``MoorDyn_Init`` and
 ``MoorDyn_Init_NoIC``) and ``MoorDynSystem::step`` (``MoorDyn_Step``) run under
-it; the other calls of the wrapper ran under all three traps in MoorDyn-C
-2.7.1 without raising one and are not masked. A run with lines may therefore
-keep the traps on for ERF's own code, in the stub build and with MoorDyn-C
-alike; masking changes no answer (the masked and untrapped runs agree bit for
-bit). MoorDyn's own failures are still caught: ``step`` aborts on a non-finite
-coupled force, and MoorDyn reports ``MOORDYN_NAN_ERROR`` for a diverged line.
-The traps belong to the calling thread, the thread MoorDyn runs on (MoorDyn-C
-starts none); ``amrex::disableFPExcept`` sets them on Linux (glibc) and macOS
-only, as AMReX does.
+it; the wrapper's other calls (creation, the kinematics, the getters, save,
+load and the in-memory state) ran under all three traps in ERF's unit and
+conductor regression tests with MoorDyn-C 2.7.1 without raising one and are
+not masked. A run with lines may therefore keep the traps on for ERF's own
+code, in the stub build and with MoorDyn-C alike; masking changes no answer
+(the masked and untrapped runs agree bit for bit). MoorDyn's own failures are
+still caught: a line integration that diverges (MoorDyn's internal step too
+long for its segments) overflows and makes NaNs inside ``MoorDyn_Step``, which
+reports ``MOORDYN_NAN_ERROR``, and ERF aborts naming
+``erf.conductors.moordyn_cfl`` and ``moordyn_dt`` (with the traps on and no
+mask the run stopped there with a SIGFPE inside MoorDyn); ``step`` also aborts
+on a non-finite coupled force. The traps belong to the calling thread, the
+thread MoorDyn runs on (MoorDyn-C built without OpenMP, as
+``Build/setup_moordyn.sh`` builds it, starts none); ``amrex::disableFPExcept``
+sets them on Linux (glibc) and macOS only, as AMReX does.
 
 MoorDyn reports the net force of the points it integrates (free and coupled
 points) only; a fixed attachment reports zero, and its pull is the net force

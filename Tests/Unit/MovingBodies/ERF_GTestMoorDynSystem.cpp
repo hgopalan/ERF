@@ -5,7 +5,10 @@
 // - FPTrapMaskMasksTheTrapsAndRestoresThem: no trap inside, the traps and the earlier flags back after, the
 //   flags raised inside discarded; nested masks.
 // - TheSpanStartsAndStepsUnderEveryTrap: init (with the initial-condition solve, whose overflow trapped in
-//   MoorDyn-C 2.7.1) and steps under amrex's three traps, the same answer as without them, the traps still on.
+//   MoorDyn-C 2.7.1) and steps under amrex's three traps, the same answer as without them over three spans,
+//   the traps still on.
+// - ADivergingStepUnderTheTrapsAbortsNamingTheInternalStep: MOORDYN_NAN_ERROR and ERF's abort, not SIGFPE
+//   (MoorDyn-C only).
 // - MissingInputFileIsReportedNotFatal; AnInputWithoutWaveKinIsRefusedAtCreation (both libraries);
 //   AMalformedStubInputIsReportedNotFatal (stub only).
 // - FixedSpanHangsBetweenItsPointsWithTheCatenarySag: no coupled degree of freedom, the end nodes on
@@ -197,12 +200,11 @@ TEST(MoorDynSystem, FPTrapMaskMasksTheTrapsAndRestoresThem)
 
 TEST(MoorDynSystem, TheSpanStartsAndStepsUnderEveryTrap)
 {
-    // MoorDyn-C 2.7.1's initial-condition solve overflows (cfl * DBL_MAX / v for its points): without the
-    // mask in init() this test stops on SIGFPE. The stub raises nothing, so there only the restored traps
-    // and the identical answers are checked.
-    const Span s;
+    // MoorDyn-C 2.7.1's initial-condition solve overflows (cfl * DBL_MAX / v for its points) in most spans:
+    // without the mask in init() this test stops on SIGFPE. The stub raises nothing, so there only the
+    // restored traps and the identical answers are checked.
     const double U = 15.0, dt = 0.05;
-    auto run = [&] (const std::string& tag) {
+    auto run = [&] (const std::string& tag, const Span& s) {
         auto sys = make_span(tag, s);
         std::vector<std::array<double,3>> nodes;
         if (!sys) { return nodes; }
@@ -217,26 +219,61 @@ TEST(MoorDynSystem, TheSpanStartsAndStepsUnderEveryTrap)
         for (unsigned i = 0; i < sys->line_num_nodes(1); ++i) { nodes.push_back(sys->line_node_position(1, i)); }
         return nodes;
     };
-    std::vector<std::array<double,3>> untrapped;
-    {
-        const Traps traps(false);
-        untrapped = run("traps_off");
-    }
-    ASSERT_FALSE(untrapped.empty());
-    std::vector<std::array<double,3>> trapped;
-    {
-        const Traps traps(true);
-        if (!Traps::all_on()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
-        trapped = run("traps_on");
-        EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "init() and step() leave the traps as they found them";
-    }
-    ASSERT_EQ(trapped.size(), untrapped.size());
-    for (std::size_t i = 0; i < trapped.size(); ++i) {
-        for (std::size_t d = 0; d < 3; ++d) {
-            EXPECT_EQ(trapped[i][d], untrapped[i][d]) << "node " << i << " component " << d << ": masking changes no answer";
+    // short and long, taut and slack, coarse and fine spans, each stable at dtM = 1 ms
+    std::vector<Span> spans(3);
+    spans[1].chord = 600.0; spans[1].slack = 10.0; spans[1].nseg = 60;
+    spans[2].chord = 50.0;  spans[2].slack = 10.0; spans[2].nseg = 5;
+    for (std::size_t c = 0; c < spans.size(); ++c) {
+        const std::string tag = "traps_" + std::to_string(c);
+        std::vector<std::array<double,3>> untrapped, trapped;
+        {
+            const Traps traps(false);
+            untrapped = run(tag + "_off", spans[c]);
         }
+        ASSERT_FALSE(untrapped.empty()) << "span " << c;
+        {
+            const Traps traps(true);
+            if (!Traps::all_on()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+            trapped = run(tag + "_on", spans[c]);
+            EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "span " << c << ": init() and step() leave the traps on";
+        }
+        ASSERT_EQ(trapped.size(), untrapped.size()) << "span " << c;
+        for (std::size_t i = 0; i < trapped.size(); ++i) {
+            for (std::size_t d = 0; d < 3; ++d) {
+                EXPECT_EQ(trapped[i][d], untrapped[i][d]) << "span " << c << " node " << i << " component " << d
+                                                          << ": masking changes no answer";
+            }
+        }
+        EXPECT_GT(mid_node_y(untrapped), 1.0) << "span " << c << ": the +y wind must have blown the span out";
     }
-    EXPECT_GT(mid_node_y(untrapped), 1.0) << "the +y wind must have blown the span out";
+}
+
+TEST(MoorDynSystem, ADivergingStepUnderTheTrapsAbortsNamingTheInternalStep)
+{
+    // 2.5 m segments of a 50 m span are too stiff for dtM = 1 ms: MoorDyn-C's step overflows and makes NaNs,
+    // which under the traps stopped the run with SIGFPE inside MoorDyn_Step. Masked, MoorDyn reports
+    // MOORDYN_NAN_ERROR and ERF aborts naming the internal step, with the traps back on. The stub has no dynamics.
+    if (erf_moordyn::is_stub()) { GTEST_SKIP() << "the stub does not integrate the line"; }
+    const Traps traps(true);
+    if (!Traps::all_on()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+    Span s;
+    s.chord = 50.0; s.slack = 0.2; s.nseg = 20;
+    auto sys = make_span("traps_diverge", s);
+    ASSERT_TRUE(sys);
+    std::string err;
+    ASSERT_GT(sys->external_kinematics_init(err), 0u) << err;
+    double t = 0.0;
+    std::vector<double> f;
+    const std::string msg = erf_gtest::abort_message([&] {
+        for (int k = 0; k < 200; ++k) {
+            set_uniform_wind(*sys, {{0.0, 30.0, 0.0}}, t + 0.025);
+            sys->step({}, {}, f, t, 0.05);
+        }
+    });
+    EXPECT_NE(msg.find("MOORDYN_NAN_ERROR"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("moordyn_cfl"), std::string::npos) << msg;
+    EXPECT_NE(msg.find(sys->input_file()), std::string::npos) << msg;
+    EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "the traps are back on after the masked step";
 }
 
 TEST(MoorDynSystem, VersionAndErrorNamesAreKnown)

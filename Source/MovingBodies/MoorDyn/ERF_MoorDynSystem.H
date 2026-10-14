@@ -37,12 +37,16 @@ std::string error_name (int code);
  * every point, whose length is DBL_MAX (no length), with cfl <= 1 and v a residual speed: the
  * quotient overflows to +inf when v < cfl (and divides by zero when v = 0), and the std::min it
  * goes into discards the infinity, so the masked result is the untrapped one. With
- * amrex.fpe_trap_overflow on, the run stopped there (SIGFPE on Linux, SIGILL on Apple arm64). MoorDynSystem::init and MoorDynSystem::step run MoorDyn under this mask,
- * so a run with lines may keep the traps on for ERF's own code. MoorDyn's results are checked
- * instead: step() aborts on a non-finite coupled force and MoorDyn reports MOORDYN_NAN_ERROR for
- * a diverged line. The traps are a per-thread setting: the mask applies to the calling thread,
- * which is the thread MoorDyn runs on (MoorDyn-C does not start threads). Linux (glibc) and
- * macOS only, as amrex::disableFPExcept; elsewhere it masks nothing.
+ * amrex.fpe_trap_overflow on, the run stopped there (SIGFPE on Linux, SIGILL on Apple arm64).
+ * MoorDynSystem::init and MoorDynSystem::step run MoorDyn under this mask, so a run with lines
+ * may keep the traps on for ERF's own code. MoorDyn's results are checked instead: a line
+ * integration that diverges (its internal step too long) overflows and makes NaNs inside
+ * MoorDyn_Step, which then reports MOORDYN_NAN_ERROR and ERF aborts naming the internal step,
+ * where the traps stopped the run with a SIGFPE inside MoorDyn; step() also aborts on a
+ * non-finite coupled force. The traps are a per-thread setting: the mask applies to the calling
+ * thread, which is the thread MoorDyn runs on (MoorDyn-C built without OpenMP, as
+ * Build/setup_moordyn.sh builds it, starts no threads). Linux (glibc) and macOS only, as
+ * amrex::disableFPExcept; elsewhere it masks nothing.
  */
 class FPTrapMask
 {
