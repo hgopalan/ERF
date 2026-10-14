@@ -458,10 +458,9 @@ struct ConductorInputs
      * The solver settings the conductor module supports: an empty string when they hold, else the message.
      * @param max_level amr.max_level
      * @param anchor_level the level the lines are stepped on, already resolved (not -1)
-     * @param fpe_traps an amrex.fpe_trap_* input is on (MoorDyn's initial-condition solver overflows under a trap)
      * @param drag_on_flow erf.conductors.drag_on_flow, which needs the anchor level to be the finest
      */
-    static std::string validate_solver (int max_level, int anchor_level, bool fpe_traps, bool drag_on_flow = false);
+    static std::string validate_solver (int max_level, int anchor_level, bool drag_on_flow = false);
     /**
      * Whether MoorDyn's frame holds the whole domain: surface_offset must exceed prob_hi_z, so that
      * every node lies below MoorDyn's free surface at ERF z = surface_offset (MoorDyn applies no fluid

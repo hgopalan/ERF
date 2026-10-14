@@ -7,10 +7,13 @@
  */
 
 #include <array>
+#include <cfenv>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <AMReX.H>
 
 #include <moordyn/MoorDyn2.h>
 
@@ -23,13 +26,40 @@ bool is_stub ();
 /** The name of a MoorDyn error code (MOORDYN_SUCCESS, MOORDYN_INVALID_INPUT_FILE, ...). */
 std::string error_name (int code);
 /**
- * Whether any of amrex.fpe_trap_invalid, amrex.fpe_trap_zero and amrex.fpe_trap_overflow is on
- * (read from ParmParse; amrex.signal_handling is not consulted). MoorDyn-C is not trap clean: its
- * stationary initial-condition solver overflows intermediate values (amrex.fpe_trap_overflow
- * stops the run inside MoorDyn_Init in 2.7.1: SIGILL on Apple arm64, SIGFPE on Linux; the
- * invalid and zero traps pass), so a body that runs MoorDyn refuses to start with any of the traps on.
+ * Masks the floating-point traps (amrex.fpe_trap_invalid, amrex.fpe_trap_zero and
+ * amrex.fpe_trap_overflow, as set on the calling thread) for its lifetime, with
+ * amrex::disableFPExcept; on destruction it discards the exception flags raised meanwhile, puts
+ * back the flags raised before it and restores the traps with amrex::setFPExcept, so that a
+ * masked exception is not reported later from unrelated code.
+ *
+ * MoorDyn-C is not trap clean: in 2.7.1 the stationary initial-condition solver
+ * (StationaryScheme::Step, under MoorDyn_Init) bounds its pseudo-step by cfl * length / v for
+ * every point, whose length is DBL_MAX (no length), with cfl <= 1 and v a residual speed: the
+ * quotient overflows to +inf when v < cfl (and divides by zero when v = 0), and the std::min it
+ * goes into discards the infinity, so the masked result is the untrapped one. With
+ * amrex.fpe_trap_overflow on, the run stopped there (SIGFPE on Linux, SIGILL on Apple arm64).
+ * MoorDynSystem::init and MoorDynSystem::step run MoorDyn under this mask, so a run with lines
+ * may keep the traps on for ERF's own code. MoorDyn's results are checked instead: a line
+ * integration that diverges (its internal step too long) overflows and makes NaNs inside
+ * MoorDyn_Step, which then reports MOORDYN_NAN_ERROR and ERF aborts naming the internal step,
+ * where the traps stopped the run with a SIGFPE inside MoorDyn; step() also aborts on a
+ * non-finite coupled force. The traps are a per-thread setting: the mask applies to the calling
+ * thread, which is the thread MoorDyn runs on (MoorDyn-C built without OpenMP, as
+ * Build/setup_moordyn.sh builds it, starts no threads). Linux (glibc) and macOS only, as
+ * amrex::disableFPExcept; elsewhere it masks nothing.
  */
-bool fpe_traps_requested ();
+class FPTrapMask
+{
+public:
+    FPTrapMask ();
+    ~FPTrapMask ();
+    FPTrapMask (const FPTrapMask&) = delete;
+    FPTrapMask& operator= (const FPTrapMask&) = delete;
+
+private:
+    amrex::FPExcept m_traps;
+    std::fexcept_t m_flags{};
+};
 
 /**
  * Check the OPTIONS block of a MoorDyn input file for `1 WaveKin`, the external fluid kinematics
@@ -89,7 +119,8 @@ public:
      * Initialise the system with the coupled positions (m) and velocities (m/s), num_coupled_dof()
      * finite values each in MoorDyn's frame (empty when there are none). With compute_ic MoorDyn
      * solves for the static initial shape; without it the state is expected from load() or
-     * deserialize(). Returns an error message, empty on success.
+     * deserialize(). MoorDyn runs with the floating-point traps masked (FPTrapMask). Returns an
+     * error message, empty on success.
      */
     std::string init (const std::vector<double>& x, const std::vector<double>& xd, bool compute_ic = true);
 
@@ -118,7 +149,8 @@ public:
      *
      * Units: x m, xd m/s, f N, t and dt s; MoorDyn's frame. f is the force ON each coupled point
      * BY the lines ending there (plus the point's own weight, buoyancy and drag, zero for the
-     * massless points ERF writes). Aborts when dt is not positive or a returned force is not finite.
+     * massless points ERF writes). MoorDyn runs with the floating-point traps masked (FPTrapMask).
+     * Aborts when dt is not positive or a returned force is not finite.
      */
     void step (const std::vector<double>& x, const std::vector<double>& xd, std::vector<double>& f, double& t, double dt);
 

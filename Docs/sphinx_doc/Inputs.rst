@@ -4980,10 +4980,11 @@ in the wind computed by MoorDyn-C; see :ref:`sec:Conductors` for the model
 and :doc:`CouplingToMoorDyn` for building ERF with MoorDyn. The feature is
 built with ``-DERF_ENABLE_MOORDYN=ON`` (cmake) or ``USE_MOVING_BODIES = TRUE``
 and ``USE_MOORDYN = TRUE`` (GNU make); a build without it stops when
-``erf.conductors.lines`` is given. A run with lines refuses to start with
-``amrex.fpe_trap_invalid``, ``amrex.fpe_trap_zero`` or
-``amrex.fpe_trap_overflow`` on, since MoorDyn's initial-condition solver
-overflows an intermediate value. Every Real input of a line, a transformer, a
+``erf.conductors.lines`` is given. ``amrex.fpe_trap_invalid``,
+``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow`` may be on: they are
+masked while MoorDyn initialises and steps the lines, whose initial-condition
+solver overflows an intermediate value it then discards
+(:doc:`CouplingToMoorDyn`), and apply to the rest of the run. Every Real input of a line, a transformer, a
 tower type or the shared settings must be finite: a NaN or an infinity stops
 the run, naming the key. Lines are named in ``erf.conductors.lines``
 (each entry names a whole line, a single span or a section); each has its own

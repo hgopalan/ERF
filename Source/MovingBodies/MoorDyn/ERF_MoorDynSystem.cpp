@@ -8,7 +8,6 @@
 #include <sstream>
 
 #include <AMReX.H>
-#include <AMReX_ParmParse.H>
 
 namespace erf_moordyn {
 
@@ -61,17 +60,18 @@ std::string error_name (int code)
     }
 }
 
-bool fpe_traps_requested ()
+FPTrapMask::FPTrapMask ()
 {
-    amrex::ParmParse pp("amrex");
-    bool traps = false;
-    for (const char* key : {"fpe_trap_invalid", "fpe_trap_zero", "fpe_trap_overflow"}) {
-        // a bool, as AMReX reads it: true, false, 1 and 0 all parse (an int query refused "true")
-        bool trap = false;
-        pp.query(key, trap);
-        traps = traps || trap;
-    }
-    return traps;
+    std::fegetexceptflag(&m_flags, FE_ALL_EXCEPT);
+    m_traps = amrex::disableFPExcept(amrex::FPExcept::all);
+}
+
+FPTrapMask::~FPTrapMask ()
+{
+    // a flag MoorDyn raised under the mask would be reported by the next instruction once its trap is back on
+    std::feclearexcept(FE_ALL_EXCEPT);
+    std::fesetexceptflag(&m_flags, FE_ALL_EXCEPT);
+    amrex::setFPExcept(m_traps);
 }
 
 std::string check_wave_kinematics_option (const std::string& input_file)
@@ -160,7 +160,11 @@ std::string MoorDynSystem::init (const std::vector<double>& x, const std::vector
     }
     const double* px = ndof > 0 ? x.data() : nullptr;
     const double* pv = ndof > 0 ? xd.data() : nullptr;
-    const int rc = compute_ic ? MoorDyn_Init(m_sys, px, pv) : MoorDyn_Init_NoIC(m_sys, px, pv);
+    int rc = MOORDYN_SUCCESS;
+    {
+        const FPTrapMask mask;
+        rc = compute_ic ? MoorDyn_Init(m_sys, px, pv) : MoorDyn_Init_NoIC(m_sys, px, pv);
+    }
     if (rc != MOORDYN_SUCCESS) {
         return std::string(compute_ic ? "MoorDyn_Init" : "MoorDyn_Init_NoIC") + " failed with " + error_name(rc) +
                " for the system from '" + m_file + "'";
@@ -223,7 +227,12 @@ void MoorDynSystem::step (const std::vector<double>& x, const std::vector<double
     const double* pv = ndof > 0 ? xd.data() : nullptr;
     double* pf = ndof > 0 ? f.data() : nullptr;
     double dt_in = dt;
-    check(MoorDyn_Step(m_sys, px, pv, pf, &t, &dt_in), "MoorDyn_Step");
+    int rc = MOORDYN_SUCCESS;
+    {
+        const FPTrapMask mask;
+        rc = MoorDyn_Step(m_sys, px, pv, pf, &t, &dt_in);
+    }
+    check(rc, "MoorDyn_Step");
     std::size_t bad = 0;
     if (!all_finite(f, bad)) {
         amrex::Abort("MoorDyn_Step returned a non-finite coupled force (component " + std::to_string(bad) +

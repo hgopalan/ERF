@@ -97,15 +97,36 @@ each step), the step itself (MoorDyn sub-steps internally with its own
 tensions and net forces, the end and maximum tensions, the attachment points' positions and
 forces, and MoorDyn's save and load of the whole system state for restarts.
 
-MoorDyn-C is not clean under floating-point traps: its stationary
-initial-condition solver overflows intermediate values, so a run with
-``amrex.fpe_trap_overflow = 1`` ends with SIGILL inside ``MoorDyn_Init``
-(2.7.1; the invalid and zero traps pass its start, but its time stepping has
-not been shown clean under them). As for OpenFAST, a body that runs
-MoorDyn refuses to start with ``amrex.fpe_trap_invalid``,
-``amrex.fpe_trap_zero`` or ``amrex.fpe_trap_overflow`` on, and so does the
-stub build, so that a deck behaves alike in both builds;
-:cpp:`erf_moordyn::fpe_traps_requested()` is the check.
+MoorDyn-C is not clean under floating-point traps: in 2.7.1 its stationary
+initial-condition solver bounds its pseudo-step by ``cfl * length / v`` for
+every point, whose length is the largest double, and the quotient overflows to
+infinity whenever the residual speed ``v`` is below ``cfl`` (it divides by
+zero when ``v = 0``); the ``std::min`` it goes into discards the infinity, so
+the result is sound, but with ``amrex.fpe_trap_overflow = 1`` the run stopped
+inside ``MoorDyn_Init`` (SIGFPE on Linux, SIGILL on Apple arm64). The wrapper
+therefore masks the traps around MoorDyn's computing calls:
+:cpp:`erf_moordyn::FPTrapMask` switches ``amrex.fpe_trap_invalid``,
+``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow`` off with
+``amrex::disableFPExcept``, and on leaving discards the exception flags
+MoorDyn raised (or a re-enabled trap could fire later in unrelated code), puts
+back the flags raised before and restores the traps with
+``amrex::setFPExcept``. ``MoorDynSystem::init`` (``MoorDyn_Init`` and
+``MoorDyn_Init_NoIC``) and ``MoorDynSystem::step`` (``MoorDyn_Step``) run under
+it; the wrapper's other calls (creation, the kinematics, the getters, save,
+load and the in-memory state) ran under all three traps in ERF's unit and
+conductor regression tests with MoorDyn-C 2.7.1 without raising one and are
+not masked. A run with lines may therefore keep the traps on for ERF's own
+code, in the stub build and with MoorDyn-C alike; masking changes no answer
+(the masked and untrapped runs agree bit for bit). MoorDyn's own failures are
+still caught: a line integration that diverges (MoorDyn's internal step too
+long for its segments) overflows and makes NaNs inside ``MoorDyn_Step``, which
+reports ``MOORDYN_NAN_ERROR``, and ERF aborts naming
+``erf.conductors.moordyn_cfl`` and ``moordyn_dt`` (with the traps on and no
+mask the run stopped there with a SIGFPE inside MoorDyn); ``step`` also aborts
+on a non-finite coupled force. The traps belong to the calling thread, the
+thread MoorDyn runs on (MoorDyn-C built without OpenMP, as
+``Build/setup_moordyn.sh`` builds it, starts none); ``amrex::disableFPExcept``
+sets them on Linux (glibc) and macOS only, as AMReX does.
 
 MoorDyn reports the net force of the points it integrates (free and coupled
 points) only; a fixed attachment reports zero, and its pull is the net force

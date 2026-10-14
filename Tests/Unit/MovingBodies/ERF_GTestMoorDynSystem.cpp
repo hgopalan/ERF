@@ -2,7 +2,13 @@
 // library, whichever the build links). "Line" here is a MoorDyn line; the input is one span.
 //
 // - VersionAndErrorNamesAreKnown.
-// - FpeTrapsAreReadAsAMReXReadsThem: amrex.fpe_trap_* given as true, false, 1 or 0.
+// - FPTrapMaskMasksTheTrapsAndRestoresThem: no trap inside, the traps and the earlier flags back after, the
+//   flags raised inside discarded; nested masks.
+// - TheSpanStartsAndStepsUnderEveryTrap: init (with the initial-condition solve, whose overflow trapped in
+//   MoorDyn-C 2.7.1) and steps under amrex's three traps, the same answer as without them over three spans,
+//   the traps still on.
+// - ADivergingStepUnderTheTrapsAbortsNamingTheInternalStep: MOORDYN_NAN_ERROR and ERF's abort, not SIGFPE
+//   (MoorDyn-C only).
 // - MissingInputFileIsReportedNotFatal; AnInputWithoutWaveKinIsRefusedAtCreation (both libraries);
 //   AMalformedStubInputIsReportedNotFatal (stub only).
 // - FixedSpanHangsBetweenItsPointsWithTheCatenarySag: no coupled degree of freedom, the end nodes on
@@ -16,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfenv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -25,7 +32,7 @@
 #include <string>
 #include <vector>
 
-#include <AMReX_ParmParse.H>
+#include <AMReX.H>
 
 #include <gtest/gtest.h>
 
@@ -140,32 +147,133 @@ std::array<double,3> mid_node (const MoorDynSystem& sys)
     return sys.line_node_position(1, (nn - 1) / 2);
 }
 
+double mid_node_y (const std::vector<std::array<double,3>>& nodes) { return nodes[(nodes.size() - 1) / 2][1]; }
+
 double norm (const std::array<double,3>& v) { return std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); }
 
 } // namespace
 
-TEST(MoorDynSystem, FpeTrapsAreReadAsAMReXReadsThem)
+// the three traps AMReX sets (amrex.fpe_trap_invalid, _zero, _overflow) switched on, or off, for a scope,
+// the earlier traps restored after it; all_on() is false where AMReX cannot set traps (not Linux glibc or macOS)
+struct Traps {
+    amrex::FPExcept prev;
+    explicit Traps (bool on)
+        : prev(on ? amrex::enableFPExcept(amrex::FPExcept::all) : amrex::disableFPExcept(amrex::FPExcept::all)) {}
+    ~Traps () { std::feclearexcept(FE_ALL_EXCEPT); amrex::setFPExcept(prev); }
+    Traps (const Traps&) = delete;
+    Traps& operator= (const Traps&) = delete;
+    static bool all_on () { return amrex::getFPExcept() == amrex::FPExcept::all; }
+};
+
+TEST(MoorDynSystem, FPTrapMaskMasksTheTrapsAndRestoresThem)
 {
-    // AMReX reads the traps as bool: "true" is valid, and an int query of it aborted on a type mismatch
-    // AMReX records the traps it read at start-up; they are switched off for the test, and every value
-    // restored after it (ParmParse takes the last value given)
-    amrex::ParmParse pp("amrex");
-    const std::vector<std::string> keys{"fpe_trap_invalid", "fpe_trap_zero", "fpe_trap_overflow"};
-    std::vector<int> was, had;
-    for (const auto& k : keys) {
-        bool b = false;
-        had.push_back(pp.contains(k.c_str()) ? 1 : 0);
-        pp.query(k.c_str(), b);
-        was.push_back(b ? 1 : 0);
-        pp.add(k.c_str(), false);
+    const Traps traps(true);
+    if (!Traps::all_on()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+    std::feclearexcept(FE_ALL_EXCEPT);
+    // a flag raised before the mask, of an exception AMReX does not trap, must survive it
+    std::feraiseexcept(FE_UNDERFLOW);
+    volatile double big = std::numeric_limits<double>::max();
+    volatile double zero = 0.0;
+    {
+        const erf_moordyn::FPTrapMask mask;
+        EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::none);
+        {
+            const erf_moordyn::FPTrapMask inner;
+            EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::none);
+        }
+        EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::none) << "a nested mask restores the outer one's (no) traps";
+        // each would stop the test under its trap
+        volatile double r = big * 2.0;
+        EXPECT_TRUE(std::isinf(r));
+        r = 1.0 / zero;
+        EXPECT_TRUE(std::isinf(r));
+        r = zero / zero;
+        EXPECT_TRUE(std::isnan(r));
+        EXPECT_NE(std::fetestexcept(FE_OVERFLOW | FE_DIVBYZERO | FE_INVALID), 0);
     }
-    for (const auto& [value, on] : std::vector<std::pair<std::string, bool>>{{"true", true}, {"false", false}, {"1", true}, {"0", false}}) {
-        pp.add("fpe_trap_zero", value);
-        EXPECT_EQ(erf_moordyn::fpe_traps_requested(), on) << "amrex.fpe_trap_zero = " << value;
+    EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "the traps are back after the mask";
+    EXPECT_EQ(std::fetestexcept(FE_OVERFLOW | FE_DIVBYZERO | FE_INVALID), 0)
+        << "the flags raised under the mask are discarded, or a re-enabled trap could fire in unrelated code";
+    EXPECT_NE(std::fetestexcept(FE_UNDERFLOW), 0) << "the flags raised before the mask are kept";
+    std::feclearexcept(FE_ALL_EXCEPT);
+}
+
+TEST(MoorDynSystem, TheSpanStartsAndStepsUnderEveryTrap)
+{
+    // MoorDyn-C 2.7.1's initial-condition solve overflows (cfl * DBL_MAX / v for its points) in most spans:
+    // without the mask in init() this test stops on SIGFPE. The stub raises nothing, so there only the
+    // restored traps and the identical answers are checked.
+    const double U = 15.0, dt = 0.05;
+    auto run = [&] (const std::string& tag, const Span& s) {
+        auto sys = make_span(tag, s);
+        std::vector<std::array<double,3>> nodes;
+        if (!sys) { return nodes; }
+        std::string err;
+        EXPECT_GT(sys->external_kinematics_init(err), 0u) << err;
+        double t = 0.0;
+        std::vector<double> f;
+        for (int k = 0; k < 20; ++k) {
+            set_uniform_wind(*sys, {{0.0, U, 0.0}}, t + 0.5 * dt);
+            sys->step({}, {}, f, t, dt);
+        }
+        for (unsigned i = 0; i < sys->line_num_nodes(1); ++i) { nodes.push_back(sys->line_node_position(1, i)); }
+        return nodes;
+    };
+    // short and long, taut and slack, coarse and fine spans, each stable at dtM = 1 ms
+    std::vector<Span> spans(3);
+    spans[1].chord = 600.0; spans[1].slack = 10.0; spans[1].nseg = 60;
+    spans[2].chord = 50.0;  spans[2].slack = 10.0; spans[2].nseg = 5;
+    for (std::size_t c = 0; c < spans.size(); ++c) {
+        const std::string tag = "traps_" + std::to_string(c);
+        std::vector<std::array<double,3>> untrapped, trapped;
+        {
+            const Traps traps(false);
+            untrapped = run(tag + "_off", spans[c]);
+        }
+        ASSERT_FALSE(untrapped.empty()) << "span " << c;
+        {
+            const Traps traps(true);
+            if (!Traps::all_on()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+            trapped = run(tag + "_on", spans[c]);
+            EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "span " << c << ": init() and step() leave the traps on";
+        }
+        ASSERT_EQ(trapped.size(), untrapped.size()) << "span " << c;
+        for (std::size_t i = 0; i < trapped.size(); ++i) {
+            for (std::size_t d = 0; d < 3; ++d) {
+                EXPECT_EQ(trapped[i][d], untrapped[i][d]) << "span " << c << " node " << i << " component " << d
+                                                          << ": masking changes no answer";
+            }
+        }
+        EXPECT_GT(mid_node_y(untrapped), 1.0) << "span " << c << ": the +y wind must have blown the span out";
     }
-    for (std::size_t i = 0; i < keys.size(); ++i) {
-        if (had[i] != 0) { pp.add(keys[i].c_str(), was[i] != 0); } else { pp.remove(keys[i].c_str()); }
-    }
+}
+
+TEST(MoorDynSystem, ADivergingStepUnderTheTrapsAbortsNamingTheInternalStep)
+{
+    // 2.5 m segments of a 50 m span are too stiff for dtM = 1 ms: MoorDyn-C's step overflows and makes NaNs,
+    // which under the traps stopped the run with SIGFPE inside MoorDyn_Step. Masked, MoorDyn reports
+    // MOORDYN_NAN_ERROR and ERF aborts naming the internal step, with the traps back on. The stub has no dynamics.
+    if (erf_moordyn::is_stub()) { GTEST_SKIP() << "the stub does not integrate the line"; }
+    const Traps traps(true);
+    if (!Traps::all_on()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+    Span s;
+    s.chord = 50.0; s.slack = 0.2; s.nseg = 20;
+    auto sys = make_span("traps_diverge", s);
+    ASSERT_TRUE(sys);
+    std::string err;
+    ASSERT_GT(sys->external_kinematics_init(err), 0u) << err;
+    double t = 0.0;
+    std::vector<double> f;
+    const std::string msg = erf_gtest::abort_message([&] {
+        for (int k = 0; k < 200; ++k) {
+            set_uniform_wind(*sys, {{0.0, 30.0, 0.0}}, t + 0.025);
+            sys->step({}, {}, f, t, 0.05);
+        }
+    });
+    EXPECT_NE(msg.find("MOORDYN_NAN_ERROR"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("moordyn_cfl"), std::string::npos) << msg;
+    EXPECT_NE(msg.find(sys->input_file()), std::string::npos) << msg;
+    EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "the traps are back on after the masked step";
 }
 
 TEST(MoorDynSystem, VersionAndErrorNamesAreKnown)

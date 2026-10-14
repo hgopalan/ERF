@@ -15,7 +15,7 @@
 //     named for another's gust statistics, gust_with only with random gusts and naming another line of as many
 //     spans that takes no other's), and a line whose log would take the name of one of the run's own logs (a
 //     tower's frame log, or the same path spelled differently) included.
-// AnchorLevelMustExistAndFpeTrapsAreRefused: validate_solver and resolve_anchor_level.
+// AnchorLevelMustExist: validate_solver and resolve_anchor_level.
 // SurfaceOffsetMustHoldTheWholeDomain: validate_frame against the domain's top and bottom.
 // ASectionIsReadWithItsTowersLengthsAndInsulatorStrings: a section's towers, lengths and strings.
 // SectionValuesOutsideTheirRangeAreRefusedByName: a section's bad values, a line that turns back at a
@@ -560,15 +560,15 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
     bad([](ConductorInputs& c) { c.lines[0].mass_per_length = 5.0e-4; }, "erf.conductors.S.mass_per_length");
 }
 
-TEST(ConductorInputs, AnchorLevelMustExistAndFpeTrapsAreRefused)
+TEST(ConductorInputs, AnchorLevelMustExist)
 {
-    EXPECT_TRUE(ConductorInputs::validate_solver(1, 1, false).empty());
-    EXPECT_TRUE(ConductorInputs::validate_solver(1, 0, false).empty());
-    EXPECT_NE(ConductorInputs::validate_solver(1, 2, false).find("anchor_level"), std::string::npos);
-    EXPECT_NE(ConductorInputs::validate_solver(0, 0, true).find("fpe_trap"), std::string::npos);
+    EXPECT_TRUE(ConductorInputs::validate_solver(1, 1).empty());
+    EXPECT_TRUE(ConductorInputs::validate_solver(1, 0).empty());
+    EXPECT_NE(ConductorInputs::validate_solver(1, 2).find("anchor_level"), std::string::npos);
+    EXPECT_NE(ConductorInputs::validate_solver(1, -1).find("anchor_level"), std::string::npos);
     // the drag goes into the anchor level only, so it must be the finest
-    EXPECT_TRUE(ConductorInputs::validate_solver(1, 1, false, true).empty());
-    EXPECT_NE(ConductorInputs::validate_solver(1, 0, false, true).find("drag_on_flow"), std::string::npos);
+    EXPECT_TRUE(ConductorInputs::validate_solver(1, 1, true).empty());
+    EXPECT_NE(ConductorInputs::validate_solver(1, 0, true).find("drag_on_flow"), std::string::npos);
     EXPECT_EQ(ConductorInputs::resolve_anchor_level(-1, 2), 2);
     EXPECT_EQ(ConductorInputs::resolve_anchor_level(1, 2), 1);
 }
