@@ -559,7 +559,7 @@ std::string ConductorInputs::validate_frame (Real surface_offset, Real prob_lo_z
     return std::string();
 }
 
-std::string ConductorInputs::validate_solver (int max_level, int anchor_level, bool fpe_traps, bool drag_on_flow)
+std::string ConductorInputs::validate_solver (int max_level, int anchor_level, bool drag_on_flow)
 {
     if (anchor_level < 0 || anchor_level > max_level) {
         return "erf.conductors.anchor_level = " + std::to_string(anchor_level) + " is not a level of this run (0 .. " +
@@ -572,10 +572,6 @@ std::string ConductorInputs::validate_solver (int max_level, int anchor_level, b
                std::to_string(anchor_level) + ", and amr.max_level = " + std::to_string(max_level) +
                " allows a finer level whose flow never feels it; step the lines on the finest level "
                "(erf.conductors.anchor_level = -1) or switch drag_on_flow off";
-    }
-    if (fpe_traps) {
-        return "erf.conductors: MoorDyn's initial-condition solver overflows an intermediate value and is killed by a "
-               "floating-point trap; switch off amrex.fpe_trap_invalid, amrex.fpe_trap_zero and amrex.fpe_trap_overflow";
     }
     return std::string();
 }

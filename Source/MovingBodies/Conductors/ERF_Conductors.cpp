@@ -71,7 +71,7 @@ Conductors::create (int max_level)
     ConductorInputs in = ConductorInputs::read();
     if (!in.active) { return nullptr; }
     const int anchor = ConductorInputs::resolve_anchor_level(in.anchor_level, max_level);
-    const std::string err = ConductorInputs::validate_solver(max_level, anchor, erf_moordyn::fpe_traps_requested(), in.drag_on_flow);
+    const std::string err = ConductorInputs::validate_solver(max_level, anchor, in.drag_on_flow);
     if (!err.empty()) { Abort(err); }
     Print() << "erf.conductors: " << in.lines.size() << " line(s) on MoorDyn-C " << erf_moordyn::library_version()
             << (erf_moordyn::is_stub() ? " (the bundled stub stands in for MoorDyn)" : "") << ", anchor level " << anchor

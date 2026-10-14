@@ -1161,9 +1161,7 @@ clock at zero at the restart time.
 Checks at start-up
 ------------------
 
-A run with conductor lines refuses to start with ``amrex.fpe_trap_invalid``,
-``amrex.fpe_trap_zero`` or ``amrex.fpe_trap_overflow`` on (MoorDyn's
-initial-condition solver overflows an intermediate value), with an anchor
+A run with conductor lines refuses to start with an anchor
 level that is not a level of the run, with a ``surface_offset`` that does
 not put MoorDyn's free surface above the domain top and its bottom below the
 domain bottom, with a span whose length does not exceed the distance between

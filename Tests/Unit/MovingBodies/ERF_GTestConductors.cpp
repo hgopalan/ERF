@@ -7,6 +7,8 @@
 //     level that does not exist (yet, or any more) stops the run, naming erf.conductors.anchor_level.
 // TheFlowIsSampledAtTheLinesCurrentPosition: without a prescribed velocity, MoorDyn gets ERF's
 //     velocity at the line's current position, not where it hung.
+// LinesRunWithTheFloatingPointTrapsOn: amrex.fpe_trap_invalid, _zero and _overflow on (in the inputs and on
+//     the thread) no longer stop the run at create(); MoorDyn starts and steps under them, and they stay on.
 // ClearanceIsTheHeightAboveTheTerrainUnderEachNode: the clearance against the terrain under each node.
 // AStringReachingBelowTheGroundIsRefused: placed, a tower's string may not end below the ground.
 // TheGridsMustReachAsFarAsTheDragDoes: the coverage reach is a cell, and with drag_on_flow 3 epsilon cells.
@@ -66,6 +68,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -79,6 +82,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <AMReX.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Geometry.H>
@@ -406,6 +410,55 @@ TEST(Conductors, TheFlowIsSampledAtTheLinesCurrentPosition)
     // the line really moved, so sampling at the initial positions would have handed a different wind
     EXPECT_GT(moved, 0.5) << "the span must blow out in the sampled crosswind";
     EXPECT_GT(m.vy * moved, 1.0e-3) << "the field must change measurably over the distance the line moved";
+}
+
+TEST(Conductors, LinesRunWithTheFloatingPointTrapsOn)
+{
+    // the traps as given in the inputs (create() refused them before MoorDyn's calls were masked) and as
+    // AMReX sets them on the thread; both restored when the test ends, a failed assertion included
+    struct TrapsOn {
+        const std::vector<std::string> keys{"fpe_trap_invalid", "fpe_trap_zero", "fpe_trap_overflow"};
+        std::vector<int> had, was;
+        amrex::FPExcept prev;
+        TrapsOn ()
+        {
+            amrex::ParmParse pa("amrex");
+            for (const auto& k : keys) {
+                bool b = false;
+                had.push_back(pa.contains(k.c_str()) ? 1 : 0);
+                pa.query(k.c_str(), b);
+                was.push_back(b ? 1 : 0);
+                pa.add(k.c_str(), true);
+            }
+            prev = amrex::enableFPExcept(amrex::FPExcept::all);
+        }
+        ~TrapsOn ()
+        {
+            std::feclearexcept(FE_ALL_EXCEPT);
+            amrex::setFPExcept(prev);
+            amrex::ParmParse pa("amrex");
+            for (std::size_t i = 0; i < keys.size(); ++i) {
+                if (had[i] != 0) { pa.add(keys[i].c_str(), was[i] != 0); } else { pa.remove(keys[i].c_str()); }
+            }
+        }
+        TrapsOn (const TrapsOn&) = delete;
+        TrapsOn& operator= (const TrapsOn&) = delete;
+    };
+    const TrapsOn traps;
+    const bool trapping = (amrex::getFPExcept() == amrex::FPExcept::all);
+    {
+        const std::string dir = scratch("traps");
+        set_inputs(dir, "Ttraps", false);
+        Mesh m(false);
+        m.fill_crosswind();
+        auto c = Conductors::create(0);
+        ASSERT_TRUE(c);
+        c->set_ground(nullptr, m.geom);   // MoorDyn_Init and its initial-condition solve
+        const auto& span = *c->lines().front();
+        for (int s = 0; s < 8; ++s) { c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
+        EXPECT_GT(span.mid_offset(), 0.1) << "the span must blow out in the sampled crosswind";
+        if (trapping) { EXPECT_EQ(amrex::getFPExcept(), amrex::FPExcept::all) << "the traps must still be on"; }
+    }
 }
 
 TEST(Conductors, GustsComeFromTheRANSkAlongEachSpan)
