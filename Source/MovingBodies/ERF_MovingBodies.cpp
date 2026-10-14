@@ -1115,21 +1115,23 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
     if (any_turbine_force) {
         const auto& turbs = m_driver->turbines();
         // the cells an actuator line's tip sweeps are physical cells: on a terrain-following or
-        // stretched mesh the shortest under the rotor (hub +- tip radius), from z_phys_nd, not the
-        // nominal dz (a collective: every rank takes part, each rotor's bounds from its owner)
+        // stretched mesh the height that limits the tip is the smallest over the cells of the disk
+        // of dz over the fraction of the tip speed that can cross the cell there (vertically, less
+        // towards the top and bottom of the disk; sideways across a sloping face), from z_phys_nd,
+        // not the nominal dz (a collective: every rank takes part, each rotor's region from its owner)
         std::vector<Real> dz_rotor(nturb, static_cast<Real>(geom.CellSize(2)));
         bool any_alm = false;
         for (const std::string& m : m_turbine_mode) { any_alm = any_alm || (m == "alm"); }
         if (any_alm && z_phys_nd != nullptr) {
-            const std::vector<Real> regions = turbine_table(6, false, [this, &turbs] (int i, Real* row) {
+            const std::vector<Real> regions = turbine_table(9, false, [this, &turbs] (int i, Real* row) {
                 if (m_turbine_mode[i] != "alm") {
                     for (int d = 0; d < 3; ++d) { row[d] = Real(1.0); row[d+3] = Real(0.0); }   // empty: no line
+                    row[6] = Real(0.0); row[7] = Real(0.0); row[8] = Real(0.0);
                     return;
                 }
-                const Real r_tip = erf_actuator::tip_radius(turbs[i]);
-                for (int d = 0; d < 3; ++d) { row[d] = turbs[i].hub_pos[d] - r_tip; row[d+3] = turbs[i].hub_pos[d] + r_tip; }
+                erf_actuator::tip_sweep_region(turbs[i], row);
             });
-            erf_actuator::min_cell_heights(z_phys_nd, geom, regions, dz_rotor);
+            erf_actuator::tip_cell_heights(z_phys_nd, geom, regions, dz_rotor);
         }
         for (int i = 0; i < nturb; ++i) {
             if (m_turbine_mode[i] == "none" || !m_driver->is_owner(i)) { continue; }
@@ -1163,11 +1165,11 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                     const Real dt_max = m_in.alm_max_tip_cells * dx_min / std::max(std::abs(turbs[i].rotor_speed) * r_tip, Real(1.0e-30));
                     Abort("erf.moving_bodies." + turbs[i].name + ": the blade tip sweeps " + std::to_string(cells) +
                           " cells per step (rotor speed " + std::to_string(turbs[i].rotor_speed) + " rad/s, tip radius " +
-                          std::to_string(r_tip) + " m, dt " + std::to_string(m_dt) + " s, smallest cell " + std::to_string(dx_min) +
+                          std::to_string(r_tip) + " m, dt " + std::to_string(m_dt) + " s, limiting cell height " + std::to_string(dx_min) +
                           " m), more than erf.moving_bodies.alm_max_tip_cells = " + std::to_string(m_in.alm_max_tip_cells) +
                           "; use erf.fixed_dt <= " + std::to_string(dt_max * m_input_fixed_dt / m_dt) +
                           " (a step of " + std::to_string(dt_max) + " s on level " + std::to_string(m_anchor) +
-                          ") or finer cells for the actuator line");
+                          ") for the actuator line");
                 }
             }
             // the rotor's points, the tower's loads (OpenFAST's tower force nodes, if the model has

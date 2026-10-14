@@ -3,12 +3,14 @@
 #include "ERF_ActuatorSampling.H"
 
 #include <cmath>
+#include <cstddef>
 #include <array>
 #include <limits>
 #include <string>
 #include <vector>
 
 #include <AMReX.H>
+#include <AMReX_Algorithm.H>
 #include <AMReX_Array4.H>
 #include <AMReX_Gpu.H>
 #include <AMReX_MFIter.H>
@@ -439,11 +441,14 @@ mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom, bool over_all_ra
     return b;
 }
 
+namespace {
+
+// the shared body of min_cell_heights (weigh false: every spacing in full) and tip_cell_heights
 void
-min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& regions, std::vector<Real>& dz)
+cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& rows, bool weigh, std::vector<Real>& dz)
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(regions.size() % 6 == 0, "min_cell_heights: six bounds per region");
-    const int n = static_cast<int>(regions.size() / 6);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(rows.size() % 9 == 0, "tip_cell_heights: nine values per region");
+    const int n = static_cast<int>(rows.size() / 9);
     const Real dz0 = static_cast<Real>(geom.CellSize(2));
     dz.assign(n, dz0);
     if (n == 0 || z_phys_nd == nullptr) { return; }
@@ -453,15 +458,24 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
     const Box& domain = geom.Domain();
     std::vector<Real> found(n, big);
     for (int r = 0; r < n; ++r) {
-        const Real* b = &regions[static_cast<std::size_t>(6 * r)];
-        if (b[0] > b[3] || b[1] > b[4] || b[2] > b[5]) { continue; }
+        const Real* b = &rows[static_cast<std::size_t>(9 * r)];
+        // an empty region (low end above high end), one with a non-finite value (a diverged hub) or
+        // a non-positive radius keeps the nominal dz
+        bool finite = true;
+        for (int d = 0; d < 9; ++d) { finite = finite && std::isfinite(b[d]); }
+        if (!finite || b[0] > b[3] || b[1] > b[4] || b[2] > b[5] || !(b[7] > Real(0.0))) { continue; }
         // per direction across, the node index ranges of the cells the region touches: one range, or
         // two in a periodic direction whose range crosses the seam
         std::array<std::vector<std::array<int,2>>,2> ranges;
         for (int d = 0; d < 2; ++d) {
             const int dlo = domain.smallEnd(d), dhi = domain.bigEnd(d), nc = dhi - dlo + 1;
-            const int clo = static_cast<int>(std::floor((b[d]   - plo[d]) * dxi[d]));
-            const int chi = static_cast<int>(std::floor((b[d+3] - plo[d]) * dxi[d]));
+            // a bound more than a domain length outside (a diverged hub) is clamped there, so the
+            // index stays an int; such a region already covers or misses the whole domain
+            const Real len = Real(nc) / dxi[d];
+            const Real blo = amrex::Clamp(b[d],   plo[d] - len, plo[d] + Real(2.0) * len);
+            const Real bhi = amrex::Clamp(b[d+3], plo[d] - len, plo[d] + Real(2.0) * len);
+            const int clo = static_cast<int>(std::floor((blo - plo[d]) * dxi[d]));
+            const int chi = static_cast<int>(std::floor((bhi - plo[d]) * dxi[d]));
             if (geom.isPeriodic(d)) {
                 const int len = chi + 2 - clo;   // nodes clo .. chi + 1
                 if (len >= nc) {
@@ -481,7 +495,13 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
                 if (a <= e) { ranges[d].push_back({{a, e}}); }
             }
         }
-        const Real zl = b[2], zh = b[5];
+        const Real zl = b[2], zh = b[5], zc = b[6], rad = b[7], slack = b[8];
+        const Real dxi0 = dxi[0], dxi1 = dxi[1];
+        // the domain's node range across; a neighbour beyond it in a non-periodic direction is not
+        // read (a fine level may leave those ghost nodes at a fill value)
+        const int nilo = domain.smallEnd(0), nihi = domain.bigEnd(0) + 1;
+        const int njlo = domain.smallEnd(1), njhi = domain.bigEnd(1) + 1;
+        const bool perx = geom.isPeriodic(0), pery = geom.isPeriodic(1);
         ReduceOps<ReduceOpMin> ops;
         ReduceData<Real> data(ops);
         using T = typename decltype(data)::Type;
@@ -497,7 +517,31 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
                     ops.eval(sbx, data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> T
                     {
                         const Real z0 = znd(i,j,k), z1 = znd(i,j,k+1);
-                        return {(z1 > zl && z0 < zh) ? z1 - z0 : big};
+                        // a collapsed or folded cell (z1 <= z0) is not a height to count
+                        if (!(z1 > z0 && z1 > zl && z0 < zh)) { return {big}; }
+                        if (!weigh) { return {z1 - z0}; }
+                        // the cell's point nearest the hub height, less the slack; the tip's vertical
+                        // speed there is at most q = sqrt(rad^2 - dist^2) / rad of the full tip speed
+                        const Real gap = (zc < z0) ? z0 - zc : ((zc > z1) ? zc - z1 : Real(0.0));
+                        const Real dist = amrex::max(gap - slack, Real(0.0));
+                        const Real q = std::sqrt(amrex::max(rad * rad - dist * dist, Real(0.0))) / rad;
+                        // the steepest slope G of the cell's two faces (to the neighbouring nodes on
+                        // either side, inside the domain or across a periodic seam): a tip moving sideways
+                        // crosses a sloping face too, at most at (q + G) of the tip speed, and never
+                        // faster than the speed normal to the face, sqrt(1 + G^2)
+                        Real g2 = 0.0;
+                        for (int kk = k; kk <= k + 1; ++kk) {
+                            const Real zc0 = znd(i,j,kk);
+                            Real gx = 0.0, gy = 0.0;
+                            if ((perx || i + 1 <= nihi) && znd.contains(i+1,j,kk)) { gx = amrex::max(gx, std::abs(znd(i+1,j,kk) - zc0)); }
+                            if ((perx || i - 1 >= nilo) && znd.contains(i-1,j,kk)) { gx = amrex::max(gx, std::abs(zc0 - znd(i-1,j,kk))); }
+                            if ((pery || j + 1 <= njhi) && znd.contains(i,j+1,kk)) { gy = amrex::max(gy, std::abs(znd(i,j+1,kk) - zc0)); }
+                            if ((pery || j - 1 >= njlo) && znd.contains(i,j-1,kk)) { gy = amrex::max(gy, std::abs(zc0 - znd(i,j-1,kk))); }
+                            gx *= dxi0; gy *= dxi1;
+                            g2 = amrex::max(g2, gx * gx + gy * gy);
+                        }
+                        const Real qs = amrex::min(std::sqrt(Real(1.0) + g2), q + std::sqrt(g2));
+                        return {(qs > Real(0.0)) ? (z1 - z0) / qs : big};
                     });
                 }
             }
@@ -508,6 +552,31 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
     for (int r = 0; r < n; ++r) {
         if (found[r] < big && found[r] > Real(0.0)) { dz[r] = found[r]; }
     }
+}
+
+} // namespace
+
+void
+min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& regions, std::vector<Real>& dz)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(regions.size() % 6 == 0, "min_cell_heights: six bounds per region");
+    // every spacing counts in full: a slack wider than any height keeps the distance to the "hub" zero
+    const std::size_t n = regions.size() / 6;
+    std::vector<Real> rows;
+    rows.reserve(9 * n);
+    for (std::size_t r = 0; r < n; ++r) {
+        rows.insert(rows.end(), regions.begin() + static_cast<std::ptrdiff_t>(6 * r), regions.begin() + static_cast<std::ptrdiff_t>(6 * r + 6));
+        rows.push_back(Real(0.0));
+        rows.push_back(Real(1.0));
+        rows.push_back(std::numeric_limits<Real>::max());
+    }
+    cell_heights(z_phys_nd, geom, rows, false, dz);
+}
+
+void
+tip_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& rows, std::vector<Real>& dz)
+{
+    cell_heights(z_phys_nd, geom, rows, true, dz);
 }
 
 bool

@@ -15,11 +15,14 @@
 //   (from mesh_z_bounds, exact on a flat uniform mesh), or over the whole height without the bounds.
 // - wrap_periodic: a point a few ulps below a non-zero prob_lo lands on prob_lo, not on prob_hi.
 // - terrain_heights: the bilinear k = 0 node surface.
-// - min_cell_heights: the shortest physical cell (z_phys_nd node spacing) under a region.
+// - min_cell_heights: the shortest physical cell (z_phys_nd node spacing) under a region, over the
+//   region's heights only, across periodic seams.
+// - tip_cell_heights: the cell height that limits a blade tip, each cell weighed by the tip speed that can cross it.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -488,6 +491,172 @@ TEST(ActuatorSampling, TheShortestCellUnderARegionIsPhysical)
     Fields nominal(m, true);
     erf_actuator::min_cell_heights(nominal.znd.get(), nominal.geom, regions, dz);
     for (const Real v : dz) { EXPECT_DOUBLE_EQ(v, dz0); }
+}
+
+// min_cell_heights on a stretched mesh, where a column's cells differ: only the spacings whose span
+// overlaps the region's heights count (the bottom cells under a band high in the column do not), a
+// spacing at the top of a z box counts, a region straddling a periodic seam takes the columns on both
+// sides, a non-finite bound keeps the nominal dz, and a folded cell is not a height
+TEST(ActuatorSampling, TheShortestCellCountsOnlyTheRegionsHeightsAndBothSidesOfASeam)
+{
+    MeshSpec m; m.hill = 100.0; m.max_grid = {{4, 5, 3}};   // stretch 1.15; z boxes of cells 0-2, 3-5, 6-7
+    Fields f(m, false);
+    const Real dz0 = m.H / m.nz;
+    const Real tol = (sizeof(Real) == 8) ? Real(1.0e-9) : Real(1.0e-4);
+    auto brute = [&](int ilo, int ihi, int jlo, int jhi, Real zl, Real zh) {
+        Real best = 1.0e30;
+        for (int i = std::max(ilo, 0); i <= std::min(ihi, m.nx); ++i) {
+            for (int j = std::max(jlo, 0); j <= std::min(jhi, m.ny); ++j) {
+                for (int k = 0; k < m.nz; ++k) {
+                    const Real z0 = m.z_node(i, j, k), z1 = m.z_node(i, j, k + 1);
+                    if (z1 > zl && z0 < zh) { best = std::min(best, z1 - z0); }
+                }
+            }
+        }
+        return best;
+    };
+    // a band high in the summit's columns (x = -1.5 dx .. 1.5 dx, y = 2 dy .. 3 dy: nodes -2 .. 2 and 2 .. 4,
+    // clipped to i = 0 .. 2 without periodicity): the bottom cells, the shortest of the stretched column,
+    // lie below it and must not count
+    const Real zl = 250.0, zh = 300.0;
+    const std::vector<Real> band{Real(-1.5) * m.dx(), Real(2.0) * m.dy(), zl, Real(1.5) * m.dx(), Real(3.0) * m.dy(), zh};
+    std::vector<Real> dz;
+    erf_actuator::min_cell_heights(f.znd.get(), f.geom, band, dz);
+    ASSERT_EQ(dz.size(), 1u);
+    const Real want_band = brute(0, 2, 2, 4, zl, zh);
+    EXPECT_NEAR(dz[0], want_band, tol);
+    EXPECT_GT(dz[0], brute(0, 2, 2, 4, Real(0.0), m.H) + Real(5.0));   // the whole column's shortest is far below
+    // the spacing at the top of the lowest z box (node 2 to node 3) on a flat stretched mesh, alone in the band
+    MeshSpec ms = m; ms.hill = 0.0;
+    Fields flat(ms, false);
+    const Real z2 = ms.z_node(0, 0, 2), z3 = ms.z_node(0, 0, 3);
+    const std::vector<Real> top{Real(100.0), Real(100.0), z2 + Real(0.1), Real(500.0), Real(500.0), z3 - Real(0.1)};
+    erf_actuator::min_cell_heights(flat.znd.get(), flat.geom, top, dz);
+    EXPECT_NEAR(dz[0], z3 - z2, tol);
+    EXPECT_GT(dz[0], ms.z_node(0, 0, 1) - ms.z_node(0, 0, 0) + Real(1.0));   // not the bottom cell's height
+    // periodic in y: a region straddling y = 0 (nodes -1 .. 2) takes j = ny - 1, ny and j = 0 .. 2. The hill
+    // rises from y = 0 towards y = Ly / 4 and falls below it near y = Ly, so the shortest cells are on the
+    // y = 0 side; the columns near y = Ly alone give taller ones
+    const std::array<int,3> periodic_y{{0, 1, 0}};
+    const amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)}, {AMREX_D_DECL(m.Lx, m.Ly, m.H)});
+    const amrex::Geometry pgeom(f.geom.Domain(), &rb, 0, periodic_y.data());
+    const std::vector<Real> seam{Real(100.0), Real(-0.5) * m.dy(), Real(0.0), Real(300.0), Real(1.5) * m.dy(), m.H};
+    erf_actuator::min_cell_heights(f.znd.get(), pgeom, seam, dz);
+    const Real low_side = brute(1, 4, 0, 2, Real(0.0), m.H), high_side = brute(1, 4, m.ny - 1, m.ny, Real(0.0), m.H);
+    EXPECT_NEAR(dz[0], std::min(low_side, high_side), tol);
+    EXPECT_LT(low_side, high_side - Real(0.5));
+    // a region wider than the periodic domain: every column
+    const std::vector<Real> wide{Real(100.0), -m.Ly, Real(0.0), Real(300.0), Real(2.0) * m.Ly, m.H};
+    erf_actuator::min_cell_heights(f.znd.get(), pgeom, wide, dz);
+    EXPECT_NEAR(dz[0], brute(1, 4, 0, m.ny, Real(0.0), m.H), tol);
+    // a huge but finite bound (a diverged hub position, 1e12 m): clamped a domain length out, so the
+    // region covers every column across, as one exactly the domain wide does
+    const std::vector<Real> huge{Real(-1.0e12), Real(100.0), Real(0.0), Real(1.0e12), Real(300.0), m.H};
+    const std::vector<Real> whole{Real(0.0), Real(100.0), Real(0.0), m.Lx, Real(300.0), m.H};
+    std::vector<Real> dzw;
+    erf_actuator::min_cell_heights(f.znd.get(), f.geom, huge, dz);
+    erf_actuator::min_cell_heights(f.znd.get(), f.geom, whole, dzw);
+    EXPECT_EQ(dz[0], dzw[0]);
+    EXPECT_LT(dz[0], dz0 - Real(5.0));
+    // a non-finite bound (a diverged hub position): the nominal dz, no trap
+    const std::vector<Real> bad{std::numeric_limits<Real>::quiet_NaN(), Real(0.0), Real(0.0), Real(100.0), Real(100.0), Real(100.0)};
+    erf_actuator::min_cell_heights(f.znd.get(), f.geom, bad, dz);
+    EXPECT_DOUBLE_EQ(dz[0], dz0);
+    // a folded cell: node (1, 1, 1) lifted above node (1, 1, 2) on the flat stretched mesh. Its negative
+    // spacing is skipped, so the region over columns 0 .. 2 still finds the other columns' bottom cell
+    // (before, the negative minimum fell back to the nominal dz)
+    for (amrex::MFIter mfi(*flat.znd, false); mfi.isValid(); ++mfi) {
+        auto za = flat.znd->array(mfi);
+        amrex::LoopOnCpu(amrex::grow(mfi.validbox(), 2), [&](int i, int j, int k) {
+            if (i == 1 && j == 1 && k == 1) { za(i,j,k) = z2 + Real(1.0); }
+        });
+    }
+    const std::vector<Real> fold{Real(0.5) * ms.dx(), Real(0.5) * ms.dy(), Real(0.0), Real(1.5) * ms.dx(), Real(1.5) * ms.dy(), ms.H};
+    erf_actuator::min_cell_heights(flat.znd.get(), flat.geom, fold, dz);
+    EXPECT_NEAR(dz[0], ms.z_node(0, 0, 1) - ms.z_node(0, 0, 0), tol);
+    EXPECT_LT(dz[0], dz0 - Real(5.0));
+}
+
+// tip_cell_heights: each cell of the disk counts with the share of the tip speed that can cross it,
+// sqrt(R^2 - d^2) / R for a cell whose nearest point is d from the hub height on a flat mesh, plus the
+// slope G of its faces on a sloping one (at most sqrt(1 + G^2)). On a stretched column the short cells low
+// in the disk count less than their height alone; the slack moves the hub height by up to that much; on a
+// planar slope a cell low in the disk can limit through its slope; a zero radius keeps the nominal dz
+TEST(ActuatorSampling, TheTipCellHeightWeighsEachCellByTheTipSpeedThatCrossesIt)
+{
+    MeshSpec ms; ms.max_grid = {{4, 5, 3}};   // flat, stretch 1.15: spacings 29.1 m at the ground to 77.5 m at the top
+    Fields flat(ms, false);
+    const Real dz0 = ms.H / ms.nz;
+    const Real tol = (sizeof(Real) == 8) ? Real(1.0e-9) : Real(1.0e-4);
+    // the reference, over one column (every column of the flat mesh is the same)
+    auto brute = [&](Real zl, Real zh, Real zc, Real R, Real slack) {
+        Real best = 1.0e30;
+        for (int k = 0; k < ms.nz; ++k) {
+            const Real z0 = ms.z_node(0, 0, k), z1 = ms.z_node(0, 0, k + 1);
+            if (!(z1 > zl && z0 < zh)) { continue; }
+            const Real gap = (zc < z0) ? z0 - zc : ((zc > z1) ? zc - z1 : Real(0.0));
+            const Real d = std::max(gap - slack, Real(0.0));
+            if (d >= R) { continue; }
+            best = std::min(best, (z1 - z0) / (std::sqrt(R * R - d * d) / R));
+        }
+        return best;
+    };
+    const Real zc = 200.0, R = 120.0;
+    const std::vector<Real> rows{100.0, 100.0, zc - R, 500.0, 500.0, zc + R, zc, R, 0.0};
+    std::vector<Real> dz, plain;
+    erf_actuator::tip_cell_heights(flat.znd.get(), flat.geom, rows, dz);
+    ASSERT_EQ(dz.size(), 1u);
+    EXPECT_NEAR(dz[0], brute(zc - R, zc + R, zc, R, Real(0.0)), tol);
+    // hand values: the cell 145.5 .. 196.5 m (51.0 m, 3.5 m below the hub) gives 50.99 m; the one
+    // 101.2 .. 145.5 m (44.3 m, 54.5 m below) gives 44.32 / 0.891 = 49.74 m, the limit
+    EXPECT_NEAR(dz[0], Real(49.743), Real(0.005));
+    const std::vector<Real> box(rows.begin(), rows.begin() + 6);
+    erf_actuator::min_cell_heights(flat.znd.get(), flat.geom, box, plain);
+    EXPECT_GT(dz[0], plain[0] + Real(10.0));   // the 38.5 m cell 99 m below the hub counts as 67.9 m
+    // a slack of 60 m brings every cell 60 m nearer the hub height: the 38.5 m cell 98.8 m below now
+    // counts as 38.54 / 0.946 = 40.73 m and is the limit
+    const std::vector<Real> slack{100.0, 100.0, zc - R, 500.0, 500.0, zc + R, zc, R, 60.0};
+    erf_actuator::tip_cell_heights(flat.znd.get(), flat.geom, slack, dz);
+    EXPECT_NEAR(dz[0], brute(zc - R, zc + R, zc, R, Real(60.0)), tol);
+    EXPECT_NEAR(dz[0], Real(40.727), Real(0.005));
+    // a zero radius (no blades): the nominal dz
+    const std::vector<Real> bare{100.0, 100.0, zc - R, 500.0, 500.0, zc + R, zc, 0.0, 0.0};
+    erf_actuator::tip_cell_heights(flat.znd.get(), flat.geom, bare, dz);
+    EXPECT_DOUBLE_EQ(dz[0], dz0);
+    // a planar slope, ground h = 0.25 x under equal cells (z = h + (400 - h) k / 8): face k slopes as
+    // 0.25 (1 - k / 8), so a tip moving sideways crosses it as well. The limit is the bottom cell of the
+    // column x = 800 m (200 .. 225 m, 75 m below a hub at 300 m): 25 / (0.7806 + 0.25) = 24.257 m, where
+    // the vertical speed alone (q) would give the 25 m of the cell at hub height
+    MeshSpec mp = ms; mp.stretch = 1.0;
+    Fields plane(mp, false);
+    for (amrex::MFIter mfi(*plane.znd, false); mfi.isValid(); ++mfi) {
+        auto za = plane.znd->array(mfi);
+        amrex::LoopOnCpu(amrex::grow(mfi.validbox(), 2), [&](int i, int j, int k) {
+            amrex::ignore_unused(j);
+            const Real h = Real(0.25) * i * mp.dx();
+            za(i,j,k) = h + (mp.H - h) * Real(k) / mp.nz;
+        });
+    }
+    const std::vector<Real> prow{500.0, 300.0, 180.0, 700.0, 700.0, 420.0, 300.0, 120.0, 0.0};
+    erf_actuator::tip_cell_heights(plane.znd.get(), plane.geom, prow, dz);
+    EXPECT_NEAR(dz[0], Real(25.0) / (std::sqrt(Real(1.0) - Real(0.625) * Real(0.625)) + Real(0.25)), Real(1.0e-4));
+    EXPECT_NEAR(dz[0], Real(24.2571), Real(1.0e-3));
+    erf_actuator::min_cell_heights(plane.znd.get(), plane.geom, std::vector<Real>(prow.begin(), prow.begin() + 6), plain);
+    EXPECT_NEAR(plain[0], Real(25.0), Real(1.0e-4));   // the plain vertical spacing is not weighted
+    // a region at the domain's high x side (not periodic): the ghost nodes beyond it are not read, so a
+    // fill value there (a fine level can leave one) changes nothing
+    const std::vector<Real> side{1000.0, 300.0, 280.0, 1200.0, 700.0, 400.0, 340.0, 120.0, 0.0};
+    std::vector<Real> clean;
+    erf_actuator::tip_cell_heights(plane.znd.get(), plane.geom, side, clean);
+    for (amrex::MFIter mfi(*plane.znd, false); mfi.isValid(); ++mfi) {
+        auto za = plane.znd->array(mfi);
+        amrex::LoopOnCpu(amrex::grow(mfi.validbox(), 2), [&](int i, int j, int k) {
+            if (i < 0 || i > mp.nx) { za(i,j,k) = Real(1.0e30); }
+        });
+    }
+    erf_actuator::tip_cell_heights(plane.znd.get(), plane.geom, side, dz);
+    EXPECT_EQ(dz[0], clean[0]);
+    EXPECT_GT(dz[0], Real(10.0));
 }
 
 // A point a few ulps below a non-zero prob_lo wraps to lo + (len - tiny), which rounds onto prob_hi, owned by

@@ -62,6 +62,15 @@ std::array<amrex::Real,3> nacelle_corrected_velocity (const std::array<amrex::Re
 amrex::Real tip_radius (const erf_openfast::TurbineState& t);
 
 /**
+ * The region the blade tips sweep, as one row of erf_actuator::tip_cell_heights: row[0 .. 5] the box
+ * low (x, y, z) and high around the hub, row[6] the hub height, row[7] the tip radius R and row[8] the
+ * slack R_off |n_z|. Along a direction e_d the disk of radius R normal to the hub axis n reaches
+ * R sqrt(1 - n_d^2) from the hub, and the blade nodes stand at most R_off (cone, deflection) off the
+ * rotor plane, which adds R_off |n_d|; for a rotor facing x the box is thin along x.
+ */
+void tip_sweep_region (const erf_openfast::TurbineState& t, amrex::Real* row);
+
+/**
  * The velocity nodes shifted upstream by diameters * 2 * tip_radius along the horizontal projection
  * of the shaft axis, where the flow is the free stream: there OpenFAST's own induction model applies
  * (sampling = upstream). The shaft's tilt is left out, so the nodes sample the free stream at their
