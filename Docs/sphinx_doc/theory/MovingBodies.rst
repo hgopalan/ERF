@@ -320,20 +320,25 @@ the FLLC, which on 2.5 m cells is 0.8 cells. A kernel wider than the chord
 smears the tip loading and raises the power for a given inflow: two 2.5 m cells
 (5 m) over-predicted the power by 44 %. The line must not jump over cells between two
 steps: at every step ERF computes how many cells the blade tip sweeps,
-``rotor_speed * tip_radius * dt / min(dx, dy, dz)``, with the tip radius the
-largest distance of a blade node from the hub axis and, on a terrain-following
-or stretched mesh, ``dz`` the shortest physical cell height (the spacing of
-``z_phys_nd``'s nodes) in the box of the hub plus and minus the tip radius,
-not the nominal one, and aborts when it exceeds
-``erf.moving_bodies.alm_max_tip_cells`` (1 by default), naming the largest
-``erf.fixed_dt`` that passes. The count is a safe bound rather than an exact
-one: it pairs the full tip speed with the shortest cell anywhere in the box,
-although the shortest cells usually lie at the bottom of the disk where the tip
-moves sideways, and it measures heights vertically, while on a slope the
-spacing normal to the coordinate surfaces is a little shorter (41.5 m against
-42.2 m in the rotor box of the Askervein test). The start-up audit's cells across
-the rotor still use the nominal spacing. For the IEA 15 MW at rated speed (tip
-speed about 95 m/s) one cell per step means
+``rotor_speed * tip_radius * dt / min(dx, dy, dz)``, with the tip radius ``R``
+the largest distance of a blade node from the hub axis, and aborts when it
+exceeds ``erf.moving_bodies.alm_max_tip_cells`` (1 by default), naming the
+largest ``erf.fixed_dt`` that passes. On a terrain-following or stretched mesh
+``dz`` comes from the physical cells (``z_phys_nd``) in the box the disk sweeps
+(the hub plus and minus ``R sqrt(1 - n_d^2)`` along each direction ``d`` for the
+hub axis ``n``, plus the blades' distance off the rotor plane; thin along the
+axis). The tip's vertical speed at a height ``z`` of the disk is at most
+``rotor_speed * sqrt(R^2 - (z - z_hub)^2)``, so each cell counts with its height
+divided by ``sqrt(R^2 - d^2) / R``, where ``d`` is the distance from the hub
+height to the cell's nearest point, and ``dz`` is the smallest of these. A cell at
+hub height counts in full, so on a mesh whose columns have equal cells (the
+default terrain-following mesh) ``dz`` is the shortest cell under the rotor; on
+a stretched mesh the short cells near the ground, which the tip crosses moving
+mostly sideways, do not stop a run their height alone would stop. The heights are
+vertical: on a slope the spacing normal to the coordinate surfaces is a little
+shorter (41.5 m against 42.2 m in the rotor box of the Askervein test), and the
+start-up audit's cells across the rotor still use the nominal spacing. For the
+IEA 15 MW at rated speed (tip speed about 95 m/s) one cell per step means
 ``dt <= min(dx, dy, dz) / 95``: 0.44 s on the 50 m Askervein mesh, whose cells
 under the rotor are 42.2 m tall. The check runs every
 step because the rotor speed is OpenFAST's to change. The velocities OpenFAST

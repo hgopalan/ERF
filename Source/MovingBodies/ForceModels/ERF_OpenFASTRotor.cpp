@@ -208,6 +208,28 @@ tip_radius (const erf_openfast::TurbineState& t)
     return std::sqrt(r2max);
 }
 
+void
+tip_sweep_region (const erf_openfast::TurbineState& t, Real* row)
+{
+    const std::array<Real,3>& n = t.hub_axis;
+    const Real r_tip = tip_radius(t);
+    Real off = 0.0;   // the blade nodes' largest distance from the rotor plane
+    const int nfb = t.num_blades * t.num_force_pts_blade;
+    for (int nd = 1; nd <= nfb && nd < t.num_force_nodes; ++nd) {
+        Real rn = 0.0;
+        for (int d = 0; d < 3; ++d) { rn += (t.force_pos[3*nd+d] - t.hub_pos[d]) * n[d]; }
+        off = std::max(off, std::abs(rn));
+    }
+    for (int d = 0; d < 3; ++d) {
+        const Real half = r_tip * std::sqrt(std::max(Real(1.0) - n[d] * n[d], Real(0.0))) + off * std::abs(n[d]);
+        row[d]     = t.hub_pos[d] - half;
+        row[d + 3] = t.hub_pos[d] + half;
+    }
+    row[6] = t.hub_pos[2];
+    row[7] = r_tip;
+    row[8] = off * std::abs(n[2]);
+}
+
 Real
 tip_cells_per_step (const erf_openfast::TurbineState& t, Real dt, Real dx)
 {

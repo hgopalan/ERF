@@ -170,6 +170,26 @@ ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& 
 void min_cell_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
                        const std::vector<amrex::Real>& regions, std::vector<amrex::Real>& dz);
 
+/**
+ * The cell height that limits a rotating blade tip's vertical travel, per region: the smallest
+ * dz / q over the cells of the region (as in min_cell_heights), with q = sqrt(R^2 - d^2) / R the
+ * largest fraction of the tip speed that can point up or down at the cell. The tip's velocity is
+ * omega n x r with r in the rotor plane, so its vertical part at a height Z of the disk is at most
+ * omega sqrt(R^2 - r_z^2), and r_z differs from Z - hub_z by at most the blades' off-plane reach
+ * times |n_z| (the slack). d is the distance from the hub height to the cell's nearest point, less
+ * the slack; a cell beyond the disk (d >= R) does not count. A cell at hub height counts its full
+ * height, so on a mesh whose columns are uniform this is min_cell_heights' answer; on a stretched
+ * mesh the short cells low in the disk, which the tip crosses moving mostly sideways, count less.
+ * Region r is rows[9r .. 9r+8]: the box low (x, y, z), the box high, the hub height, the tip radius R
+ * and the slack, in metres. The nominal dz in the same cases as min_cell_heights, and for R <= 0.
+ * A collective: the same on every rank.
+ *
+ * @param[in] rows 9*n values (m)
+ * @param[out] dz n heights (m)
+ */
+void tip_cell_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                       const std::vector<amrex::Real>& rows, std::vector<amrex::Real>& dz);
+
 bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
                         const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,
                         CoverZ z = CoverZ::Reach, const ZBounds* zb = nullptr);

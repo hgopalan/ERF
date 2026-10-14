@@ -3,6 +3,7 @@
 #include "ERF_ActuatorSampling.H"
 
 #include <cmath>
+#include <cstddef>
 #include <array>
 #include <limits>
 #include <string>
@@ -443,7 +444,24 @@ void
 min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& regions, std::vector<Real>& dz)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(regions.size() % 6 == 0, "min_cell_heights: six bounds per region");
-    const int n = static_cast<int>(regions.size() / 6);
+    // every spacing counts in full: a slack wider than any height keeps the distance to the "hub" zero
+    const std::size_t n = regions.size() / 6;
+    std::vector<Real> rows;
+    rows.reserve(9 * n);
+    for (std::size_t r = 0; r < n; ++r) {
+        rows.insert(rows.end(), regions.begin() + static_cast<std::ptrdiff_t>(6 * r), regions.begin() + static_cast<std::ptrdiff_t>(6 * r + 6));
+        rows.push_back(Real(0.0));
+        rows.push_back(Real(1.0));
+        rows.push_back(std::numeric_limits<Real>::max());
+    }
+    tip_cell_heights(z_phys_nd, geom, rows, dz);
+}
+
+void
+tip_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& rows, std::vector<Real>& dz)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(rows.size() % 9 == 0, "tip_cell_heights: nine values per region");
+    const int n = static_cast<int>(rows.size() / 9);
     const Real dz0 = static_cast<Real>(geom.CellSize(2));
     dz.assign(n, dz0);
     if (n == 0 || z_phys_nd == nullptr) { return; }
@@ -453,12 +471,12 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
     const Box& domain = geom.Domain();
     std::vector<Real> found(n, big);
     for (int r = 0; r < n; ++r) {
-        const Real* b = &regions[static_cast<std::size_t>(6 * r)];
-        // an empty region (low end above high end) or one with a non-finite bound (a diverged hub)
-        // keeps the nominal dz
+        const Real* b = &rows[static_cast<std::size_t>(9 * r)];
+        // an empty region (low end above high end), one with a non-finite value (a diverged hub) or
+        // a non-positive radius keeps the nominal dz
         bool finite = true;
-        for (int d = 0; d < 6; ++d) { finite = finite && std::isfinite(b[d]); }
-        if (!finite || b[0] > b[3] || b[1] > b[4] || b[2] > b[5]) { continue; }
+        for (int d = 0; d < 9; ++d) { finite = finite && std::isfinite(b[d]); }
+        if (!finite || b[0] > b[3] || b[1] > b[4] || b[2] > b[5] || !(b[7] > Real(0.0))) { continue; }
         // per direction across, the node index ranges of the cells the region touches: one range, or
         // two in a periodic direction whose range crosses the seam
         std::array<std::vector<std::array<int,2>>,2> ranges;
@@ -485,7 +503,7 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
                 if (a <= e) { ranges[d].push_back({{a, e}}); }
             }
         }
-        const Real zl = b[2], zh = b[5];
+        const Real zl = b[2], zh = b[5], zc = b[6], rad = b[7], slack = b[8];
         ReduceOps<ReduceOpMin> ops;
         ReduceData<Real> data(ops);
         using T = typename decltype(data)::Type;
@@ -502,7 +520,13 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
                     {
                         const Real z0 = znd(i,j,k), z1 = znd(i,j,k+1);
                         // a collapsed or folded cell (z1 <= z0) is not a height to count
-                        return {(z1 > z0 && z1 > zl && z0 < zh) ? z1 - z0 : big};
+                        if (!(z1 > z0 && z1 > zl && z0 < zh)) { return {big}; }
+                        // the cell's point nearest the hub height, less the slack; the tip crosses
+                        // it upward at most q = sqrt(rad^2 - dist^2) / rad of the full tip speed
+                        const Real gap = (zc < z0) ? z0 - zc : ((zc > z1) ? zc - z1 : Real(0.0));
+                        const Real dist = amrex::max(gap - slack, Real(0.0));
+                        const Real q = std::sqrt(amrex::max(rad * rad - dist * dist, Real(0.0))) / rad;
+                        return {(q > Real(0.0)) ? (z1 - z0) / q : big};
                     });
                 }
             }

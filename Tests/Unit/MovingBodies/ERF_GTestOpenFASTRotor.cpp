@@ -272,6 +272,65 @@ TEST(OpenFASTRotor, TipTravelPerStepFromRotorSpeedAndTipRadius)
     EXPECT_EQ(erf_actuator::tip_radius(bare), Real(0.0));
 }
 
+// tip_sweep_region: the box around the disk the tips sweep, thin along the axis: R sqrt(1 - n_d^2) plus the
+// blades' off-plane reach |n_d| from the hub; every blade node and every point of the swept circle lie in it,
+// and the circle reaches its faces; the hub height, the tip radius and the vertical slack follow
+TEST(OpenFASTRotor, TheTipSweepRegionIsTheDiskBoxNotACube)
+{
+    const std::array<Real,3> hub{{500.0, 400.0, 150.0}};
+    // facing x, yawed 8 degrees and tilted 6 degrees
+    std::array<Real,3> axis{{static_cast<Real>(std::cos(0.10472) * std::cos(0.13963)),
+                             static_cast<Real>(std::cos(0.10472) * std::sin(0.13963)),
+                             static_cast<Real>(-std::sin(0.10472))}};
+    const int nodes = 5;
+    const Real R = 120.0, cone = 8.0;   // tips 8 m upwind of the plane, the roots less (r / R)
+    TurbineState t = make_rotor(hub, axis, nodes, R, 1.0e4, 1.0e3);
+    for (int nd = 1; nd < t.num_force_nodes; ++nd) {
+        Real r2 = 0.0;
+        for (int d = 0; d < 3; ++d) { const Real c = t.force_pos[3*nd+d] - hub[d]; r2 += c * c; }
+        for (int d = 0; d < 3; ++d) { t.force_pos[3*nd+d] -= cone * std::sqrt(r2) / R * t.hub_axis[d]; }
+    }
+    const std::array<Real,3>& n = t.hub_axis;
+    const Real r_tip = erf_actuator::tip_radius(t);
+    const Real off = cone * r_tip / R;   // the outermost node's distance from the plane
+    std::array<Real,9> row{};
+    erf_actuator::tip_sweep_region(t, row.data());
+    EXPECT_NEAR(row[6], hub[2], tol() * R);
+    EXPECT_NEAR(row[7], r_tip, tol() * R);
+    EXPECT_NEAR(row[8], off * std::abs(n[2]), tol() * R);
+    for (int d = 0; d < 3; ++d) {
+        const Real half = r_tip * std::sqrt(Real(1.0) - n[d] * n[d]) + off * std::abs(n[d]);
+        EXPECT_NEAR(row[d + 3] - hub[d], half, tol() * R);
+        EXPECT_NEAR(hub[d] - row[d], half, tol() * R);
+    }
+    EXPECT_LT(row[3] - row[0], Real(0.5) * R);   // thin along the axis: about 2 x 25 m, not 2 x 120 m
+    // every blade node inside
+    for (int nd = 1; nd < t.num_force_nodes; ++nd) {
+        for (int d = 0; d < 3; ++d) {
+            EXPECT_GE(t.force_pos[3*nd+d], row[d] - tol() * R);
+            EXPECT_LE(t.force_pos[3*nd+d], row[d + 3] + tol() * R);
+        }
+    }
+    // the swept circle at the tips' off-plane distance, on either side: inside, and touching each face
+    std::array<Real,3> e1 = cross({{0.0, 0.0, 1.0}}, n);
+    const Real l1 = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+    for (auto& e : e1) { e /= l1; }
+    const std::array<Real,3> e2 = cross(n, e1);
+    std::array<Real,3> reach{{0.0, 0.0, 0.0}};
+    for (int a = 0; a < 720; ++a) {
+        const Real th = 2.0 * pi * a / 720.0;
+        for (const Real side : {Real(-1.0), Real(1.0)}) {
+            for (int d = 0; d < 3; ++d) {
+                const Real p = hub[d] + r_tip * (std::cos(th) * e1[d] + std::sin(th) * e2[d]) + side * off * n[d];
+                EXPECT_GE(p, row[d] - tol() * R);
+                EXPECT_LE(p, row[d + 3] + tol() * R);
+                reach[d] = std::max(reach[d], p - hub[d]);
+            }
+        }
+    }
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(reach[d], row[d + 3] - hub[d], Real(1.0e-3) * R); }
+}
+
 TEST(OpenFASTRotor, TowerPointsAreTheTowerNodesAfterTheBlades)
 {
     const std::array<Real,3> hub{{500.0, 500.0, 150.0}};

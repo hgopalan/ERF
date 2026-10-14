@@ -2533,11 +2533,19 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # 41.67 m tall, so the tip that sweeps 0.93 nominal cells per step sweeps 1.11 physical cells and the run
   # must stop, naming the physical height (with the nominal 50 m it ran)
   add_test_abort(MovingBodies_ALMTipTravelPhysicalCells ${_mb_cases}/OpenFAST_ADM_Terrain OpenFAST_ADM_Terrain.i
-      "the blade tip sweeps 1[.]11[0-9]* cells per step.*smallest cell 41[.]66" "erf.moving_bodies.T1.mode=alm erf.moving_bodies.T1.fllc=false")
+      "the blade tip sweeps 1[.]11[0-9]* cells per step.*limiting cell 41[.]66" "erf.moving_bodies.T1.mode=alm erf.moving_bodies.T1.fllc=false")
+  # the same line on a stretched mesh, 8 m cells at the ground growing to 50 m at the hub (150 m): the tip
+  # crosses the short cells low in the disk (17 m at 24-41 m) moving mostly sideways, so the limiting cell is
+  # 47.6 m and the line sweeps 0.97 cells, under the default limit of one (the shortest cell alone would give
+  # 2.7 and stop the run); the limit lowered to 0.5 makes the run print the count
+  add_test_abort(MovingBodies_ALMTipTravelStretched ${_mb_cases}/OpenFAST_ALM_Uniform OpenFAST_ALM_Uniform.i
+      "the blade tip sweeps 0[.]97[0-9]* cells per step.*limiting cell 47[.]59"
+      "erf.moving_bodies.alm_max_tip_cells=0.5 'erf.terrain_z_levels=0 7.7 15.7 23.7 40.8 78.5 125 175 225 275 350 450 600'")
   foreach(_t MovingBodies_AnchorLevelAboveFinest MovingBodies_StopTimeNotWholeSteps MovingBodies_CtDiskDensityMismatch
              MovingBodies_MixedTimeSteps_OneRank
              MovingBodies_FinerLevelOverTheBodies MovingBodies_FPETrapsRefused MovingBodies_CorrectionRelaxOutOfRange
-             MovingBodies_ALMTipTravelLimit MovingBodies_ALMTipTravelPhysicalCells MovingBodies_StopTimeNotWholeCoarseSteps
+             MovingBodies_ALMTipTravelLimit MovingBodies_ALMTipTravelPhysicalCells MovingBodies_ALMTipTravelStretched
+             MovingBodies_StopTimeNotWholeCoarseSteps
              MovingBodies_AnchorLevelMissingAtStart
              MovingBodies_MaxStepEndsTheRunFirst MovingBodies_NacelleKernelTooNarrow MovingBodies_TowerWidthWithoutTower)
     set_property(TEST ${_t} APPEND PROPERTY LABELS "moving-bodies")

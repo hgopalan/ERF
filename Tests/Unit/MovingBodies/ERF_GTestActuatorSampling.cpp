@@ -17,6 +17,7 @@
 // - terrain_heights: the bilinear k = 0 node surface.
 // - min_cell_heights: the shortest physical cell (z_phys_nd node spacing) under a region, over the
 //   region's heights only, across periodic seams.
+// - tip_cell_heights: the cell height that limits a blade tip, each cell weighed by the vertical tip speed there.
 
 #include <algorithm>
 #include <array>
@@ -565,6 +566,63 @@ TEST(ActuatorSampling, TheShortestCellCountsOnlyTheRegionsHeightsAndBothSidesOfA
     erf_actuator::min_cell_heights(flat.znd.get(), flat.geom, fold, dz);
     EXPECT_NEAR(dz[0], ms.z_node(0, 0, 1) - ms.z_node(0, 0, 0), tol);
     EXPECT_LT(dz[0], dz0 - Real(5.0));
+}
+
+// tip_cell_heights: each cell of the disk counts with the share of the tip speed that can point up or down
+// at it, sqrt(R^2 - d^2) / R for a cell whose nearest point is d from the hub height. On a stretched column
+// the short cells low in the disk count less than their height alone; on columns of equal cells (a
+// terrain-following mesh) a box holding the hub height gives min_cell_heights' answer; the slack moves the
+// hub height by up to that much; a zero radius keeps the nominal dz
+TEST(ActuatorSampling, TheTipCellHeightWeighsEachCellByTheVerticalTipSpeedThere)
+{
+    MeshSpec ms; ms.max_grid = {{4, 5, 3}};   // flat, stretch 1.15: spacings 29.1 m at the ground to 77.5 m at the top
+    Fields flat(ms, false);
+    const Real dz0 = ms.H / ms.nz;
+    const Real tol = (sizeof(Real) == 8) ? Real(1.0e-9) : Real(1.0e-4);
+    // the reference, over one column (every column of the flat mesh is the same)
+    auto brute = [&](Real zl, Real zh, Real zc, Real R, Real slack) {
+        Real best = 1.0e30;
+        for (int k = 0; k < ms.nz; ++k) {
+            const Real z0 = ms.z_node(0, 0, k), z1 = ms.z_node(0, 0, k + 1);
+            if (!(z1 > zl && z0 < zh)) { continue; }
+            const Real gap = (zc < z0) ? z0 - zc : ((zc > z1) ? zc - z1 : Real(0.0));
+            const Real d = std::max(gap - slack, Real(0.0));
+            if (d >= R) { continue; }
+            best = std::min(best, (z1 - z0) / (std::sqrt(R * R - d * d) / R));
+        }
+        return best;
+    };
+    const Real zc = 200.0, R = 120.0;
+    const std::vector<Real> rows{100.0, 100.0, zc - R, 500.0, 500.0, zc + R, zc, R, 0.0};
+    std::vector<Real> dz, plain;
+    erf_actuator::tip_cell_heights(flat.znd.get(), flat.geom, rows, dz);
+    ASSERT_EQ(dz.size(), 1u);
+    EXPECT_NEAR(dz[0], brute(zc - R, zc + R, zc, R, Real(0.0)), tol);
+    // hand values: the cell 145.5 .. 196.5 m (51.0 m, 3.5 m below the hub) gives 50.99 m; the one
+    // 101.2 .. 145.5 m (44.3 m, 54.5 m below) gives 44.32 / 0.891 = 49.74 m, the limit
+    EXPECT_NEAR(dz[0], Real(49.743), Real(0.005));
+    const std::vector<Real> box(rows.begin(), rows.begin() + 6);
+    erf_actuator::min_cell_heights(flat.znd.get(), flat.geom, box, plain);
+    EXPECT_GT(dz[0], plain[0] + Real(10.0));   // the 38.5 m cell 99 m below the hub counts as 67.9 m
+    // a slack of 60 m brings every cell 60 m nearer the hub height: the 38.5 m cell 98.8 m below now
+    // counts as 38.54 / 0.946 = 40.73 m and is the limit
+    const std::vector<Real> slack{100.0, 100.0, zc - R, 500.0, 500.0, zc + R, zc, R, 60.0};
+    erf_actuator::tip_cell_heights(flat.znd.get(), flat.geom, slack, dz);
+    EXPECT_NEAR(dz[0], brute(zc - R, zc + R, zc, R, Real(60.0)), tol);
+    EXPECT_NEAR(dz[0], Real(40.727), Real(0.005));
+    // a zero radius (no blades): the nominal dz
+    const std::vector<Real> bare{100.0, 100.0, zc - R, 500.0, 500.0, zc + R, zc, 0.0, 0.0};
+    erf_actuator::tip_cell_heights(flat.znd.get(), flat.geom, bare, dz);
+    EXPECT_DOUBLE_EQ(dz[0], dz0);
+    // columns of equal cells over the hill: the cell at hub height counts in full in every column, so
+    // the answer is min_cell_heights' (the Askervein case), bit for bit
+    MeshSpec mh; mh.stretch = 1.0; mh.hill = 100.0; mh.max_grid = {{4, 5, 3}};
+    Fields hill(mh, false);
+    const std::vector<Real> hrows{-120.0, 130.0, 80.0, 120.0, 370.0, 320.0, 200.0, 120.0, 0.0};
+    erf_actuator::tip_cell_heights(hill.znd.get(), hill.geom, hrows, dz);
+    erf_actuator::min_cell_heights(hill.znd.get(), hill.geom, std::vector<Real>(hrows.begin(), hrows.begin() + 6), plain);
+    EXPECT_EQ(dz[0], plain[0]);
+    EXPECT_NEAR(dz[0], Real(37.8058968), Real(1.0e-4));
 }
 
 // A point a few ulps below a non-zero prob_lo wraps to lo + (len - tiny), which rounds onto prob_hi, owned by
