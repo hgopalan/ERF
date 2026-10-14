@@ -24,8 +24,10 @@
 #   Docs/sphinx_doc/CouplingToMoorDyn.rst.
 #
 #   Build with -DERF_ENABLE_MOORDYN=ON. A build without MoorDyn stops when
-#   erf.conductors.lines is given. A run with lines refuses to start with
-#   amrex.fpe_trap_invalid, amrex.fpe_trap_zero or amrex.fpe_trap_overflow on.
+#   erf.conductors.lines is given. amrex.fpe_trap_invalid, amrex.fpe_trap_zero
+#   and amrex.fpe_trap_overflow may be on: they are masked while MoorDyn starts
+#   and steps the lines (its initial-condition solver overflows a value it then
+#   discards) and apply to the rest of the run.
 #   Every Real input must be finite: a NaN or an infinity stops the run.
 #
 #   "must be set" marks a key without a default; the value shown is an
