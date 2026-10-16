@@ -301,6 +301,7 @@ TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
         a.init(0.05, 1.0);
         a.set_uniform_velocity(vel);
         a.solution0();
+        a.write_diagnostics(0.0);
         for (int n = 0; n < 3; ++n) { a.step(); }
         a.create_checkpoint(prefix);
         EXPECT_TRUE(std::filesystem::exists(dir / "chk_T1.chkp"));
@@ -323,6 +324,7 @@ TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
     EXPECT_EQ(b.turbines()[0].num_substeps, 5);
     b.set_uniform_velocity(vel);
     for (int n = 0; n < 2; ++n) { b.step(); }
+    b.write_diagnostics(0.25);
     const erf_openfast::TurbineState& t = b.turbines()[0];
     EXPECT_EQ(t.time_index, index_ref);
     ASSERT_EQ(t.force_pos.size(), pos_ref.size());
@@ -332,11 +334,17 @@ TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
         EXPECT_EQ(t.force[i], force_ref[i]) << "force entry " << i;
     }
     for (int k = 0; k < 3; ++k) { EXPECT_EQ(t.hub_pos[k], hub_ref[k]); }
-    // the logs were appended to, not truncated: the header is still the first line
+    // the logs were appended to, not truncated: the header is still the first line, then the first
+    // run's row and the restarted run's, with no second header
     std::ifstream csv((dir / "T1_erf.csv"));
     std::string line;
     ASSERT_TRUE(std::getline(csv, line));
     EXPECT_EQ(line.rfind("time,", 0), 0u) << line;
+    ASSERT_TRUE(std::getline(csv, line));
+    EXPECT_EQ(line.rfind("0,", 0), 0u) << line;
+    ASSERT_TRUE(std::getline(csv, line));
+    EXPECT_EQ(line.rfind("0.25,", 0), 0u) << line;
+    EXPECT_FALSE(std::getline(csv, line)) << line;
 }
 
 TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)

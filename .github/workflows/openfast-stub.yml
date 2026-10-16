@@ -88,7 +88,7 @@ jobs:
 
     - name: Actuator and OpenFAST Unit Tests
       run: |
-        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:BodyExchange.*:WakeLines.*:RunningStats.*:PrescribedCtDisk.*:OpenFAST*:FLLC.*:MovingBodiesInputs.*'
+        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:BodyExchange.*:WakeLines.*:RunningStats.*:LogStreams.*:PrescribedCtDisk.*:OpenFAST*:FLLC.*:MovingBodiesInputs.*'
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Moving-Bodies Regression Tests

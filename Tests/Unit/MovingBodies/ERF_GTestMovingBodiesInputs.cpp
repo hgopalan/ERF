@@ -334,3 +334,20 @@ TEST(MovingBodiesInputs, TheEnvelopeCheckIntervalDefaultsToEveryStepAndMustBePos
     EXPECT_NE(erf_gtest::abort_message([] { MovingBodiesInputs::read(); }).find("envelope_check_interval"), std::string::npos);
     pp.add("envelope_check_interval", 1);
 }
+
+TEST(MovingBodiesInputs, TheDiagnosticsFormatDefaultsToPerTurbineAndMustBeKnown)
+{
+    set_turbine("Tfmt", "adm", "");
+    EXPECT_EQ(MovingBodiesInputs::read().diagnostics_format, "per_turbine");
+    for (const char* f : {"per_turbine", "per_rank", "farm"}) {
+        EXPECT_TRUE(MovingBodiesInputs::valid_diagnostics_format(f)) << f;
+    }
+    EXPECT_FALSE(MovingBodiesInputs::valid_diagnostics_format("per_body"));
+    EXPECT_FALSE(MovingBodiesInputs::valid_diagnostics_format(""));
+    amrex::ParmParse pp("erf.moving_bodies");
+    pp.add("diagnostics_format", std::string("farm"));
+    EXPECT_EQ(MovingBodiesInputs::read().diagnostics_format, "farm");
+    pp.add("diagnostics_format", std::string("per_body"));
+    EXPECT_NE(erf_gtest::abort_message([] { MovingBodiesInputs::read(); }).find("diagnostics_format"), std::string::npos);
+    pp.add("diagnostics_format", std::string("per_turbine"));
+}

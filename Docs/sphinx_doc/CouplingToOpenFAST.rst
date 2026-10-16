@@ -190,6 +190,13 @@ whose forcing they describe. The full list, with the prescribed-Ct disk's
 file, is under the input table in :doc:`Inputs <Inputs>`. OpenFAST writes its
 own ``.out`` and summary files next to the ``.fst``.
 
+``erf.moving_bodies.diagnostics_format`` gathers the per-turbine time series
+and statistics into one file per rank (``per_rank``) or one per log for the
+whole farm (``farm``, written by the I/O rank), with the body's name as a
+column; the default ``per_turbine`` writes the files above. In every format
+each file is opened once and kept open, and its rows are flushed at every
+checkpoint and at the end of the run.
+
 Running on many ranks
 ---------------------
 
@@ -213,6 +220,27 @@ The wake lines behind a rotor belong to the rotor's owner, which samples them,
 keeps their running average and writes their files; sampling them adds one
 integer reduction at each step that writes them.
 
+At start-up the turbines' OpenFAST input files are read once per distinct
+``.fst`` (a farm usually shares a few models), the distinct files spread over
+the ranks, for each rotor's radius and time step. At each diagnostics step the
+farm's totals (``total_load.csv``) and, in the ``farm`` format, every body's
+rows reach the I/O rank in one reduction.
+
+For large farms (hundreds of turbines and more):
+
+- Write the diagnostics less often than every step: ``diagnostics_int`` of 10
+  to 100 steps (a few seconds of simulated time) resolves the rotor dynamics
+  the logs are used for, and OpenFAST's own ``.out`` files keep the full rate.
+  Set ``avg_start`` so the statistics, rewritten at each write, start after the
+  spin-up.
+- Sample wake lines rarely: their exchange costs a collective every
+  ``wake.int`` steps. Use a multiple of ``diagnostics_int``, 50 to 200 steps
+  for averaged wake profiles, and only behind the turbines whose wakes are
+  studied.
+- Use ``diagnostics_format = farm`` (or ``per_rank`` when the farm file's
+  gather to one rank is too large): a few files in place of several per
+  turbine.
+
 Restarting
 ----------
 
@@ -222,7 +250,9 @@ the same ``erf.fixed_dt`` and a stop time no later than the one the turbines
 were started with (OpenFAST keeps that stop time in its own checkpoint); the
 run aborts otherwise, naming the input. The diagnostics files drop any rows
 written after the checkpoint (by a run that went on past it) and continue from
-there. To run on past the first run's stop time, start the turbines again:
+there (in the ``per_rank`` format, the files of every rank of either run; a
+restart in another ``diagnostics_format`` starts that format's files and leaves
+the old ones as they are). To run on past the first run's stop time, start the turbines again:
 remove the ``moving_bodies`` directory from a copy of the checkpoint and restart
 from that copy, which starts OpenFAST afresh at the checkpoint's time (and also
 starts the wake averages, the statistics and the FLLC afresh). A run with
