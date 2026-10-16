@@ -114,7 +114,8 @@ jobs:
         ctest -L openfast-real --output-on-failure --no-tests=error
       working-directory: ${{runner.workspace}}/ERF/build
 
-    - name: Upload logs and backtraces from failed tests
+    # the plotfiles too: the golds are taken from this job's runs (Linux, GCC), the reference platform
+    - name: Upload logs, backtraces and plotfiles from failed tests
       if: failure()
       uses: actions/upload-artifact@v7
       with:
@@ -123,4 +124,5 @@ jobs:
           ${{runner.workspace}}/ERF/build/Tests/**/Backtrace.*
           ${{runner.workspace}}/ERF/build/Tests/**/simulation.log
           ${{runner.workspace}}/ERF/build/Tests/**/T1_*.csv
+          ${{runner.workspace}}/ERF/build/Tests/**/plt00010/**
         if-no-files-found: ignore
