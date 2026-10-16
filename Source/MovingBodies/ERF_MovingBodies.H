@@ -228,6 +228,8 @@ private:
     void choose_owners (const amrex::Geometry& geom, const amrex::BoxArray& grids, const amrex::DistributionMapping& dmap);
     /** How far (m) body b of m_exchange reaches beyond its points when its envelope is built; on its owner. */
     amrex::Real exchange_margin (int b, const amrex::Geometry& geom) const;
+    /** Hand the exchange the hub (and blade sweep) of every turbine this rank owns, for its throttled envelope checks. */
+    void set_hubs ();
     /** Print, for each body of the exchange whose exchanges now reach other ranks than last time, the ranks it exchanges with. */
     static void report_participants (const erf_actuator::BodyExchange& ex, const std::vector<std::string>& names,
                                      std::vector<std::vector<int>>& reported);

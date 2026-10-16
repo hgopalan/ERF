@@ -415,6 +415,7 @@ MovingBodies::choose_owners (const Geometry& geom, const BoxArray& grids, const 
         owners.insert(owners.end(), disk_owners.begin(), disk_owners.end());
     }
     m_exchange = erf_actuator::BodyExchange(owners);
+    m_exchange.set_check_interval(m_in.envelope_check_interval);
     m_reported_participants.clear();
 }
 
@@ -446,6 +447,20 @@ MovingBodies::exchange_margin (int b, const Geometry& geom) const
 #endif
     // a disk stands still: two cells beyond its points
     return Real(2.0) * static_cast<Real>(std::max(geom.CellSize(0), std::max(geom.CellSize(1), geom.CellSize(2))));
+}
+
+void
+MovingBodies::set_hubs ()
+{
+#ifdef ERF_USE_OPENFAST
+    // a turbine's hub, about which its blades turn: what the throttled envelope checks follow
+    for (int i = 0; i < num_turbines(); ++i) {
+        if (!m_driver->is_owner(i)) { continue; }
+        const erf_openfast::TurbineState& t = m_driver->turbines()[i];
+        m_exchange.set_hub(i, t.hub_pos, erf_actuator::tip_radius(t));
+    }
+#endif
+    // a disk stands still: the centre of its points
 }
 
 std::vector<Real>
@@ -1274,6 +1289,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         widths[b].assign(pos[b].size() / 3, m_disk_epsilon[k] * dx0);
         margin[b] = exchange_margin(b, geom);
     }
+    set_hubs();
     // each point onto the faces of the ranks its kernel reaches, normalised over all of them
     m_exchange.spread_forces(pos, force, widths, margin, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
     report_participants(m_exchange, m_exchange_names, m_reported_participants);
@@ -1366,6 +1382,7 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
         }
         amrex::ignore_unused(U, V, W, z_phys_nd);
     } else if (nbody > 0) {
+        set_hubs();
         m_exchange.sample_velocity(U, V, W, z_phys_nd, geom, pts, margin, vel);
         report_participants(m_exchange, m_exchange_names, m_reported_participants);
     }

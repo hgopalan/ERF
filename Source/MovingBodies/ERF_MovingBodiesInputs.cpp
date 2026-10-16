@@ -115,6 +115,10 @@ MovingBodiesInputs::read ()
     if (!(in.density_tolerance >= 0.0) || !std::isfinite(in.density_tolerance)) {
         Abort("erf.moving_bodies.density_tolerance must be >= 0 (relative)");
     }
+    pp.query("envelope_check_interval", in.envelope_check_interval);
+    if (in.envelope_check_interval < 1) {
+        Abort("erf.moving_bodies.envelope_check_interval must be >= 1 (steps between two checks of the exchange envelopes)");
+    }
     pp.query("alm_max_tip_cells", in.alm_max_tip_cells);
     if (!(in.alm_max_tip_cells > 0.0) || !std::isfinite(in.alm_max_tip_cells)) {
         Abort("erf.moving_bodies.alm_max_tip_cells must be > 0 (cells swept by a blade tip per step)");

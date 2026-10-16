@@ -7,10 +7,12 @@
 //   step (then the most cells, then the lowest rank); otherwise the nearest least loaded such rank, so
 //   that the bodies stay one per rank while there are as many ranks; a footprint no box overlaps goes
 //   to the nearest box.
-// - exchange_buffers: each rank gets what was sent to it, sizes unknown beforehand.
+// - exchange_buffers: each rank gets what was sent to it, sizes unknown beforehand (in arrival order) or
+//   given (all receives posted at once).
 // - sample_velocity and spread_forces: the owners' points sampled and spread through point-to-point
 //   messages give exactly what the global sampler and spreader give over all the points (bit for bit
-//   on one and two ranks), on a uniform and on a terrain-following mesh with unequal boxes, a body's
+//   on one and two ranks over terrain, to 1e-12 on a uniform mesh, whose owners normalise their kernels
+//   alone), on a uniform and on a terrain-following mesh with unequal boxes, a body's
 //   owner need not take part in its exchanges, and a rank whose boxes no kernel reaches receives no
 //   point at all; a body whose points leave its envelope gets a larger one, and the results do not change.
 // - a point outside the domain aborts on its owner, naming it, as the global sampler does.
@@ -303,6 +305,34 @@ TEST(BodyExchange, BuffersReachTheRanksTheyAreSentTo)
         ASSERT_EQ(in.count((me - 2 + np) % np), 1u);
         EXPECT_TRUE(in[(me - 2 + np) % np].empty());
     }
+    // the same with the sizes given: every receive posted at once with its exact size; then several
+    // senders at once, arriving in any order (each rank sends to every rank, itself too)
+    {
+        std::map<int, std::vector<Real>> o2, i2;
+        std::map<int, std::size_t> sizes;
+        o2[(me + 1) % np] = std::vector<Real>(static_cast<std::size_t>(me + 1), Real(me));
+        sizes[prev] = static_cast<std::size_t>(prev + 1);
+        if (np >= 4) { o2[(me + 2) % np]; sizes[(me - 2 + np) % np] = 0; }
+        erf_actuator::exchange_buffers(o2, from, i2, &sizes);
+        ASSERT_EQ(i2[prev].size(), static_cast<std::size_t>(prev + 1));
+        for (Real x : i2[prev]) { EXPECT_EQ(x, Real(prev)); }
+        if (np >= 4) { EXPECT_TRUE(i2[(me - 2 + np) % np].empty()); }
+    }
+    for (int known = 0; known < 2; ++known) {
+        std::map<int, std::vector<Real>> o3, i3;
+        std::map<int, std::size_t> sizes;
+        std::vector<int> all;
+        for (int r = 0; r < np; ++r) {
+            o3[r] = std::vector<Real>(static_cast<std::size_t>(r + 2 * me + 1), Real(100 * me + r));
+            all.push_back(r);
+            sizes[r] = static_cast<std::size_t>(me + 2 * r + 1);
+        }
+        erf_actuator::exchange_buffers(o3, all, i3, known ? &sizes : nullptr);
+        for (int r = 0; r < np; ++r) {
+            ASSERT_EQ(i3[r].size(), static_cast<std::size_t>(me + 2 * r + 1)) << "from " << r;
+            for (Real x : i3[r]) { EXPECT_EQ(x, Real(100 * r + me)); }
+        }
+    }
 }
 
 namespace {
@@ -355,6 +385,11 @@ void expect_spreading_matches (const SlabMesh& m)
     m.define_sources(ax, ay, az);
     m.define_sources(gx, gy, gz);
     ex.spread_forces(pos, force, eps, std::vector<Real>(3, Real(0.0)), m.znd.get(), m.detj.get(), m.geom, ax, ay, az);
+    // on a uniform mesh covered by the boxes every kernel is normalised on its owner: no partial sums travel
+    if (!m.znd) { EXPECT_EQ(ex.remote_normalisations(), 0L); }
+    long remote = ex.remote_normalisations();
+    amrex::ParallelDescriptor::ReduceLongSum(remote);
+    if (m.znd) { EXPECT_GT(remote, 0L); }
     erf_actuator::spread_forces(all_pos, all_force, all_eps, m.znd.get(), m.detj.get(), m.geom, gx, gy, gz);
     const std::array<std::pair<amrex::MultiFab*, amrex::MultiFab*>,3> pairs{{{&ax, &gx}, {&ay, &gy}, {&az, &gz}}};
     for (int d = 0; d < 3; ++d) {
@@ -362,11 +397,12 @@ void expect_spreading_matches (const SlabMesh& m)
         ASSERT_GT(scale, Real(0.0));
         amrex::MultiFab::Subtract(*pairs[d].first, *pairs[d].second, 0, 0, 1, 0);
         const Real diff = pairs[d].first->norm0();
-        if (np <= 2) {
-            // a normalisation is the same sum of the same parts on two ranks or one
+        if (np <= 2 && m.znd) {
+            // over terrain a normalisation is the same sum of the same parts on two ranks or one
             EXPECT_EQ(diff, Real(0.0)) << "component " << d;
         } else {
-            // an MPI reduction may add more than two parts in another order than rank order
+            // on a uniform mesh the owner adds up the faces alone (uniform_mesh_norm), in another order than
+            // the boxes do; and an MPI reduction may add more than two parts in another order than rank order
             EXPECT_LE(diff, near_tol * scale) << "component " << d;
         }
     }
@@ -483,4 +519,89 @@ TEST(BodyExchange, APointOutsideTheDomainAbortsNamingIt)
     } else {
         EXPECT_TRUE(msg.empty()) << msg;
     }
+}
+
+namespace {
+
+// A rotor of radius R about a hub moving along x at speed (m per step), turning and yawing: its blade
+// points at step n (three blades of nb points each, plus the hub)
+std::vector<Real> rotor_points (const std::array<Real,3>& hub, Real R, int nb, Real azimuth, Real yaw)
+{
+    std::vector<Real> p{hub[0], hub[1], hub[2]};
+    for (int blade = 0; blade < 3; ++blade) {
+        const Real a = azimuth + Real(2.0943951023931957) * blade;
+        for (int k = 1; k <= nb; ++k) {
+            const Real r = R * Real(k) / Real(nb);
+            // in the rotor plane (normal to the yawed axis cos(yaw), sin(yaw), 0)
+            const Real s = r * std::cos(a), up = r * std::sin(a);
+            p.insert(p.end(), {hub[0] - s * std::sin(yaw), hub[1] + s * std::cos(yaw), hub[2] + up});
+        }
+    }
+    return p;
+}
+
+} // namespace
+
+TEST(BodyExchange, ThrottledEnvelopeChecksFollowAMovingYawingRotor)
+{
+    SlabMesh m;
+    const int np = amrex::ParallelDescriptor::NProcs();
+    const Real R = Real(3.0) * m.dx(), margin = R + Real(5.0) * m.dx();
+    const int k = 4, steps = 48;
+    erf_actuator::BodyExchange ex({np - 1});
+    ex.set_check_interval(k);
+    EXPECT_EQ(ex.check_interval(), k);
+    // the kernels reach 3 dx, so the hub may drift 5 dx between two builds: a rebuild once it is 4 dx
+    // away (half the margin), and 0.2 dx per step (0.8 dx per interval) on top. That carries it over ten
+    // cells, across the slab face at the middle (between ranks), and its envelope is rebuilt as it goes
+    std::array<Real,3> hub{{Real(0.4) * m.Lx, Real(0.5) * m.Ly, Real(0.5) * m.H}};
+    const Real speed = Real(0.2) * m.dx();
+    const std::string msg = erf_gtest::abort_message([&] {
+        for (int n = 0; n < steps; ++n) {
+            const std::vector<Real> p = rotor_points(hub, R, 4, Real(0.7) * n, Real(0.05) * n);
+            std::vector<std::vector<Real>> pts(1), vel, pos(1), force(1), eps(1);
+            if (ex.owns(0)) {
+                ex.set_hub(0, hub, R);
+                pts[0] = p;
+                pos[0] = p;
+                for (std::size_t q = 0; q < p.size() / 3; ++q) { force[0].insert(force[0].end(), {Real(1.0e3), Real(-50.0), Real(10.0)}); }
+                eps[0].assign(p.size() / 3, m.dx());
+            }
+            ex.sample_velocity(m.u, m.v, m.w, nullptr, m.geom, pts, {margin}, vel);
+            std::vector<Real> ref;
+            erf_actuator::sample_velocity(m.u, m.v, m.w, nullptr, m.geom, p, ref);
+            if (ex.owns(0)) { EXPECT_EQ(vel[0], ref) << "step " << n; }
+            amrex::MultiFab sx, sy, sz;
+            m.define_sources(sx, sy, sz);
+            ex.spread_forces(pos, force, eps, {margin}, nullptr, nullptr, m.geom, sx, sy, sz);
+            const Real total = erf_actuator::integrate_source(0, sx, nullptr, m.geom);
+            const Real want = Real(1.0e3) * Real(p.size() / 3);
+            EXPECT_NEAR(total, want, near_tol * want) << "step " << n;
+            hub[0] += speed;
+        }
+    });
+    // the inside-envelope check never tripped, and the reduction ran on one exchange in k of each kind
+    EXPECT_TRUE(msg.empty()) << msg;
+    EXPECT_EQ(ex.num_envelope_checks(), 2 * steps / k);
+    // the envelope was rebuilt as the hub drifted, and no longer reaches back to where it began
+    EXPECT_GE(ex.num_envelope_updates(), 2);
+    EXPECT_GT(ex.envelope(0)[0], Real(0.4) * m.Lx - R - margin);
+}
+
+TEST(BodyExchange, PointsLeavingTheirEnvelopeBetweenChecksAbort)
+{
+    // the owner stops the run at once, so only on one rank, where no other rank is left waiting for it
+    if (amrex::ParallelDescriptor::NProcs() != 1) { GTEST_SKIP() << "one rank only"; }
+    SlabMesh m;
+    erf_actuator::BodyExchange ex({0});
+    ex.set_check_interval(10);
+    const std::vector<Real> a = cluster(Real(8.0) * m.dx(), Real(0.5) * m.Ly, Real(0.5) * m.H, m.dx(), Real(40.0), 10, 11);
+    const std::vector<Real> b = cluster(Real(30.0) * m.dx(), Real(0.5) * m.Ly, Real(0.5) * m.H, m.dx(), Real(40.0), 10, 12);
+    std::vector<std::vector<Real>> vel;
+    ex.sample_velocity(m.u, m.v, m.w, nullptr, m.geom, {a}, {Real(10.0)}, vel);
+    const std::string msg = erf_gtest::abort_message([&] {
+        ex.sample_velocity(m.u, m.v, m.w, nullptr, m.geom, {b}, {Real(10.0)}, vel);
+    });
+    EXPECT_NE(msg.find("left its envelope between two envelope checks"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("envelope_check_interval"), std::string::npos) << msg;
 }

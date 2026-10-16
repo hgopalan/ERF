@@ -427,6 +427,51 @@ spread_partial_norms (const std::vector<Real>& pos, const std::vector<Real>& eps
     std::copy(buf.norms.pinned.begin(), buf.norms.pinned.begin() + norm.size(), norm.begin());
 }
 
+bool
+uniform_mesh_norm (Real px, Real py, Real pz, Real eps, const Geometry& geom, const BoxArray& ba, Real norm[3])
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ba.ixType().cellCentered(), "uniform_mesh_norm: the level's boxes must be cell-centred");
+    KernelFaces kf(geom, nullptr, nullptr, nullptr);
+    const Real inv_eps2 = Real(1.0) / (eps * eps);
+    const Real reach2 = Real(9.0) * eps * eps;
+    const Array4<Real const> no_znd{};
+    std::vector<std::array<Real,3>> images;
+    kf.point_images(px, py, pz, eps, images);
+    // the faces of the domain a box would own (each physical face once): the cells' low faces
+    const Box dom_cells = geom.Domain();
+    // first check that the boxes hold every cell whose low face is within reach, in every direction
+    for (int dir = 0; dir < 3; ++dir) {
+        const Box dom_faces = owned_faces(dir, dom_cells);
+        for (const auto& q : images) {
+            const Box rb = kf.reach_box(dir, q[0], q[1], q[2], eps) & dom_faces;
+            if (rb.isEmpty()) { continue; }
+            // a face of rb and the cell it is the low face of have the same index
+            if (!ba.contains(Box(rb.smallEnd(), rb.bigEnd()))) { return false; }
+        }
+    }
+    Real s[3] = {Real(0.0), Real(0.0), Real(0.0)};
+    for (int dir = 0; dir < 3; ++dir) {
+        const Box dom_faces = owned_faces(dir, dom_cells);
+        for (const auto& q : images) {
+            const Box rb = kf.reach_box(dir, q[0], q[1], q[2], eps) & dom_faces;
+            if (rb.isEmpty()) { continue; }
+            const auto lo = amrex::lbound(rb);
+            const auto hi = amrex::ubound(rb);
+            for (int k = lo.z; k <= hi.z; ++k) {
+                for (int j = lo.y; j <= hi.y; ++j) {
+                    for (int i = lo.x; i <= hi.x; ++i) {
+                        if (boundary_face(dir, i, j, k, kf.per, kf.dlo, kf.dhi)) { continue; }
+                        const Real w = kernel_weight(dir, i, j, k, q[0], q[1], q[2], kf.plo, kf.dx, no_znd, false, inv_eps2, reach2);
+                        if (w > Real(0.0)) { s[dir] += w * kf.dxdydz; }
+                    }
+                }
+            }
+        }
+    }
+    for (int d = 0; d < 3; ++d) { norm[d] = s[d]; }
+    return true;
+}
+
 void
 add_scaled_kernels (const std::vector<Real>& pos, const std::vector<Real>& f_over_s, const std::vector<Real>& epsilon,
                     const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom,

@@ -8,6 +8,7 @@
  */
 
 #include <array>
+#include <cstddef>
 #include <map>
 #include <vector>
 
@@ -75,15 +76,28 @@ std::vector<int> choose_owners (const std::vector<amrex::Box>& footprints, const
  * A body's envelope is a box of space (m) that holds every point it samples and the reach of
  * every kernel it spreads, grown by a margin its owner chooses (a rotor radius, so that a blade
  * turning or a rotor yawing stays inside). The ranks whose boxes the envelope touches (its
- * participants) are the only ranks the owner exchanges with. Every exchange first checks, with
+ * participants) are the only ranks the owner exchanges with. An exchange may first check, with
  * one integer reduction over all ranks, whether some body's points have left its envelope; the
  * envelopes of those bodies then grow to hold them, and every rank learns the new ones. That
- * check is the only operation of an exchange in which every rank takes part.
+ * check is the only operation of an exchange in which every rank takes part. It runs on every
+ * exchange by default; with set_check_interval(k) on every k-th sampling and every k-th spreading
+ * exchange only (and whenever the grids change). An envelope must then hold the body's points
+ * until the next check, wherever its blades turn: it is built to hold, besides the points grown by
+ * the margin, the sphere about the body's hub (set_hub) of its sweep (a rotor's tip radius) plus
+ * the margin. At a check, an owner whose body's hub (set_hub; else the centre of its points, with
+ * no sweep) has moved by more than half the margin since its envelope was last built has the
+ * envelope built afresh, so that the margin is restored ahead of a moving body. Between checks
+ * every owner checks, on its own, that its points are inside the envelope, and aborts if not: the
+ * hub must not drift by more than the margin less the kernels' reach (3 epsilon) between two
+ * builds, half the margin of it within one interval.
  *
  * The results are those of sample_velocity() and spread_forces() over all the points, whatever
- * the owners: a sampled velocity is the one value of the one box holding the point, and a kernel's
- * normalisation is the sum of the participants' partial sums taken in rank order (an MPI reduction
- * may take another order, so with more than two ranks the two can differ in the last bits).
+ * the owners: a sampled velocity is the one value of the one box holding the point. A kernel's
+ * normalisation is, on a uniform mesh whose boxes cover its reach, the owner's own sum over the
+ * faces it reaches (uniform_mesh_norm(), sent with the point, so that spreading takes one message
+ * each way instead of three); otherwise the sum of the participants' partial sums taken in rank
+ * order. Either way the faces are those spread_forces() sums, added in another order, so the two
+ * can differ in the last bits.
  */
 class BodyExchange
 {
@@ -104,6 +118,22 @@ public:
     int num_envelope_updates () const { return m_num_updates; }
     /** The points this rank has received from other ranks, over every exchange so far: for the tests. */
     long points_received () const { return m_points_received; }
+    /** The kernels this rank's bodies sent whose normalisation the ranks they reach had to sum (not normalised on the owner): for the tests. */
+    long remote_normalisations () const { return m_remote_norms; }
+    /** How many exchanges ran the envelope check (the one reduction): for the diagnostics and the tests. */
+    int num_envelope_checks () const { return m_num_checks; }
+
+    /**
+     * Check the envelopes on every k-th sampling and every k-th spreading exchange only (k >= 1; 1, the
+     * default, checks them on every exchange). The same k on every rank.
+     */
+    void set_check_interval (int k);
+    int check_interval () const { return m_check_interval; }
+    /**
+     * On body b's owner: where its hub is now (m), whose drift rebuilds the envelope (see the class), and
+     * how far from the hub its points turn (m; a rotor's tip radius), which a throttled envelope holds whole.
+     */
+    void set_hub (int b, const std::array<amrex::Real,3>& x, amrex::Real sweep = 0);
     /** The device memory its sampling and spreading kernels reuse from step to step (and their launch count): for the tests. */
     const ActuatorDeviceBuffers& device_buffers () const { return m_buffers; }
 
@@ -144,16 +174,27 @@ private:
     bool m_fitted{false};
     int m_num_updates{0};
     long m_points_received{0};
+    long m_remote_norms{0};
+    int m_check_interval{1};
+    int m_num_checks{0};
+    std::array<long,2> m_calls{{0, 0}};             //!< sampling, spreading exchanges so far
+    std::vector<std::array<amrex::Real,3>> m_hub;   //!< per owned body: its hub, when set_hub was called
+    std::vector<char> m_has_hub;
+    std::vector<amrex::Real> m_sweep;               //!< per owned body: how far its points turn about the hub
+    std::vector<std::array<amrex::Real,3>> m_hub_at_build;   //!< per owned body: its hub when its envelope was last built
+    std::vector<char> m_has_hub_at_build;
     ActuatorDeviceBuffers m_buffers;                //!< kept from step to step: grows to the largest exchange, never shrinks
 
     /**
      * Collective. Grow the envelope of every body whose needed box (lo, hi in m, on its owner; lo > hi
      * when it has no points) is not inside it, by the needed box grown by the margin, and find the
-     * participants again when an envelope or the grids changed.
+     * participants again when an envelope or the grids changed. kind: 0 sampling, 1 spreading (each has
+     * its own count of exchanges for the check interval). Between checks, only the local check that
+     * the needed boxes are inside their envelopes (an abort if not).
      */
     void ensure_envelopes (const std::vector<std::array<amrex::Real,6>>& needed, const std::vector<amrex::Real>& margin,
                            const amrex::BoxArray& ba, const amrex::DistributionMapping& dm, const amrex::Geometry& geom,
-                           bool fitted);
+                           bool fitted, int kind);
     void find_participants (const amrex::Geometry& geom);
     /** The owners that send to this rank: of every body this rank takes part in (sorted, once each; this rank itself when it owns one). */
     std::vector<int> senders () const;
@@ -163,13 +204,18 @@ private:
 
 /**
  * Collective. Send send[r] to every rank r it names and receive one buffer from every rank in
- * from (whose sizes need not be known); a buffer for this rank itself is moved across without MPI.
- * Every rank must call it, with sends and receives that pair up: a rank that names r in send must
- * be named in r's from. Uses one MPI tag of the ParallelDescriptor sequence, so every rank calls
- * it the same number of times.
+ * from; a buffer for this rank itself is moved across without MPI. Every rank must call it, with
+ * sends and receives that pair up: a rank that names r in send must be named in r's from. Uses one
+ * MPI tag of the ParallelDescriptor sequence, so every rank calls it the same number of times.
+ *
+ * With sizes (the length of the buffer from each rank in from, which the caller knows when it
+ * is a reply to its own message) every receive is posted at once with its exact size, before the
+ * sends, and one wait completes them all; a message of another size aborts. Without, the sizes
+ * are learned from the messages, which are taken in the order they arrive (matched probes).
  */
 void exchange_buffers (std::map<int, std::vector<amrex::Real>>& send, const std::vector<int>& from,
-                       std::map<int, std::vector<amrex::Real>>& recv);
+                       std::map<int, std::vector<amrex::Real>>& recv,
+                       const std::map<int, std::size_t>* sizes = nullptr);
 
 } // namespace erf_actuator
 

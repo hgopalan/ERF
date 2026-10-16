@@ -418,6 +418,49 @@ TEST(ActuatorSpreading, AWidthThatIsMissingOrNotPositiveIsRefused)
     }
 }
 
+TEST(ActuatorSpreading, UniformMeshNormIsTheSummedNorm)
+{
+    // the normalisation one rank finds alone on a uniform mesh is the one the ranks' partial sums add up
+    // to, to 1e-12 relative: inside, across the periodic seams in x, in y and at their corner, cut by the
+    // ground and by the top, on box faces, and for a kernel wider than the domain in y (several images)
+    Mesh m;
+    m.max_grid = {{8, 8, 4}};   // several boxes, so the partial sums come from several of them (and ranks)
+    Sources s(m, false);
+    const Real dx = m.dx(), dz = m.H / m.nz;
+    std::vector<Real> pos, eps;
+    auto add = [&] (Real x, Real y, Real z, Real e) { pos.insert(pos.end(), {x, y, z}); eps.push_back(e); };
+    add(Real(0.37) * m.Lx, Real(0.41) * m.Ly, Real(0.5) * m.H, Real(2.0) * dx);           // inside
+    add(Real(0.1) * dx, Real(0.5) * m.Ly, Real(0.5) * m.H, Real(2.0) * dx);               // x seam
+    add(Real(0.5) * m.Lx, m.Ly - Real(0.2) * m.dy(), Real(0.5) * m.H, Real(1.5) * dx);    // y seam
+    add(m.Lx - Real(0.3) * dx, Real(0.05) * m.dy(), Real(0.45) * m.H, Real(2.5) * dx);    // corner
+    add(Real(0.6) * m.Lx, Real(0.3) * m.Ly, Real(0.3) * dz, Real(2.0) * dx);              // ground
+    add(Real(0.2) * m.Lx, Real(0.7) * m.Ly, m.H - Real(0.4) * dz, Real(1.0) * dx);        // top
+    add(Real(8.0) * dx, Real(4.0) * m.dy(), Real(4.0) * dz, Real(2.0) * dx);              // on box faces
+    add(Real(0.5) * m.Lx, Real(0.5) * m.Ly, Real(0.5) * m.H, Real(0.6) * m.Ly);           // wider than y
+    std::vector<Real> summed;
+    erf_actuator::spread_partial_norms(pos, eps, nullptr, nullptr, s.geom, s.sx, summed);
+    amrex::ParallelDescriptor::ReduceRealSum(summed.data(), static_cast<int>(summed.size()));
+    for (std::size_t p = 0; p < eps.size(); ++p) {
+        Real local[3] = {Real(-1.0), Real(-1.0), Real(-1.0)};
+        ASSERT_TRUE(erf_actuator::uniform_mesh_norm(pos[3*p], pos[3*p+1], pos[3*p+2], eps[p], s.geom, s.ba, local)) << "point " << p;
+        for (int d = 0; d < 3; ++d) {
+            ASSERT_GT(summed[3*p+d], Real(0.0));
+            const Real tol = (sizeof(Real) == 8) ? Real(1.0e-12) : Real(1.0e-5);
+            EXPECT_LE(std::abs(local[d] - summed[3*p+d]), tol * summed[3*p+d]) << "point " << p << " component " << d;
+        }
+    }
+    // a refined level that does not cover a kernel's reach: no local normalisation (the faces outside its
+    // boxes get no source), and the norm is left alone
+    amrex::BoxArray part(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(m.nx / 2 - 1, m.ny - 1, m.nz - 1)));
+    Real untouched[3] = {Real(7.0), Real(7.0), Real(7.0)};
+    EXPECT_FALSE(erf_actuator::uniform_mesh_norm(Real(0.5) * m.Lx, Real(0.5) * m.Ly, Real(0.5) * m.H, Real(2.0) * dx, s.geom, part,
+                                                 untouched));
+    EXPECT_EQ(untouched[0], Real(7.0));
+    // but a kernel well inside its boxes is
+    EXPECT_TRUE(erf_actuator::uniform_mesh_norm(Real(0.2) * m.Lx, Real(0.5) * m.Ly, Real(0.5) * m.H, Real(1.0) * dx, s.geom, part,
+                                                untouched));
+}
+
 namespace {
 
 // The kernel weight of face (i,j,k) of grid dir for one image of a point, as the spreader defines it
