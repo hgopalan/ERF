@@ -4,6 +4,7 @@
 /** Wake sampling lines behind one rotor and their running time average. */
 
 #include <array>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,8 @@
 #include <AMReX_REAL.H>
 
 namespace erf_actuator {
+
+class LogStreams;
 
 /**
  * Wake sampling lines behind one rotor: at each downstream distance x/D along the horizontal
@@ -80,6 +83,8 @@ public:
      * asks for one. Units: time s, x y z m, u v w m/s.
      */
     void write_instantaneous (double time, const std::vector<amrex::Real>& vel, bool truncate) const;
+    /** The same through logs, which keeps the file open from one write to the next (LogStreams). */
+    void write_instantaneous (LogStreams& logs, double time, const std::vector<amrex::Real>& vel, bool truncate) const;
     /** Rewrite <output_root>_wake_avg.csv with the running average (the file always holds the current mean). */
     void write_average () const;
 
@@ -98,7 +103,8 @@ public:
     bool read_state (const std::string& dir);
 
 private:
-    void write_rows (std::ofstream& out, const std::vector<amrex::Real>& vel, const std::string& prefix) const;
+    void write_rows (std::ostream& out, const std::vector<amrex::Real>& vel, const std::string& prefix) const;
+    void write_instantaneous_rows (std::ostream& out, double time, const std::vector<amrex::Real>& vel) const;
 
     std::string m_name, m_output_root;
     std::array<amrex::Real,3> m_hub, m_axis, m_lateral;

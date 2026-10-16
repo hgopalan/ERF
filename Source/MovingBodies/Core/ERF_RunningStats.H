@@ -97,10 +97,29 @@ public:
         if (amrex::ParallelDescriptor::MyProc() != m_writer) { return; }
         std::ofstream out;
         open_log(out, m_output_root + "_stats.csv", true);
-        out << "samples,t_first,t_last,quantity,mean,rms,min,max\n" << std::setprecision(10);
+        out << columns() << "\n";
+        write_rows(out, "");
+    }
+
+    /** The columns of the rows of write_rows() after its prefix. */
+    static const char* columns () { return "samples,t_first,t_last,quantity,mean,rms,min,max"; }
+    /** The statistics as write() writes them, one row per quantity, each row after prefix (a body's name and a comma, or nothing). */
+    void write_rows (std::ostream& out, const std::string& prefix) const
+    {
+        std::vector<amrex::Real> v(4 * m_names.size());
         for (std::size_t i = 0; i < m_names.size(); ++i) {
-            out << m_count << "," << m_t_first << "," << m_t_last << "," << m_names[i] << ","
-                << mean(i) << "," << rms(i) << "," << min(i) << "," << max(i) << "\n";
+            v[4*i] = mean(i); v[4*i+1] = rms(i); v[4*i+2] = min(i); v[4*i+3] = max(i);
+        }
+        write_rows(out, prefix, m_names, m_count, m_t_first, m_t_last, v.data());
+    }
+    /** The same rows from values packed elsewhere (another rank's statistics): mean, rms, min and max for each quantity. */
+    static void write_rows (std::ostream& out, const std::string& prefix, const std::vector<std::string>& names, int count,
+                            double t_first, double t_last, const amrex::Real* v)
+    {
+        out << std::setprecision(10);
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            out << prefix << count << "," << t_first << "," << t_last << "," << names[i] << ","
+                << v[4*i] << "," << v[4*i+1] << "," << v[4*i+2] << "," << v[4*i+3] << "\n";
         }
     }
 

@@ -94,7 +94,7 @@ WakeLines::average () const
 
 // one row per point: [prefix,]xD,line,s,x,y,z,u,v,w
 void
-WakeLines::write_rows (std::ofstream& out, const std::vector<Real>& vel, const std::string& prefix) const
+WakeLines::write_rows (std::ostream& out, const std::vector<Real>& vel, const std::string& prefix) const
 {
     int p = 0;
     for (const Real xD : m_xD) {
@@ -117,6 +117,20 @@ WakeLines::write_instantaneous (double time, const std::vector<Real>& vel, bool 
     if (open_log(out, m_output_root + "_wake.csv", truncate)) {
         out << "time,xD,line,s,x,y,z,u,v,w\n";
     }
+    write_instantaneous_rows(out, time, vel);
+}
+
+void
+WakeLines::write_instantaneous (LogStreams& logs, double time, const std::vector<Real>& vel, bool truncate) const
+{
+    if (ParallelDescriptor::MyProc() != m_writer) { return; }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(vel.size() == m_pos.size(), "WakeLines::write_instantaneous: one velocity per point");
+    write_instantaneous_rows(logs.get(m_output_root + "_wake.csv", truncate, "time,xD,line,s,x,y,z,u,v,w"), time, vel);
+}
+
+void
+WakeLines::write_instantaneous_rows (std::ostream& out, double time, const std::vector<Real>& vel) const
+{
     out << std::setprecision(10);
     std::ostringstream prefix;
     prefix << std::setprecision(10) << time << ",";

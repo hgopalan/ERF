@@ -82,6 +82,10 @@ MovingBodiesInputs::read ()
         Abort("erf.moving_bodies.diagnostics_int must be >= 1");
     }
     pp.query("diagnostics_dir", in.diagnostics_dir);
+    pp.query("diagnostics_format", in.diagnostics_format);
+    if (!valid_diagnostics_format(in.diagnostics_format)) {
+        Abort("erf.moving_bodies.diagnostics_format = " + in.diagnostics_format + ": use per_turbine, per_rank or farm");
+    }
 
     {
         ParmParse pw("erf.moving_bodies.wake");

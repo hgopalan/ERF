@@ -60,14 +60,15 @@ public:
     /** Raise the disk and its sampling points by dz (m): the terrain height under the base, at start-up. */
     void shift_z (amrex::Real dz);
 
-    /** The rank that writes <output_root>_disk.csv (the I/O rank by default). */
+    /** The rank that writes the disk's row of <output_root>_disk.csv (the I/O rank by default). */
     void set_writer (int rank) { m_writer = rank; }
     int writer () const { return m_writer; }
 
-    /** Open <output_root>_disk.csv: truncated for a fresh run, appended to after a restart. */
-    void open_diagnostics (bool truncate) const;
-    /** Append one row: time, u_inf, u_disk, thrust, power, plus the integrated source total. */
-    void write_diagnostics (double time, amrex::Real spread_total) const;
+    /** The columns of the _disk.csv row after its time. */
+    static const std::string& log_columns ();
+    static constexpr int log_size = 5;
+    /** The _disk.csv row after its time: u_inf, u_disk, thrust, power, plus the integrated source total. */
+    void log_row (amrex::Real spread_total, amrex::Real* row) const;
 
 private:
     std::string m_name;

@@ -14,6 +14,7 @@
 
 #include "ERF_BodyExchange.H"
 #include "ERF_BodyMotion.H"
+#include "ERF_DiagnosticsLog.H"
 #include "ERF_MovingBodiesInputs.H"
 #include "ERF_PrescribedCtDisk.H"
 #include "ERF_RunningStats.H"
@@ -164,7 +165,6 @@ private:
     std::vector<amrex::Real> m_ground;   //!< per body: the terrain height under its base (m)
     bool m_restored{false};   //!< read_checkpoint() done
     bool m_resumed{false};    //!< the checkpoint held the bodies' state: their logs continue rather than start afresh
-    bool m_logs_reopened{false};
     std::vector<std::unique_ptr<erf_actuator::BodyMotion>> m_motion;  //!< one per body
     std::vector<std::unique_ptr<erf_actuator::PrescribedCtDisk>> m_disks;
     std::vector<std::string> m_turbine_mode;                           //!< per OpenFAST turbine: adm | alm | none
@@ -182,10 +182,48 @@ private:
      * Append time, the sum of every body's load on the structure (the turbines' thrust, tower
      * and nacelle forces, the disks' thrust) and the turbines' total power to
      * <diagnostics_dir>/total_load.csv: the farm's totals, and what the integrated momentum
-     * source must equal minus.
+     * source must equal minus. The loads join the step's packed gather (flush_logs()).
      */
     void write_total_load (double time, bool first);
     bool m_total_written{false};
+
+    /**
+     * The bodies' appended logs, each file opened once and kept open (flushed at every checkpoint
+     * and at the end of the run): the bodies' time series in the per_turbine and per_rank formats on
+     * their owners, the wake lines' rows on the rotors' owners, and in the farm format and for the
+     * run's own files (total_load.csv, momentum_source.csv) on the I/O rank.
+     */
+    mutable erf_actuator::LogStreams m_logs;   // flushed by the const write_checkpoint()
+    /**
+     * Write the rows of one time-series log (erf, flow, correction, fllc, disk) for the bodies
+     * listed (indices of m_exchange: the turbines, then the disks), in the format
+     * erf.moving_bodies.diagnostics_format asks for. fill(b, row) gives body b's k values on its
+     * owner, or returns false when the body has no row. Collective (every rank calls it alike); in
+     * the farm format the rows join the step's packed gather (flush_logs()), otherwise each owner
+     * writes its own at once.
+     * @param truncate the file starts afresh when this call opens it (a fresh run), else it is appended to
+     */
+    void write_series (const std::string& log, const std::string& columns, double time, bool truncate,
+                       const std::vector<int>& bodies, int k, const std::function<bool(int, amrex::Real*)>& fill);
+    /** One part of the step's packed gather: this rank's contribution, and what the I/O rank does with the sum. */
+    struct PendingLog {
+        std::vector<double> packed;
+        std::function<void(const double*)> write;
+    };
+    std::vector<PendingLog> m_pending_logs;
+    /**
+     * Collective: sum every part of the step's gather onto the I/O rank in one reduction, and let
+     * it write them, in the order they were added. A no-op when nothing is pending.
+     */
+    void flush_logs ();
+    /** The diagnostics file of log for body b in the per_turbine format: <output_root>_<log>.csv. */
+    std::string body_log_file (int b, const std::string& log) const;
+    /** The diagnostics file of log for rank r in the per_rank format: <diagnostics_dir>/rank<r>_<log>.csv. */
+    std::string rank_log_file (int r, const std::string& log) const;
+    /** The diagnostics file of log in the farm format: <diagnostics_dir>/farm_<log>.csv. */
+    std::string farm_log_file (const std::string& log) const;
+    /** Write the statistics of every body this step, in the format asked for (collective in the farm format). */
+    void write_statistics ();
     /** Append time and the integrated source vector to <diagnostics_dir>/momentum_source.csv. */
     void write_source_diagnostics (double time, const amrex::MultiFab* detJ_cc,
                                    const amrex::Geometry& geom, bool first);
@@ -266,8 +304,6 @@ private:
      * part prints its findings together and a fatal one aborts.
      */
     void audit_turbines_setup (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
-    //! collective: the terrain height under each turbine's hub (prob_lo z on a flat mesh), for the audit, on every rank
-    std::vector<amrex::Real> hub_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
     //! where turbine i's node velocities are sampled: its nodes, or (sampling = upstream) the nodes shifted
     //! sample_diameters_upstream diameters ahead of the hub along the shaft axis; on its owner
     std::vector<amrex::Real> sampling_positions (int i) const;
@@ -311,6 +347,8 @@ private:
      *  momentum theory on the previous step's thrust; the tower nodes keep the resolved flow. */
     void apply_disk_correction (int i, std::vector<amrex::Real>& uvw, const amrex::Geometry& geom);
     void write_correction_diagnostics (double time, bool first);
+    //! every turbine's <output_root>_erf.csv and _flow.csv rows (or their rank or farm files); collective
+    void write_turbine_logs (double time, bool solution0);
     std::vector<amrex::Real> m_corr_uinf;                     //!< per turbine: the corrected free stream of the previous step (checkpointed)
     std::vector<erf_actuator::DiskCorrection> m_corr_last;    //!< per turbine: the last correction, for the diagnostics
     bool m_corr_written{false};
