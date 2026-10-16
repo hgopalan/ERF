@@ -83,7 +83,17 @@ differs from the point loads': the whole rotor's torque by 0.4 % at 40 m and
 visited over the faces within three widths of it, and again as its periodic
 images, so a kernel wraps across a periodic boundary and the cost grows with
 the number of points and the cube of their widths, not with the mesh. Faces on a non-periodic domain
-boundary get no source. The normalisation of a turbine's kernel is the sum of
+boundary get no source.
+Each pass launches one GPU kernel per box and staggered grid, whatever the
+number of points: the periodic images are made once per point and binned to
+the boxes their kernels reach. The normalisation pass gives each point one
+thread, which adds its terms in a fixed order (its images, then their faces),
+and the spreading pass gives each face one thread, which adds the terms of
+the images binned to its tile of faces in point order. Neither uses atomic
+additions, so the sources do not depend on how the device schedules its
+threads, and on a CPU they equal, to the last bit, those of spreading one
+point at a time. The device buffers the kernels read are kept from step to
+step, and grow to the largest exchange. The normalisation of a turbine's kernel is the sum of
 the parts the ranks its kernel reaches compute on their own boxes, added by
 the owner of the turbine or disk in rank order and sent back with the force. The sources are computed once per step, from the
 velocities sampled at the start of the step (the disks) or from the OpenFAST

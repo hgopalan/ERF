@@ -15,6 +15,8 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
 
+#include "ERF_ActuatorDeviceBuffers.H"
+
 namespace erf_actuator {
 
 /**
@@ -57,6 +59,8 @@ void sample_velocity (const amrex::MultiFab& U,
  * @param[in] wpos 3*n point coordinates inside the domain (m)
  * @param[out] vel 3*n velocities (m/s), zero at the points no box of this rank holds
  * @param[out] cnt n counts: how many of this rank's boxes hold each point (0 or 1)
+ * @param buffers device memory kept from call to call (the call uses its own when nullptr); the points
+ *        go to the device and the answers come back with asynchronous copies and one synchronisation
  */
 void sample_velocity_local (const amrex::MultiFab& U,
                             const amrex::MultiFab& V,
@@ -65,7 +69,8 @@ void sample_velocity_local (const amrex::MultiFab& U,
                             const amrex::Geometry& geom,
                             const std::vector<amrex::Real>& wpos,
                             std::vector<amrex::Real>& vel,
-                            std::vector<int>& cnt);
+                            std::vector<int>& cnt,
+                            ActuatorDeviceBuffers* buffers = nullptr);
 
 /**
  * The points (3 coordinates each, m) with their coordinates in every periodic direction moved by

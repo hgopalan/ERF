@@ -101,7 +101,8 @@ wrap_periodic (const std::vector<Real>& pos, const Geometry& geom)
 void
 sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
                        const MultiFab* z_phys_nd, const Geometry& geom,
-                       const std::vector<Real>& wpos, std::vector<Real>& vel, std::vector<int>& cnt)
+                       const std::vector<Real>& wpos, std::vector<Real>& vel, std::vector<int>& cnt,
+                       ActuatorDeviceBuffers* buffers)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(wpos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(U.nGrow() >= 1 && V.nGrow() >= 1 && W.nGrow() >= 1,
@@ -124,13 +125,18 @@ sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
     const int ihi = domain.bigEnd(0), jhi = domain.bigEnd(1);
     const bool has_znd = (z_phys_nd != nullptr);
 
-    Gpu::DeviceVector<Real> d_pos(wpos.size());
-    Gpu::DeviceVector<Real> d_vel(wpos.size(), Real(0.0));
-    Gpu::DeviceVector<int>  d_cnt(npts, 0);
-    Gpu::copyAsync(Gpu::hostToDevice, wpos.begin(), wpos.end(), d_pos.begin());
-    Real* p_pos = d_pos.data();
-    Real* p_vel = d_vel.data();
-    int*  p_cnt = d_cnt.data();
+    // the points, and zeros for the answers, to the device in one copy each (into buffers kept from call to call)
+    ActuatorDeviceBuffers own;
+    ActuatorDeviceBuffers& buf = (buffers != nullptr) ? *buffers : own;
+    buf.sample_pos.host.assign(wpos.begin(), wpos.end());
+    buf.sample_vel.host.assign(wpos.size(), Real(0.0));
+    buf.sample_cnt.host.assign(static_cast<std::size_t>(npts), 0);
+    buf.sample_pos.upload();
+    buf.sample_vel.upload();
+    buf.sample_cnt.upload();
+    const Real* p_pos = buf.sample_pos.data();
+    Real* p_vel = buf.sample_vel.data();
+    int*  p_cnt = buf.sample_cnt.data();
 
     for (MFIter mfi(U, false); mfi.isValid(); ++mfi) {
         // the cells this rank owns; a point is sampled by the box holding its containing cell
@@ -140,6 +146,7 @@ sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
         Array4<Real const> const& w = W.const_array(mfi);
         Array4<Real const> znd = has_znd ? z_phys_nd->const_array(mfi) : Array4<Real const>{};
 
+        ++buf.kernel_launches;
         ParallelFor(npts, [=] AMREX_GPU_DEVICE (int p) noexcept
         {
             const Real x = p_pos[3*p], y = p_pos[3*p+1], z = p_pos[3*p+2];
@@ -187,9 +194,12 @@ sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
             p_cnt[p] = 1;
         });
     }
+    // the answers back with asynchronous copies and one synchronisation
+    buf.sample_vel.download_async(vel.size());
+    buf.sample_cnt.download_async(cnt.size());
     Gpu::streamSynchronize();
-    Gpu::copy(Gpu::deviceToHost, d_vel.begin(), d_vel.end(), vel.begin());
-    Gpu::copy(Gpu::deviceToHost, d_cnt.begin(), d_cnt.end(), cnt.begin());
+    std::copy(buf.sample_vel.pinned.begin(), buf.sample_vel.pinned.begin() + vel.size(), vel.begin());
+    std::copy(buf.sample_cnt.pinned.begin(), buf.sample_cnt.pinned.begin() + cnt.size(), cnt.begin());
 }
 
 void
