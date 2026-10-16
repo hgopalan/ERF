@@ -60,7 +60,8 @@ struct Sources {
     std::unique_ptr<amrex::MultiFab> znd, detj;
     Mesh mesh;
 
-    Sources (const Mesh& m, bool terrain)
+    // dm_in: the distribution of another Sources on the same mesh, to compare the two box by box
+    Sources (const Mesh& m, bool terrain, const amrex::DistributionMapping* dm_in = nullptr)
         : mesh(m)
     {
         const amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(m.nx-1, m.ny-1, m.nz-1));
@@ -68,7 +69,7 @@ struct Sources {
         geom = amrex::Geometry(domain, &rb, 0, m.periodic.data());
         ba = amrex::BoxArray(domain);
         ba.maxSize(amrex::IntVect(m.max_grid[0], m.max_grid[1], m.max_grid[2]));
-        dm = amrex::DistributionMapping(ba);
+        dm = (dm_in != nullptr) ? *dm_in : amrex::DistributionMapping(ba);
         sx.define(amrex::convert(ba, amrex::IntVect(1,0,0)), dm, 1, 0);
         sy.define(amrex::convert(ba, amrex::IntVect(0,1,0)), dm, 1, 0);
         sz.define(amrex::convert(ba, amrex::IntVect(0,0,1)), dm, 1, 0);
@@ -550,7 +551,7 @@ TEST(ActuatorSpreading, BatchedKernelsMatchThePointByPointReference)
     std::vector<Real> force, eps;
     const std::vector<Real> pos = many_points(m, force, eps);
     Sources s(m, true);
-    Sources ref(m, true);
+    Sources ref(m, true, &s.dm);
     int nlocal = 0;
     for (amrex::MFIter mfi(s.sx, false); mfi.isValid(); ++mfi) { ++nlocal; }
 
