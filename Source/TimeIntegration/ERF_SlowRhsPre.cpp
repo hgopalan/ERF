@@ -7,6 +7,7 @@
 #include "AMReX_GpuPrint.H"
 
 #include "ERF_TI_slow_headers.H"
+#include "ERF_SlowRhsPreUtils.H"
 #include "ERF_ShocDriver.H"
 #include "ERF_EOS.H"
 #include "ERF_Utils.H"
@@ -96,6 +97,7 @@ void erf_slow_rhs_pre (int level, int finest_level,
                        MultiFab* Q1fx1, MultiFab* Q1fx2,
                        MultiFab* Q1fx3, MultiFab* Q2fx3,
                        MultiFab* /*Diss*/,
+                       MultiFab* mf_surface_fluxes,
                        MultiFab* Hfx3_EB,
                        const Geometry geom,
                        const SolverChoice& solverChoice,
@@ -266,7 +268,8 @@ void erf_slow_rhs_pre (int level, int finest_level,
                         SurfLayer[ori]->impose_SurfaceLayer_bcs(level, mfs, Tau_lev,
                                                                             Hfx1, Hfx2, Hfx3,
                                                                             Q1fx1, Q1fx2, Q1fx3,
-                                                                            &z_phys_nd);
+                                                                            &z_phys_nd,
+                                                                            mf_surface_fluxes);
                     }
                 }
 
@@ -913,9 +916,9 @@ void erf_slow_rhs_pre (int level, int finest_level,
 
             Real gpz = gpz_arr(i,j,k);
 
-            Real q = (l_use_moisture) ? myhalf * (qt_arr(i,j,k) + qt_arr(i,j,k-1)) : zero;
-
-            rho_w_rhs(i, j, k) += (-gpz - abl_pressure_grad[2] + buoyancy_arr(i,j,k)) / (one + q) + zmom_src_arr(i,j,k);
+            rho_w_rhs(i, j, k) += slow_rhs_pre_z_pressure_buoyancy(
+                qt_arr, i, j, k, l_use_moisture, gpz, abl_pressure_grad[2],
+                buoyancy_arr(i,j,k)) + zmom_src_arr(i,j,k);
 
             if (l_moving_terrain) {
                  rho_w_rhs(i, j, k) *= myhalf * (detJ_arr(i,j,k) + detJ_arr(i,j,k-1));
