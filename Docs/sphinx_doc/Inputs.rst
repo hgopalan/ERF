@@ -2793,6 +2793,12 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 | **erf.moving_bodies.diagnostics_dir**                  | directory of the default diagnostics files and of the    | String                   | moving_bodies            |
 |                                                        | run's own files (listed after this table)                |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.diagnostics_format**               | where the bodies' time series and statistics go:         | per_turbine, per_rank,   | per_turbine              |
+|                                                        | per_turbine (one file per body and log), per_rank (one   | farm                     |                          |
+|                                                        | file per rank and log, written by the bodies' owners) or |                          |                          |
+|                                                        | farm (one file per log, gathered to the I/O rank); the   |                          |                          |
+|                                                        | last two carry the body's name in a body column          |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (velocities sampled |
 |                                                        | node instead of the flow velocity; the sampling          |                          | from the flow)           |
 |                                                        | correction and the FLLC still apply to it, so with       |                          |                          |
@@ -2872,6 +2878,16 @@ at the start of the step whose forcing they describe.
   bodies' loads),
   ``total_load.csv`` (in a build with OpenFAST: the bodies' total load) and ``ground.csv`` (the terrain
   height under each body).
+
+These are the files of ``diagnostics_format = per_turbine``. With ``per_rank``, the rows of the
+``erf``, ``flow``, ``correction``, ``fllc`` and ``disk`` logs and the statistics of the bodies a rank
+owns go to ``<diagnostics_dir>/rank<r>_<log>.csv`` (``r`` with five digits) instead; with ``farm``,
+every body's go to ``<diagnostics_dir>/farm_<log>.csv``, written by the I/O rank from one reduction
+per diagnostics step. Both add a ``body`` column (the body's name) after the time (first in the
+statistics), and a body's rows, picked out by that column with the column removed, are its
+``per_turbine`` rows. The wake-line files stay per body. The files are opened once and kept open:
+their rows reach the disk at every checkpoint and at the end of the run (a run that aborts may lose
+the rows written since its last checkpoint).
 
 .. _sec:ConstantMassFluxInputs:
 

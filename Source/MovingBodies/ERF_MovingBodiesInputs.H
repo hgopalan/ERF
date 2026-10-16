@@ -92,6 +92,8 @@ struct MovingBodyInputs
  *   erf.moving_bodies.D1.hub_height  = 150
  *   erf.moving_bodies.D1.ct          = 0.75
  *   erf.moving_bodies.diagnostics_int = 1
+ *   erf.moving_bodies.diagnostics_format = per_turbine  (per_turbine: one file per body and log; per_rank: one per rank
+ *                                                       and log; farm: one per log, gathered to the I/O rank)
  *   erf.moving_bodies.wake.lines_xD   = 2 4 7      (wake lines behind every rotor; see WakeInputs)
  *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
  *   erf.moving_bodies.alm_max_tip_cells = 1.0      (abort when a blade tip sweeps more cells than this per step)
@@ -117,6 +119,13 @@ struct MovingBodiesInputs
     std::vector<MovingBodyInputs> bodies;
     int diagnostics_int{1};                  //!< write a diagnostics row every this many steps
     std::string diagnostics_dir{"moving_bodies"};
+    /**
+     * Where the bodies' time-series logs (_erf, _flow, _correction, _fllc, _disk and _stats) go:
+     * per_turbine, <output_root>_<log>.csv per body; per_rank, <diagnostics_dir>/rank<r>_<log>.csv
+     * per rank, with the body as a column; farm, <diagnostics_dir>/farm_<log>.csv, gathered to the
+     * I/O rank, with the body as a column.
+     */
+    std::string diagnostics_format{"per_turbine"};
     bool has_prescribed_velocity{false};
     std::array<amrex::Real,3> prescribed_velocity{{0.0, 0.0, 0.0}};
     WakeInputs wake;
@@ -126,6 +135,12 @@ struct MovingBodiesInputs
     bool verify_tip_cells{false};            //!< actuator line: check the cached tip cell heights against a fresh per-region search every step (debug)
     amrex::Real density_tolerance{0.05};     //!< relative tolerance between ERF's density at a hub and the OpenFAST model's
     int anchor_level{-1};                    //!< the level the bodies live on (-1: the finest level, amr.max_level)
+
+    /** Whether f is a diagnostics_format: per_turbine, per_rank or farm. */
+    static bool valid_diagnostics_format (const std::string& f)
+    {
+        return f == "per_turbine" || f == "per_rank" || f == "farm";
+    }
 
     /** Read erf.moving_bodies.*; aborts on an unknown type, a duplicate name or a bad value. */
     static MovingBodiesInputs read ();

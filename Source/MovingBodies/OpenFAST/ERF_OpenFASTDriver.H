@@ -168,9 +168,23 @@ public:
      * rotor speed, thrust (hub and blade nodes), torque and power about the hub axis, the hub
      * axis itself, the tower force (its force nodes, zero without them) and the nacelle drag
      * (zero unless set), all forces on the structure; and <output_root>_flow.csv with the
-     * velocity the flow supplied at the hub node and its mean over the blade nodes.
+     * velocity the flow supplied at the hub node and its mean over the blade nodes. The files are
+     * opened for each row (truncated at the first row after solution0(), appended to after
+     * restart()); MovingBodies writes the same rows (erf_log_row(), flow_log_row()) through its
+     * own, persistent, streams instead.
      */
     void write_diagnostics (double time);
+
+    /** The columns of the _erf.csv row after its time. */
+    static const std::string& erf_log_columns ();
+    static constexpr int erf_log_size = 18;
+    /** Turbine i's _erf.csv row after its time (erf_log_size values); its owner only. */
+    void erf_log_row (int i, amrex::Real* row) const;
+    /** The columns of the _flow.csv row after its time. */
+    static const std::string& flow_log_columns ();
+    static constexpr int flow_log_size = 6;
+    /** Turbine i's _flow.csv row after its time (flow_log_size values); its owner only. */
+    void flow_log_row (int i, amrex::Real* row) const;
 
     const std::vector<TurbineState>& turbines () const { return m_turb; }
     bool is_owner (int i) const;
@@ -203,7 +217,8 @@ private:
     void pull_from_fast (TurbineState& t);
     void allocate ();
     void finish_setup (TurbineState& t, double dt_cfd);
-    void open_diagnostics (const TurbineState& t, bool truncate) const;
+    bool m_log_truncate{true};      //!< write_diagnostics() starts the logs afresh (after solution0()) or appends (after restart())
+    bool m_logs_started{false};     //!< write_diagnostics() has written a row since
 };
 
 } // namespace erf_openfast

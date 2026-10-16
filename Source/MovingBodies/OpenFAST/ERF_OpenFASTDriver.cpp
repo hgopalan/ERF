@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <iomanip>
 
@@ -86,6 +87,8 @@ check_tower_shadow_off (const std::string& fst_file)
 
 OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 {
+    // a farm shares a few models: each distinct model file (and check) is read once
+    std::map<std::pair<std::string,bool>, std::string> induction;
     for (const MovingBodyInputs& b : bodies) {
         TurbineState t;
         t.name = b.name;
@@ -95,7 +98,10 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
         t.num_force_pts_blade = b.num_force_points_blade;
         t.num_force_pts_tower = b.num_force_points_tower;
         if (b.mode != "none") {
-            const std::string err = check_induction(b.fst_file, b.sampling == "disk");
+            const auto key = std::make_pair(b.fst_file, b.sampling == "disk");
+            auto it = induction.find(key);
+            if (it == induction.end()) { it = induction.emplace(key, check_induction(key.first, key.second)).first; }
+            const std::string& err = it->second;
             if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
         }
         m_turb.push_back(t);
@@ -270,12 +276,12 @@ OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
                 t.node_vel[3*nd+1] = t.from_cfd.v[nd];
                 t.node_vel[3*nd+2] = t.from_cfd.w[nd];
             }
-            // the logs continue; a restart in a clean directory starts them with a header
-            open_diagnostics(t, false);
         }
     }
     check_lockstep();
     m_initialized = true;
+    // the logs continue; a restart in a clean directory starts them with a header
+    m_log_truncate = false;
     // a checkpoint written before OpenFAST's first solution (the step-0 checkpoint) still needs it
     m_solved0 = solved0;
 }
@@ -308,10 +314,12 @@ OpenFASTDriver::solution0 ()
             FAST_CFD_Solution0(&t.tid_local, &err_stat, err_msg);
             fast_check(err_stat, err_msg, "FAST_CFD_Solution0 for " + t.name);
             pull_from_fast(t);
-            open_diagnostics(t, true);
         }
     }
     m_solved0 = true;
+    // the logs start afresh at the first solution
+    m_log_truncate = true;
+    m_logs_started = false;
 }
 
 void
@@ -557,44 +565,65 @@ OpenFASTDriver::torque (const TurbineState& t) const
     return q;
 }
 
-void
-OpenFASTDriver::open_diagnostics (const TurbineState& t, bool truncate) const
+const std::string&
+OpenFASTDriver::erf_log_columns ()
 {
-    std::ofstream out;
-    if (erf_actuator::open_log(out, t.output_root + "_erf.csv", truncate)) {
-        out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z,"
-               "tower_x,tower_y,tower_z,nacelle_x,nacelle_y,nacelle_z,load_x,load_y,load_z\n";
-    }
-    std::ofstream flow;
-    if (erf_actuator::open_log(flow, t.output_root + "_flow.csv", truncate)) {
-        flow << "time,hub_u,hub_v,hub_w,blade_mean_u,blade_mean_v,blade_mean_w\n";
-    }
+    static const std::string c = "rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z,"
+                                 "tower_x,tower_y,tower_z,nacelle_x,nacelle_y,nacelle_z,load_x,load_y,load_z";
+    return c;
+}
+
+const std::string&
+OpenFASTDriver::flow_log_columns ()
+{
+    static const std::string c = "hub_u,hub_v,hub_w,blade_mean_u,blade_mean_v,blade_mean_w";
+    return c;
+}
+
+void
+OpenFASTDriver::erf_log_row (int i, Real* row) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(is_owner(i), "OpenFASTDriver::erf_log_row: only the owner of a turbine holds its loads");
+    const TurbineState& t = m_turb[i];
+    const std::array<Real,3> f = thrust(t);
+    const std::array<Real,3> ft = tower_force(t);
+    const Real q = torque(t);
+    const Real r[erf_log_size] = {t.rotor_speed, f[0], f[1], f[2], q, q * t.rotor_speed,
+                                  t.hub_axis[0], t.hub_axis[1], t.hub_axis[2], ft[0], ft[1], ft[2],
+                                  t.nacelle_force[0], t.nacelle_force[1], t.nacelle_force[2],
+                                  f[0] + ft[0] + t.nacelle_force[0], f[1] + ft[1] + t.nacelle_force[1],
+                                  f[2] + ft[2] + t.nacelle_force[2]};
+    for (int k = 0; k < erf_log_size; ++k) { row[k] = r[k]; }
+}
+
+void
+OpenFASTDriver::flow_log_row (int i, Real* row) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(is_owner(i), "OpenFASTDriver::flow_log_row: only the owner of a turbine holds its velocities");
+    std::array<Real,3> hub, blade;
+    node_velocity_means(m_turb[i], hub, blade);
+    for (int d = 0; d < 3; ++d) { row[d] = hub[d]; row[3+d] = blade[d]; }
 }
 
 void
 OpenFASTDriver::write_diagnostics (double time)
 {
+    // the first row after solution0() starts the files afresh; after restart() they are appended to
+    const bool truncate = m_log_truncate && !m_logs_started;
     for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
         if (!is_owner(i)) { continue; }
         const TurbineState& t = m_turb[i];
-        const std::array<Real,3> f = thrust(t);
-        const Real q = torque(t);
-        std::array<Real,3> hub, blade;
-        node_velocity_means(t, hub, blade);
-        std::ofstream out(t.output_root + "_erf.csv", std::ios::app);
-        const std::array<Real,3> ft = tower_force(t);
-        out << std::setprecision(10) << time << "," << t.rotor_speed << ","
-            << f[0] << "," << f[1] << "," << f[2] << "," << q << "," << q * t.rotor_speed << ","
-            << t.hub_axis[0] << "," << t.hub_axis[1] << "," << t.hub_axis[2] << ","
-            << ft[0] << "," << ft[1] << "," << ft[2] << ","
-            << t.nacelle_force[0] << "," << t.nacelle_force[1] << "," << t.nacelle_force[2] << ","
-            << f[0] + ft[0] + t.nacelle_force[0] << "," << f[1] + ft[1] + t.nacelle_force[1] << ","
-            << f[2] + ft[2] + t.nacelle_force[2] << "\n";
-        std::ofstream flow(t.output_root + "_flow.csv", std::ios::app);
-        flow << std::setprecision(10) << time << ","
-             << hub[0] << "," << hub[1] << "," << hub[2] << ","
-             << blade[0] << "," << blade[1] << "," << blade[2] << "\n";
+        Real erf_row[erf_log_size], flow_row[flow_log_size];
+        erf_log_row(i, erf_row);
+        flow_log_row(i, flow_row);
+        std::ofstream out;
+        if (erf_actuator::open_log(out, t.output_root + "_erf.csv", truncate)) { out << "time," << erf_log_columns() << "\n"; }
+        erf_actuator::write_log_row(out, time, nullptr, erf_row, erf_log_size);
+        std::ofstream flow;
+        if (erf_actuator::open_log(flow, t.output_root + "_flow.csv", truncate)) { flow << "time," << flow_log_columns() << "\n"; }
+        erf_actuator::write_log_row(flow, time, nullptr, flow_row, flow_log_size);
     }
+    m_logs_started = true;
 }
 
 } // namespace erf_openfast

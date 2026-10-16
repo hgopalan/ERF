@@ -1,14 +1,9 @@
 #include "ERF_PrescribedCtDisk.H"
 
-#include "ERF_DiagnosticsLog.H"
-
 #include <cmath>
-#include <fstream>
-#include <iomanip>
 
 #include <AMReX.H>
 #include <AMReX_ParallelDescriptor.H>
-#include <AMReX_Utility.H>
 
 using namespace amrex;
 
@@ -92,23 +87,21 @@ PrescribedCtDisk::update (const std::vector<Real>& sample_vel, const std::vector
     }
 }
 
-void
-PrescribedCtDisk::open_diagnostics (bool truncate) const
+const std::string&
+PrescribedCtDisk::log_columns ()
 {
-    if (ParallelDescriptor::MyProc() != m_writer) { return; }
-    std::ofstream out;
-    if (erf_actuator::open_log(out, m_output_root + "_disk.csv", truncate)) {
-        out << "time,u_inf,u_disk,thrust,power,spread_thrust\n";
-    }
+    static const std::string c = "u_inf,u_disk,thrust,power,spread_thrust";
+    return c;
 }
 
 void
-PrescribedCtDisk::write_diagnostics (double time, Real spread_total) const
+PrescribedCtDisk::log_row (Real spread_total, Real* row) const
 {
-    if (ParallelDescriptor::MyProc() != m_writer) { return; }
-    std::ofstream out(m_output_root + "_disk.csv", std::ios::app);
-    out << std::setprecision(10) << time << "," << m_u_inf << "," << m_u_disk << ","
-        << m_thrust << "," << power() << "," << spread_total << "\n";
+    row[0] = m_u_inf;
+    row[1] = m_u_disk;
+    row[2] = m_thrust;
+    row[3] = power();
+    row[4] = spread_total;
 }
 
 } // namespace erf_actuator

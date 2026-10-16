@@ -205,11 +205,16 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
     // read_checkpoint(); its first solution waits for the first step, when the flow exists to be
     // sampled
     m_driver = std::make_unique<erf_openfast::OpenFASTDriver>(turbines);
+    std::map<std::string, std::string> shadow;   // per distinct model file: a farm shares a few
     for (std::size_t i = 0; i < turbines.size(); ++i) {
         // the tower's wake now reaches the blades through the flow: AeroDyn's own tower-shadow
         // correction would count it twice
         if (turbines[i].mode != "none" && turbines[i].num_force_points_tower > 0) {
-            const std::string w = erf_openfast::check_tower_shadow_off(turbines[i].fst_file);
+            auto it = shadow.find(turbines[i].fst_file);
+            if (it == shadow.end()) {
+                it = shadow.emplace(turbines[i].fst_file, erf_openfast::check_tower_shadow_off(turbines[i].fst_file)).first;
+            }
+            const std::string& w = it->second;
             if (!w.empty()) { Print() << "WARNING: erf.moving_bodies." << turbines[i].name << ": " << w << "\n"; }
         }
     }
@@ -223,6 +228,8 @@ void
 MovingBodies::write_checkpoint (const std::string& chkdir) const
 {
     const std::string dir = chkdir + "/moving_bodies";
+    // every row written so far reaches its file: a restart from this checkpoint trims the logs to it
+    m_logs.flush();
 #ifdef ERF_USE_OPENFAST
     // every turbine's OpenFAST time index and corrected free stream, which its owner alone knows, at the I/O rank
     const int nturb = static_cast<int>(m_driver->turbines().size());
@@ -241,6 +248,9 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
         // the run's anchor level and its step: a restart must continue the same coupling
         out << "t0 = " << m_t0 << "\n" << "openfast_tmax = " << m_openfast_tmax << "\n"
             << "anchor = " << m_anchor << "\n" << "dt = " << m_dt << "\n";
+        // the logs' layout: a restart trims the per_rank files of every rank this run wrote with
+        out << "diagnostics_format = " << m_in.diagnostics_format << "\n"
+            << "diagnostics_nranks = " << ParallelDescriptor::NProcs() << "\n";
 #ifdef ERF_USE_OPENFAST
         out << "solved0 = " << (m_driver->solved0() ? 1 : 0) << "\n";
 #endif
@@ -370,16 +380,32 @@ MovingBodies::choose_owners (const Geometry& geom, const BoxArray& grids, const 
     const int n = static_cast<int>(turbs.size());
     if (n > 0) {
         // the rotor radius (zero when unknown: the base column alone) and the time step each model's files
-        // give, read once on the I/O rank
-        std::vector<Real> radius(n, Real(0.0)), dt(n, Real(-1.0));
-        if (ParallelDescriptor::IOProcessor()) {
+        // give. A farm shares a few models: each distinct .fst is read once, the distinct files spread over
+        // the ranks (file p on rank p mod nprocs), and one reduction gives every rank all of them
+        std::vector<std::string> paths;
+        std::vector<int> path_of(n, 0);
+        {
+            std::map<std::string, int> index;
             for (int i = 0; i < n; ++i) {
-                radius[i] = std::max(erf_openfast::model_rotor_radius(turbs[i].fst_file), Real(0.0));
-                dt[i] = erf_openfast::model_time_step(turbs[i].fst_file);
+                const auto it = index.emplace(turbs[i].fst_file, static_cast<int>(paths.size()));
+                if (it.second) { paths.push_back(turbs[i].fst_file); }
+                path_of[i] = it.first->second;
             }
         }
-        ParallelDescriptor::Bcast(radius.data(), n, ParallelDescriptor::IOProcessorNumber());
-        ParallelDescriptor::Bcast(dt.data(), n, ParallelDescriptor::IOProcessorNumber());
+        const int npath = static_cast<int>(paths.size());
+        std::vector<Real> model(2 * static_cast<std::size_t>(npath), Real(0.0));
+        for (int p = 0; p < npath; ++p) {
+            if (p % ParallelDescriptor::NProcs() != ParallelDescriptor::MyProc()) { continue; }
+            model[2*p] = std::max(erf_openfast::model_rotor_radius(paths[p]), Real(0.0));
+            model[2*p+1] = erf_openfast::model_time_step(paths[p]);
+        }
+        ParallelDescriptor::ReduceRealSum(model.data(), 2 * npath);
+        std::vector<Real> radius(n), dt(n);
+        for (int i = 0; i < n; ++i) {
+            radius[i] = model[2*path_of[i]];
+            dt[i] = model[2*path_of[i]+1];
+        }
+        Print() << "Moving bodies: " << n << " turbine(s) share " << npath << " distinct OpenFAST model file(s)\n";
         std::vector<Box> footprints;
         for (int i = 0; i < n; ++i) { footprints.push_back(footprint(turbs[i].base_pos, radius[i])); }
         owners = erf_actuator::choose_owners(footprints, dt, ba, dmap, geom, ParallelDescriptor::NProcs());
@@ -681,7 +707,8 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
     std::map<std::string,Real> corr_uinf;
     std::map<std::string,std::map<std::string,std::string>> bodies;   // body records of the run being continued
     double t0 = -1.0, openfast_tmax = -1.0, dt_chk = -1.0;
-    int anchor_chk = -1, solved0 = 1;
+    int anchor_chk = -1, solved0 = 1, nranks_chk = 0;
+    std::string format_chk;
     bool have_t0 = false;
     {
         Vector<char> chars;
@@ -713,6 +740,10 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
                 if (!(ls >> eq >> anchor_chk) || eq != "=") { Abort("malformed anchor line in '" + dir + "/state'"); }
             } else if (key == "dt") {
                 if (!(ls >> eq >> dt_chk) || eq != "=") { Abort("malformed dt line in '" + dir + "/state'"); }
+            } else if (key == "diagnostics_format") {
+                if (!(ls >> eq >> format_chk) || eq != "=") { Abort("malformed diagnostics_format line in '" + dir + "/state'"); }
+            } else if (key == "diagnostics_nranks") {
+                if (!(ls >> eq >> nranks_chk) || eq != "=") { Abort("malformed diagnostics_nranks line in '" + dir + "/state'"); }
             } else if (key == "solved0") {
                 if (!(ls >> eq >> solved0) || eq != "=") { Abort("malformed solved0 line in '" + dir + "/state'"); }
             } else if (key == "body") {
@@ -786,17 +817,37 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
         const bool keep_end_rows = (solved0 != 0);
         std::vector<std::string> end_stamped{m_in.diagnostics_dir + "/total_load.csv"};
         std::vector<std::string> start_stamped{m_in.diagnostics_dir + "/momentum_source.csv"};
-        for (const auto& b : m_in.bodies) {
-            if (b.type == "openfast_turbine") {
-                end_stamped.push_back(b.output_root + "_erf.csv");
-                end_stamped.push_back(b.output_root + "_flow.csv");
-                start_stamped.push_back(b.output_root + "_correction.csv");
-                start_stamped.push_back(b.output_root + "_fllc.csv");
-            } else {
-                start_stamped.push_back(b.output_root + "_disk.csv");
-            }
-            start_stamped.push_back(b.output_root + "_wake.csv");
+        // the bodies' time series where this run writes them (a run continued in another format starts
+        // new files and leaves the old ones as they are)
+        if (!format_chk.empty() && format_chk != m_in.diagnostics_format) {
+            Print() << "Moving bodies: the run being continued wrote its logs as " << format_chk << ", this one as "
+                    << m_in.diagnostics_format << " (erf.moving_bodies.diagnostics_format); the old files are not trimmed\n";
         }
+        if (m_in.diagnostics_format == "per_turbine") {
+            for (const auto& b : m_in.bodies) {
+                if (b.type == "openfast_turbine") {
+                    end_stamped.push_back(b.output_root + "_erf.csv");
+                    end_stamped.push_back(b.output_root + "_flow.csv");
+                    start_stamped.push_back(b.output_root + "_correction.csv");
+                    start_stamped.push_back(b.output_root + "_fllc.csv");
+                } else {
+                    start_stamped.push_back(b.output_root + "_disk.csv");
+                }
+            }
+        } else {
+            // farm: one file per log; per_rank: the files of every rank of this run and of the run being continued
+            const int nr = std::max(ParallelDescriptor::NProcs(), nranks_chk);
+            auto add = [&] (std::vector<std::string>& to, const std::string& log) {
+                if (m_in.diagnostics_format == "farm") {
+                    to.push_back(farm_log_file(log));
+                } else {
+                    for (int r = 0; r < nr; ++r) { to.push_back(rank_log_file(r, log)); }
+                }
+            };
+            for (const char* log : {"erf", "flow"}) { add(end_stamped, log); }
+            for (const char* log : {"correction", "fllc", "disk"}) { add(start_stamped, log); }
+        }
+        for (const auto& b : m_in.bodies) { start_stamped.push_back(b.output_root + "_wake.csv"); }
         // the I/O rank trims every body's files (the output directory is shared); the owner rank of a turbine
         // or disk appends to its own files (and its wake lines') only after this barrier
         for (const auto& f : end_stamped) { erf_actuator::trim_log_after(f, time, keep_end_rows, tol); }
@@ -930,7 +981,7 @@ MovingBodies::advance (int lev, double time, double dt,
         // first step: OpenFAST's first solution sees the initial flow at its nodes
         supply_velocities(time, U, V, W, z_phys_nd, geom);
         m_driver->solution0();
-        m_driver->write_diagnostics(time);
+        write_turbine_logs(time, true);
         write_total_load(time, true);
     }
 #endif
@@ -939,7 +990,7 @@ MovingBodies::advance (int lev, double time, double dt,
     if (!m_audited_flow) { audit_turbines_flow(cons, z_phys_nd, geom); }
     m_driver->step();
     if (first || m_step % m_in.diagnostics_int == 0) {
-        m_driver->write_diagnostics(time + dt);
+        write_turbine_logs(time + dt, false);
         write_fllc_diagnostics(time, first);
         write_correction_diagnostics(time, first);
         write_total_load(time + dt, false);
@@ -950,11 +1001,6 @@ MovingBodies::advance (int lev, double time, double dt,
     // about to take
     if (any_forcing()) {
         spread_sources(U, z_phys_nd, detJ_cc, geom);
-        if (first) { for (auto& d : m_disks) { d->open_diagnostics(true); } }
-        if (m_resumed && !m_logs_reopened) {
-            for (auto& d : m_disks) { d->open_diagnostics(false); }
-            m_logs_reopened = true;
-        }
         if (first || m_step % m_in.diagnostics_int == 0) {
             write_source_diagnostics(time, detJ_cc, geom, first);
         }
@@ -966,6 +1012,8 @@ MovingBodies::advance (int lev, double time, double dt,
     if (m_in.wake.active() && !m_in.has_prescribed_velocity && (first || m_step % m_in.wake.interval == 0)) {
         write_wake_diagnostics(time, U, V, W, z_phys_nd, geom);
     }
+    // the step's rows that go through the I/O rank (the farm totals, and every log in the farm format), in one reduction
+    flush_logs();
 }
 
 void
@@ -983,7 +1031,6 @@ MovingBodies::accumulate_statistics (double time)
         const Real q = m_driver->torque(t);
         m_turbine_stats[i].accumulate(time, {f[0]*t.hub_axis[0] + f[1]*t.hub_axis[1] + f[2]*t.hub_axis[2], f[0], q,
                                              q * t.rotor_speed, t.rotor_speed, hub[0], hub[1], hub[2], blade[0]});
-        if (m_step % m_in.diagnostics_int == 0) { m_turbine_stats[i].write(); }
     }
 #endif
     for (std::size_t k = 0; k < m_disks.size(); ++k) {
@@ -991,8 +1038,71 @@ MovingBodies::accumulate_statistics (double time)
         if (!m_exchange.owns(num_turbines() + static_cast<int>(k))) { continue; }
         const auto& d = m_disks[k];
         m_disk_stats[k].accumulate(time, {d->free_stream_speed(), d->disk_speed(), d->thrust(), d->power()});
-        if (m_step % m_in.diagnostics_int == 0) { m_disk_stats[k].write(); }
     }
+    if (m_step % m_in.diagnostics_int == 0) { write_statistics(); }
+}
+
+void
+MovingBodies::write_statistics ()
+{
+    // body b of m_exchange: its statistics (a turbine's, then a disk's)
+    const int nturb = num_turbines();
+    const int nbody = nturb + static_cast<int>(m_disks.size());
+    auto stats = [this, nturb] (int b) -> const erf_actuator::RunningStats& {
+        return (b < nturb) ? m_turbine_stats[b] : m_disk_stats[b - nturb];
+    };
+    const std::string& format = m_in.diagnostics_format;
+    if (format == "per_turbine") {
+        // each owner rewrites its bodies' files
+        for (int b = 0; b < nbody; ++b) { stats(b).write(); }
+        return;
+    }
+    const std::string header = std::string("body,") + erf_actuator::RunningStats::columns();
+    if (format == "per_rank") {
+        // each rank rewrites its own file with the statistics of the bodies it owns
+        bool any = false;
+        for (int b = 0; b < nbody && !any; ++b) { any = m_exchange.owns(b); }
+        if (!any) { return; }
+        std::ofstream out;
+        erf_actuator::open_log(out, rank_log_file(ParallelDescriptor::MyProc(), "stats"), true);
+        out << header << "\n";
+        for (int b = 0; b < nbody; ++b) {
+            if (m_exchange.owns(b)) { stats(b).write_rows(out, m_exchange_names[b] + ","); }
+        }
+        return;
+    }
+    // farm: per body, a flag, the count, the first and last times and four values per quantity, from its
+    // owner; the I/O rank rewrites the one file
+    std::vector<std::size_t> offset(nbody + 1, 0);
+    for (int b = 0; b < nbody; ++b) { offset[b+1] = offset[b] + 4 + 4 * stats(b).quantities().size(); }
+    PendingLog part;
+    part.packed.assign(offset[nbody], 0.0);
+    for (int b = 0; b < nbody; ++b) {
+        if (!m_exchange.owns(b)) { continue; }
+        const auto& st = stats(b);
+        double* v = &part.packed[offset[b]];
+        v[0] = 1.0;
+        v[1] = st.num_samples();
+        v[2] = st.t_first();
+        v[3] = st.t_last();
+        for (std::size_t q = 0; q < st.quantities().size(); ++q) {
+            v[4+4*q] = st.mean(q); v[5+4*q] = st.rms(q); v[6+4*q] = st.min(q); v[7+4*q] = st.max(q);
+        }
+    }
+    part.write = [this, nbody, offset, stats, header] (const double* all) {
+        std::ofstream out;
+        erf_actuator::open_log(out, farm_log_file("stats"), true);
+        out << header << "\n";
+        for (int b = 0; b < nbody; ++b) {
+            const double* v = all + offset[b];
+            if (v[0] == 0.0) { continue; }
+            const auto& names = stats(b).quantities();
+            std::vector<Real> q(4 * names.size());
+            for (std::size_t k = 0; k < q.size(); ++k) { q[k] = static_cast<Real>(v[4+k]); }
+            erf_actuator::RunningStats::write_rows(out, m_exchange_names[b] + ",", names, static_cast<int>(v[1]), v[2], v[3], q.data());
+        }
+    };
+    m_pending_logs.push_back(std::move(part));
 }
 
 void
@@ -1115,7 +1225,7 @@ MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const Mult
         if (!m_wake_exchange.owns(b)) { continue; }
         auto& wl = m_wakes[b];
         if (time >= m_in.avg_start) { wl->accumulate(vel[b]); }
-        wl->write_instantaneous(time, vel[b], !m_resumed && !m_wake_written);
+        wl->write_instantaneous(m_logs, time, vel[b], !m_resumed && !m_wake_written);
         wl->write_average();
     }
     m_wake_written = true;
@@ -1129,44 +1239,139 @@ MovingBodies::any_forcing () const
     return false;
 }
 
+std::string
+MovingBodies::body_log_file (int b, const std::string& log) const
+{
+    const int nturb = num_turbines();
+    const std::string& root = (b < nturb) ? m_turbine_in[b].output_root : m_disks[b - nturb]->output_root();
+    return root + "_" + log + ".csv";
+}
+
+std::string
+MovingBodies::rank_log_file (int r, const std::string& log) const
+{
+    return m_in.diagnostics_dir + "/" + amrex::Concatenate("rank", r, 5) + "_" + log + ".csv";
+}
+
+std::string
+MovingBodies::farm_log_file (const std::string& log) const
+{
+    return m_in.diagnostics_dir + "/farm_" + log + ".csv";
+}
+
+void
+MovingBodies::write_series (const std::string& log, const std::string& columns, double time, bool truncate,
+                            const std::vector<int>& bodies, int k, const std::function<bool(int, Real*)>& fill)
+{
+    const std::string& format = m_in.diagnostics_format;
+    std::vector<Real> row(k);
+    if (format == "per_turbine" || format == "per_rank") {
+        // each owner writes its bodies' rows at once: into each body's own file, or into its rank's
+        const bool per_rank = (format == "per_rank");
+        for (const int b : bodies) {
+            if (!m_exchange.owns(b) || !fill(b, row.data())) { continue; }
+            if (per_rank) {
+                std::ofstream& out = m_logs.get(rank_log_file(ParallelDescriptor::MyProc(), log), truncate, "time,body," + columns);
+                erf_actuator::write_log_row(out, time, &m_exchange_names[b], row.data(), k);
+            } else {
+                erf_actuator::write_log_row(m_logs.get(body_log_file(b, log), truncate, "time," + columns), time, nullptr, row.data(), k);
+            }
+        }
+        return;
+    }
+    // farm: per body a flag and its row, from its owner, into the step's gather; the I/O rank writes them in body order
+    const int n = static_cast<int>(bodies.size());
+    PendingLog part;
+    part.packed.assign(static_cast<std::size_t>(n) * (k + 1), 0.0);
+    for (int j = 0; j < n; ++j) {
+        if (!m_exchange.owns(bodies[j]) || !fill(bodies[j], row.data())) { continue; }
+        double* v = &part.packed[static_cast<std::size_t>(j) * (k + 1)];
+        v[0] = 1.0;
+        for (int c = 0; c < k; ++c) { v[1+c] = static_cast<double>(row[c]); }
+    }
+    part.write = [this, log, columns, time, truncate, bodies, k] (const double* all) {
+        std::ofstream& out = m_logs.get(farm_log_file(log), truncate, "time,body," + columns);
+        std::vector<Real> r(k);
+        for (std::size_t j = 0; j < bodies.size(); ++j) {
+            const double* v = all + j * (k + 1);
+            if (v[0] == 0.0) { continue; }
+            for (int c = 0; c < k; ++c) { r[c] = static_cast<Real>(v[1+c]); }
+            erf_actuator::write_log_row(out, time, &m_exchange_names[bodies[j]], r.data(), k);
+        }
+    };
+    m_pending_logs.push_back(std::move(part));
+}
+
+void
+MovingBodies::flush_logs ()
+{
+    // the same parts, of the same sizes, on every rank: they were added under conditions every rank shares
+    if (m_pending_logs.empty()) { return; }
+    std::size_t total = 0;
+    for (const auto& p : m_pending_logs) { total += p.packed.size(); }
+    std::vector<double> all;
+    all.reserve(total);
+    for (const auto& p : m_pending_logs) { all.insert(all.end(), p.packed.begin(), p.packed.end()); }
+    // each value comes from one rank, zeros from the others, so the sum is every value exactly
+    if (!all.empty()) {
+        ParallelDescriptor::ReduceRealSum(all.data(), static_cast<int>(all.size()), ParallelDescriptor::IOProcessorNumber());
+    }
+    if (ParallelDescriptor::IOProcessor()) {
+        std::size_t at = 0;
+        for (const auto& p : m_pending_logs) {
+            p.write(all.data() + at);
+            at += p.packed.size();
+        }
+    }
+    m_pending_logs.clear();
+}
+
 void
 MovingBodies::write_total_load (double time, bool first)
 {
-    std::array<Real,3> load{{0.0, 0.0, 0.0}};
-    Real power = 0.0;
+    const int nturb = num_turbines();
+    const int ndisk = static_cast<int>(m_disks.size());
+    // every turbine's load, torque and rotor speed (the torque and the rotor speed apart, so that the power
+    // is formed as the turbine's own log forms it) and every disk's thrust, from their owners, into the
+    // step's gather; the I/O rank sums them in body order
+    PendingLog part;
+    part.packed.assign(5 * static_cast<std::size_t>(nturb) + ndisk, 0.0);
 #ifdef ERF_USE_OPENFAST
-    {
-        // every turbine's load and power from its owner, summed on the I/O rank in turbine order
-        // (the torque and the rotor speed apart, so that the power is formed as the turbine's own log forms it)
-        const std::vector<Real> rows = turbine_table(5, true, [this] (int i, Real* row) {
-            const auto& t = m_driver->turbines()[i];
-            const auto f = m_driver->thrust(t);
-            const auto ft = m_driver->tower_force(t);
-            for (int d = 0; d < 3; ++d) { row[d] = f[d] + ft[d] + t.nacelle_force[d]; }
-            row[3] = m_driver->torque(t);
-            row[4] = t.rotor_speed;
-        });
-        for (std::size_t i = 0; i < m_turbine_mode.size(); ++i) {
-            if (m_turbine_mode[i] == "none") { continue; }   // no force in the flow
-            for (int d = 0; d < 3; ++d) { load[d] += rows[5*i+d]; }
-            power += rows[5*i+3] * rows[5*i+4];
-        }
+    for (int i = 0; i < nturb; ++i) {
+        if (!m_driver->is_owner(i)) { continue; }
+        const auto& t = m_driver->turbines()[i];
+        const auto f = m_driver->thrust(t);
+        const auto ft = m_driver->tower_force(t);
+        double* row = &part.packed[5 * static_cast<std::size_t>(i)];
+        for (int d = 0; d < 3; ++d) { row[d] = static_cast<Real>(f[d] + ft[d] + t.nacelle_force[d]); }
+        row[3] = m_driver->torque(t);
+        row[4] = t.rotor_speed;
     }
 #endif
-    // every disk's thrust from its owner, on the I/O rank
-    const std::vector<Real> disk_thrust = disk_table(1, [this] (int k, Real* row) { row[0] = m_disks[k]->thrust(); });
-    if (!ParallelDescriptor::IOProcessor()) { return; }
-    for (std::size_t k = 0; k < m_disks.size(); ++k) {
-        const auto n = m_disks[k]->normal();
-        for (int c = 0; c < 3; ++c) { load[c] += disk_thrust[k] * n[c]; }
+    for (int k = 0; k < ndisk; ++k) {
+        if (m_exchange.owns(nturb + k)) { part.packed[5 * static_cast<std::size_t>(nturb) + k] = m_disks[k]->thrust(); }
     }
-    std::ofstream out;
     const bool truncate = first && !m_resumed && !m_total_written;
-    if (erf_actuator::open_log(out, m_in.diagnostics_dir + "/total_load.csv", truncate)) {
-        out << "time,load_x,load_y,load_z,power\n";
-    }
-    out << std::setprecision(10) << time << "," << load[0] << "," << load[1] << "," << load[2] << "," << power << "\n";
     m_total_written = true;
+    part.write = [this, nturb, ndisk, time, truncate] (const double* all) {
+        std::array<Real,3> load{{0.0, 0.0, 0.0}};
+        Real power = 0.0;
+        for (int i = 0; i < nturb; ++i) {
+            if (m_turbine_mode[i] == "none") { continue; }   // no force in the flow
+            const double* row = all + 5 * static_cast<std::size_t>(i);
+            for (int d = 0; d < 3; ++d) { load[d] += static_cast<Real>(row[d]); }
+            power += static_cast<Real>(row[3]) * static_cast<Real>(row[4]);
+        }
+        for (int k = 0; k < ndisk; ++k) {
+            const auto n = m_disks[k]->normal();
+            const Real thrust = static_cast<Real>(all[5 * static_cast<std::size_t>(nturb) + k]);
+            for (int c = 0; c < 3; ++c) { load[c] += thrust * n[c]; }
+        }
+        const Real row[4] = {load[0], load[1], load[2], power};
+        erf_actuator::write_log_row(m_logs.get(m_in.diagnostics_dir + "/total_load.csv", truncate, "time,load_x,load_y,load_z,power"),
+                                    time, nullptr, row, 4);
+    };
+    m_pending_logs.push_back(std::move(part));
 }
 
 void
@@ -1175,18 +1380,23 @@ MovingBodies::write_source_diagnostics (double time, const MultiFab* detJ_cc, co
     const Real fx = erf_actuator::integrate_source(0, m_src_x, detJ_cc, geom);
     const Real fy = erf_actuator::integrate_source(1, m_src_y, detJ_cc, geom);
     const Real fz = erf_actuator::integrate_source(2, m_src_z, detJ_cc, geom);
-    for (auto& d : m_disks) {
-        const auto n = d->normal();
-        // the integrated source over all bodies, projected on this disk's normal and signed
-        // as a thrust: equals the disk's thrust when it is the only body
-        d->write_diagnostics(time, -(n[0]*fx + n[1]*fy + n[2]*fz));
+    // each disk's row from its owner, with the integrated source over all bodies projected on its normal and
+    // signed as a thrust: equals the disk's thrust when it is the only body
+    const int nturb = num_turbines();
+    std::vector<int> bodies;
+    for (int k = 0; k < static_cast<int>(m_disks.size()); ++k) { bodies.push_back(nturb + k); }
+    if (!bodies.empty()) {
+        write_series("disk", erf_actuator::PrescribedCtDisk::log_columns(), time, first, bodies, erf_actuator::PrescribedCtDisk::log_size,
+                     [this, nturb, fx, fy, fz] (int b, Real* row) {
+                         const auto& d = m_disks[b - nturb];
+                         const auto n = d->normal();
+                         d->log_row(-(n[0]*fx + n[1]*fy + n[2]*fz), row);
+                         return true;
+                     });
     }
     if (ParallelDescriptor::IOProcessor()) {
-        std::ofstream out;
-        if (erf_actuator::open_log(out, m_in.diagnostics_dir + "/momentum_source.csv", first)) {
-            out << "time,fx,fy,fz\n";
-        }
-        out << std::setprecision(10) << time << "," << fx << "," << fy << "," << fz << "\n";
+        const Real row[3] = {fx, fy, fz};
+        erf_actuator::write_log_row(m_logs.get(m_in.diagnostics_dir + "/momentum_source.csv", first, "time,fx,fy,fz"), time, nullptr, row, 3);
     }
 }
 
@@ -1638,37 +1848,34 @@ MovingBodies::apply_disk_correction (int i, std::vector<Real>& uvw, const Geomet
 }
 
 void
-MovingBodies::write_correction_diagnostics (double time, bool first)
+MovingBodies::write_turbine_logs (double time, bool solution0)
 {
-    const auto& turbs = m_driver->turbines();
-    bool any = false;
-    for (std::size_t i = 0; i < turbs.size(); ++i) {
-        if (m_turbine_in[i].sampling != "disk_corrected") { continue; }
-        any = true;
-        // the owner made the correction and writes its log
-        if (!m_driver->is_owner(static_cast<int>(i))) { continue; }
-        const erf_actuator::DiskCorrection& c = m_corr_last[i];
-        std::ofstream out;
-        const bool truncate = first && !m_resumed && !m_corr_written;
-        if (erf_actuator::open_log(out, turbs[i].output_root + "_correction.csv", truncate)) {
-            out << "time,u_disk,ct,a,ct_prime,M,u_inf,factor,gain,relax\n";
-        }
-        out << std::setprecision(10) << time << "," << c.u_disk << "," << c.ct << "," << c.a << "," << c.ct_prime << ","
-            << c.M << "," << c.u_inf << "," << c.factor << "," << c.gain << "," << c.relax << "\n";
-    }
-    if (any) { m_corr_written = true; }
+    // every turbine's ERF-side and flow logs from its owner; the solution-0 row starts the files
+    std::vector<int> all(num_turbines());
+    for (int i = 0; i < num_turbines(); ++i) { all[i] = i; }
+    write_series("erf", erf_openfast::OpenFASTDriver::erf_log_columns(), time, solution0, all,
+                 erf_openfast::OpenFASTDriver::erf_log_size, [this] (int i, Real* row) { m_driver->erf_log_row(i, row); return true; });
+    write_series("flow", erf_openfast::OpenFASTDriver::flow_log_columns(), time, solution0, all,
+                 erf_openfast::OpenFASTDriver::flow_log_size, [this] (int i, Real* row) { m_driver->flow_log_row(i, row); return true; });
 }
 
-std::vector<Real>
-MovingBodies::hub_ground (const MultiFab* z_phys_nd, const Geometry& geom) const
+void
+MovingBodies::write_correction_diagnostics (double time, bool first)
 {
-    // every hub from its owner, then the terrain under them all (a collective)
-    const std::vector<Real> pos = turbine_table(3, false, [this] (int i, Real* row) {
-        for (int d = 0; d < 3; ++d) { row[d] = m_driver->turbines()[i].hub_pos[d]; }
-    });
-    std::vector<Real> ground;
-    erf_actuator::terrain_heights(z_phys_nd, geom, pos, ground);
-    return ground;
+    std::vector<int> bodies;
+    for (int i = 0; i < num_turbines(); ++i) {
+        if (m_turbine_in[i].sampling == "disk_corrected") { bodies.push_back(i); }
+    }
+    if (bodies.empty()) { return; }
+    // the owner made the correction and writes its row
+    write_series("correction", "u_disk,ct,a,ct_prime,M,u_inf,factor,gain,relax", time, first && !m_resumed && !m_corr_written,
+                 bodies, 9, [this] (int i, Real* row) {
+                     const erf_actuator::DiskCorrection& c = m_corr_last[i];
+                     const Real v[9] = {c.u_disk, c.ct, c.a, c.ct_prime, c.M, c.u_inf, c.factor, c.gain, c.relax};
+                     std::copy(v, v + 9, row);
+                     return true;
+                 });
+    m_corr_written = true;
 }
 
 void
@@ -1684,7 +1891,21 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
         plo[d] = static_cast<Real>(geom.ProbLo(d)); phi[d] = static_cast<Real>(geom.ProbHi(d));
         dx[d] = static_cast<Real>(geom.CellSize(d)); per[d] = geom.isPeriodic(d) ? 1 : 0;
     }
-    const std::vector<Real> ground = hub_ground(z_phys_nd, geom);
+    // every rotor's hub, axis and tip radius from its owner, in one gather: the terrain under the hubs (a
+    // collective) for the geometry audits, the swept discs of every pair for the overlap audit
+    const std::vector<Real> disc = turbine_table(7, false, [this] (int i, Real* row) {
+        const auto& t = m_driver->turbines()[i];
+        for (int d = 0; d < 3; ++d) { row[d] = t.hub_pos[d]; row[3+d] = t.hub_axis[d]; }
+        row[6] = erf_actuator::tip_radius(t);
+    });
+    std::vector<Real> ground;
+    {
+        std::vector<Real> pos(3 * static_cast<std::size_t>(nturb));
+        for (int i = 0; i < nturb; ++i) {
+            for (int d = 0; d < 3; ++d) { pos[3*i+d] = disc[7 * static_cast<std::size_t>(i) + d]; }
+        }
+        erf_actuator::terrain_heights(z_phys_nd, geom, pos, ground);
+    }
     // each owner audits its turbines; the I/O rank prints the reports in turbine order
     std::vector<std::string> text(nturb);
     std::vector<int> fatal(nturb, 0);
@@ -1713,12 +1934,7 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
         fatal[i] = bad ? 1 : 0;
     }
     bool any_fatal = print_turbine_texts(text, fatal);
-    // the swept discs of every pair: each rotor's hub, axis and tip radius from its owner, audited on the I/O rank
-    const std::vector<Real> disc = turbine_table(7, true, [this] (int i, Real* row) {
-        const auto& t = m_driver->turbines()[i];
-        for (int d = 0; d < 3; ++d) { row[d] = t.hub_pos[d]; row[3+d] = t.hub_axis[d]; }
-        row[6] = erf_actuator::tip_radius(t);
-    });
+    // the swept discs of every pair, audited on the I/O rank
     int overlap_fatal = 0;
     if (ParallelDescriptor::IOProcessor()) {
         std::vector<erf_openfast::RotorDisc> discs;
@@ -1887,21 +2103,23 @@ MovingBodies::apply_fllc (int i, double time, std::vector<Real>& uvw)
 void
 MovingBodies::write_fllc_diagnostics (double time, bool first)
 {
-    const auto& turbs = m_driver->turbines();
-    for (std::size_t i = 0; i < m_fllc.size(); ++i) {
-        // built on the owner alone, which writes the log
-        if (m_fllc[i].empty()) { continue; }
-        Real du_max = 0.0, sum2 = 0.0;
-        for (const auto& f : m_fllc[i]) {
-            du_max = std::max(du_max, f->max_correction());
-            sum2 += f->rms_correction() * f->rms_correction();
-        }
-        std::ofstream out;
-        const bool truncate = first && !m_resumed && !m_fllc_written;
-        if (erf_actuator::open_log(out, turbs[i].output_root + "_fllc.csv", truncate)) {
-            out << "time,du_max,du_rms\n";
-        }
-        out << std::setprecision(10) << time << "," << du_max << "," << std::sqrt(sum2 / static_cast<Real>(m_fllc[i].size())) << "\n";
+    std::vector<int> bodies;
+    for (int i = 0; i < num_turbines(); ++i) {
+        if (m_turbine_in[i].fllc) { bodies.push_back(i); }
+    }
+    if (!bodies.empty()) {
+        // built on the owner alone, which writes the row
+        write_series("fllc", "du_max,du_rms", time, first && !m_resumed && !m_fllc_written, bodies, 2, [this] (int i, Real* row) {
+            if (m_fllc[i].empty()) { return false; }
+            Real du_max = 0.0, sum2 = 0.0;
+            for (const auto& f : m_fllc[i]) {
+                du_max = std::max(du_max, f->max_correction());
+                sum2 += f->rms_correction() * f->rms_correction();
+            }
+            row[0] = du_max;
+            row[1] = std::sqrt(sum2 / static_cast<Real>(m_fllc[i].size()));
+            return true;
+        });
     }
     m_fllc_written = true;
 }

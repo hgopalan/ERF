@@ -7,6 +7,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -17,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include "../ERF_GTestTempDir.H"
+#include "ERF_DiagnosticsLog.H"
 #include "ERF_GTestThrowOnAbort.H"
 #include "ERF_RunningStats.H"
 
@@ -167,4 +169,58 @@ TEST(RunningStats, ARenamedQuantityContinuesOnlyWhenItIsTheSame)
     msg = erf_gtest::abort_message([&] { other.read_state(dir.string()); });
     EXPECT_NE(msg.find("does not list drag_x where expected"), std::string::npos) << msg;
     std::filesystem::remove_all(dir);
+}
+
+TEST(RunningStats, TheRowsWithABodyColumnAreTheFilesRowsAfterIt)
+{
+    RunningStats a("T1", (gtest_scratch_root() / "T1rows").string(), {"thrust", "power"});
+    a.accumulate(1.0, {Real(2.0e6), Real(1.0e7)});
+    a.accumulate(2.0, {Real(3.0e6), Real(1.5e7)});
+    std::ostringstream own, prefixed, packed;
+    a.write_rows(own, "");
+    a.write_rows(prefixed, "T1,");
+    // the farm format's rows, from the values gathered to the I/O rank
+    const std::vector<Real> v{a.mean(0), a.rms(0), a.min(0), a.max(0), a.mean(1), a.rms(1), a.min(1), a.max(1)};
+    RunningStats::write_rows(packed, "T1,", a.quantities(), a.num_samples(), a.t_first(), a.t_last(), v.data());
+    EXPECT_EQ(prefixed.str(), packed.str());
+    std::istringstream o(own.str()), p(prefixed.str());
+    std::string lo, lp;
+    int n = 0;
+    while (std::getline(o, lo)) {
+        ASSERT_TRUE(std::getline(p, lp));
+        EXPECT_EQ(lp, "T1," + lo);
+        ++n;
+    }
+    EXPECT_EQ(n, 2);
+}
+
+TEST(LogStreams, AFileIsOpenedOnceAndAppendedToAfterARestart)
+{
+    const auto dir = gtest_scratch_root() / "erf_gtest_logstreams";
+    const std::string f = (dir / "farm_erf.csv").string();
+    const Real r1[2] = {Real(1.5), Real(-2.0)};
+    const Real r2[2] = {Real(2.5), Real(-3.0)};
+    const std::string body = "T1";
+    {
+        erf_actuator::LogStreams logs;
+        // a fresh run: the file starts afresh with its header (and its directory is made)
+        erf_actuator::write_log_row(logs.get(f, true, "time,body,a,b"), 0.1, &body, r1, 2);
+        // later calls return the open stream: no second truncation, no second header
+        erf_actuator::write_log_row(logs.get(f, true, "time,body,a,b"), 0.2, &body, r2, 2);
+        EXPECT_TRUE(logs.is_open(f));
+        EXPECT_EQ(logs.size(), 1u);
+        logs.flush();
+        // flushed: the rows are in the file while the stream stays open
+        std::ifstream in(f);
+        std::string all((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(all, "time,body,a,b\n0.1,T1,1.5,-2\n0.2,T1,2.5,-3\n");
+    }
+    {
+        // a restarted run appends, without a header, to the file it continues
+        erf_actuator::LogStreams logs;
+        erf_actuator::write_log_row(logs.get(f, false, "time,body,a,b"), 0.3, nullptr, r1, 2);
+    }   // flushed when destroyed
+    std::ifstream in(f);
+    std::string all((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(all, "time,body,a,b\n0.1,T1,1.5,-2\n0.2,T1,2.5,-3\n0.3,1.5,-2\n");
 }
