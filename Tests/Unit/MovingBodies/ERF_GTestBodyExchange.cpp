@@ -520,3 +520,88 @@ TEST(BodyExchange, APointOutsideTheDomainAbortsNamingIt)
         EXPECT_TRUE(msg.empty()) << msg;
     }
 }
+
+namespace {
+
+// A rotor of radius R about a hub moving along x at speed (m per step), turning and yawing: its blade
+// points at step n (three blades of nb points each, plus the hub)
+std::vector<Real> rotor_points (const std::array<Real,3>& hub, Real R, int nb, Real azimuth, Real yaw)
+{
+    std::vector<Real> p{hub[0], hub[1], hub[2]};
+    for (int blade = 0; blade < 3; ++blade) {
+        const Real a = azimuth + Real(2.0943951023931957) * blade;
+        for (int k = 1; k <= nb; ++k) {
+            const Real r = R * Real(k) / Real(nb);
+            // in the rotor plane (normal to the yawed axis cos(yaw), sin(yaw), 0)
+            const Real s = r * std::cos(a), up = r * std::sin(a);
+            p.insert(p.end(), {hub[0] - s * std::sin(yaw), hub[1] + s * std::cos(yaw), hub[2] + up});
+        }
+    }
+    return p;
+}
+
+} // namespace
+
+TEST(BodyExchange, ThrottledEnvelopeChecksFollowAMovingYawingRotor)
+{
+    SlabMesh m;
+    const int np = amrex::ParallelDescriptor::NProcs();
+    const Real R = Real(3.0) * m.dx(), margin = R + Real(5.0) * m.dx();
+    const int k = 4, steps = 48;
+    erf_actuator::BodyExchange ex({np - 1});
+    ex.set_check_interval(k);
+    EXPECT_EQ(ex.check_interval(), k);
+    // the kernels reach 3 dx, so the hub may drift 5 dx between two builds: a rebuild once it is 4 dx
+    // away (half the margin), and 0.2 dx per step (0.8 dx per interval) on top. That carries it over ten
+    // cells, across the slab face at the middle (between ranks), and its envelope is rebuilt as it goes
+    std::array<Real,3> hub{{Real(0.4) * m.Lx, Real(0.5) * m.Ly, Real(0.5) * m.H}};
+    const Real speed = Real(0.2) * m.dx();
+    const std::string msg = erf_gtest::abort_message([&] {
+        for (int n = 0; n < steps; ++n) {
+            const std::vector<Real> p = rotor_points(hub, R, 4, Real(0.7) * n, Real(0.05) * n);
+            std::vector<std::vector<Real>> pts(1), vel, pos(1), force(1), eps(1);
+            if (ex.owns(0)) {
+                ex.set_hub(0, hub, R);
+                pts[0] = p;
+                pos[0] = p;
+                for (std::size_t q = 0; q < p.size() / 3; ++q) { force[0].insert(force[0].end(), {Real(1.0e3), Real(-50.0), Real(10.0)}); }
+                eps[0].assign(p.size() / 3, m.dx());
+            }
+            ex.sample_velocity(m.u, m.v, m.w, nullptr, m.geom, pts, {margin}, vel);
+            std::vector<Real> ref;
+            erf_actuator::sample_velocity(m.u, m.v, m.w, nullptr, m.geom, p, ref);
+            if (ex.owns(0)) { EXPECT_EQ(vel[0], ref) << "step " << n; }
+            amrex::MultiFab sx, sy, sz;
+            m.define_sources(sx, sy, sz);
+            ex.spread_forces(pos, force, eps, {margin}, nullptr, nullptr, m.geom, sx, sy, sz);
+            const Real total = erf_actuator::integrate_source(0, sx, nullptr, m.geom);
+            const Real want = Real(1.0e3) * Real(p.size() / 3);
+            EXPECT_NEAR(total, want, near_tol * want) << "step " << n;
+            hub[0] += speed;
+        }
+    });
+    // the inside-envelope check never tripped, and the reduction ran on one exchange in k of each kind
+    EXPECT_TRUE(msg.empty()) << msg;
+    EXPECT_EQ(ex.num_envelope_checks(), 2 * steps / k);
+    // the envelope was rebuilt as the hub drifted, and no longer reaches back to where it began
+    EXPECT_GE(ex.num_envelope_updates(), 2);
+    EXPECT_GT(ex.envelope(0)[0], Real(0.4) * m.Lx - R - margin);
+}
+
+TEST(BodyExchange, PointsLeavingTheirEnvelopeBetweenChecksAbort)
+{
+    // the owner stops the run at once, so only on one rank, where no other rank is left waiting for it
+    if (amrex::ParallelDescriptor::NProcs() != 1) { GTEST_SKIP() << "one rank only"; }
+    SlabMesh m;
+    erf_actuator::BodyExchange ex({0});
+    ex.set_check_interval(10);
+    const std::vector<Real> a = cluster(Real(8.0) * m.dx(), Real(0.5) * m.Ly, Real(0.5) * m.H, m.dx(), Real(40.0), 10, 11);
+    const std::vector<Real> b = cluster(Real(30.0) * m.dx(), Real(0.5) * m.Ly, Real(0.5) * m.H, m.dx(), Real(40.0), 10, 12);
+    std::vector<std::vector<Real>> vel;
+    ex.sample_velocity(m.u, m.v, m.w, nullptr, m.geom, {a}, {Real(10.0)}, vel);
+    const std::string msg = erf_gtest::abort_message([&] {
+        ex.sample_velocity(m.u, m.v, m.w, nullptr, m.geom, {b}, {Real(10.0)}, vel);
+    });
+    EXPECT_NE(msg.find("left its envelope between two envelope checks"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("envelope_check_interval"), std::string::npos) << msg;
+}

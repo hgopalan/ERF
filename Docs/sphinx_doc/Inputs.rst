@@ -2822,6 +2822,13 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | hub and the OpenFAST model's AirDens, and at a ct_disk   |                          |                          |
 |                                                        | centre and its air_density; the run aborts above it      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.envelope_check_interval**          | check the bodies' exchange envelopes (the one reduction  | Int >= 1                 | 1                        |
+|                                                        | of an exchange) on every this many steps only; between   |                          |                          |
+|                                                        | checks each owner checks its points on its own and the   |                          |                          |
+|                                                        | run aborts if they left their envelope. A turbine's      |                          |                          |
+|                                                        | envelope reaches 2 cells beyond its blades' sweep: its   |                          |                          |
+|                                                        | hub must move less than 1 cell per interval              |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
 |                                                        | one step (rotor speed times tip radius times the bodies' |                          |                          |
 |                                                        | step over the smallest cell size; on a terrain-following |                          |                          |

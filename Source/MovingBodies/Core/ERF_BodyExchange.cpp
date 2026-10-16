@@ -317,7 +317,9 @@ exchange_buffers (std::map<int, std::vector<Real>>& send, const std::vector<int>
 }
 
 BodyExchange::BodyExchange (std::vector<int> owners)
-    : m_owner(std::move(owners)), m_env(m_owner.size(), empty_envelope()), m_part(m_owner.size())
+    : m_owner(std::move(owners)), m_env(m_owner.size(), empty_envelope()), m_part(m_owner.size()),
+      m_hub(m_owner.size(), {{Real(0.0), Real(0.0), Real(0.0)}}), m_has_hub(m_owner.size(), 0), m_sweep(m_owner.size(), Real(0.0)),
+      m_hub_at_build(m_owner.size(), {{Real(0.0), Real(0.0), Real(0.0)}}), m_has_hub_at_build(m_owner.size(), 0)
 {
     for (int r : m_owner) {
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(r >= 0 && r < ParallelDescriptor::NProcs(), "BodyExchange: an owner is not a rank of this run");
@@ -328,6 +330,22 @@ bool
 BodyExchange::owns (int b) const
 {
     return m_owner[b] == ParallelDescriptor::MyProc();
+}
+
+void
+BodyExchange::set_check_interval (int k)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k >= 1, "BodyExchange: the envelope check interval must be >= 1");
+    m_check_interval = k;
+}
+
+void
+BodyExchange::set_hub (int b, const std::array<Real,3>& x, Real sweep)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(b >= 0 && b < num_bodies() && owns(b), "BodyExchange::set_hub: only a body's owner knows its hub");
+    m_hub[b] = x;
+    m_has_hub[b] = 1;
+    m_sweep[b] = std::max(sweep, Real(0.0));
 }
 
 std::vector<int>
@@ -367,31 +385,81 @@ BodyExchange::find_participants (const Geometry& geom)
 
 void
 BodyExchange::ensure_envelopes (const std::vector<std::array<Real,6>>& needed, const std::vector<Real>& margin,
-                                const BoxArray& ba, const DistributionMapping& dm, const Geometry& geom, bool fitted)
+                                const BoxArray& ba, const DistributionMapping& dm, const Geometry& geom, bool fitted, int kind)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(needed.size()) == num_bodies() && static_cast<int>(margin.size()) == num_bodies(),
                                      "BodyExchange: one needed box and one margin per body");
+    // the same on every rank: the grids, the interval and the count of exchanges of this kind
+    const bool grids_changed = !(ba == m_ba) || !(dm == m_dm) || fitted != m_fitted;
+    const bool check = grids_changed || (m_calls[kind] % m_check_interval == 0);
+    ++m_calls[kind];
+    if (!check) {
+        // between checks every envelope must still hold its body's points (the participants were found
+        // from it): checked by each owner on its own
+        for (int b = 0; b < num_bodies(); ++b) {
+            if (owns(b) && !inside(needed[b], m_env[b])) {
+                Abort("BodyExchange: the points of body " + std::to_string(b) + " left its envelope between two envelope checks "
+                      "(every " + std::to_string(m_check_interval) + " exchanges, erf.moving_bodies.envelope_check_interval); "
+                      "it moves too far in that many steps for its margin: use a smaller interval");
+            }
+        }
+        return;
+    }
+    ++m_num_checks;
+    // where each owned body stands: its hub, or the centre of its points
+    auto hub_of = [&] (int b, std::array<Real,3>& h) {
+        if (m_has_hub[b] != 0) { h = m_hub[b]; return true; }
+        if (is_empty(needed[b])) { return false; }
+        for (int d = 0; d < 3; ++d) { h[d] = Real(0.5) * (needed[b][d] + needed[b][d+3]); }
+        return true;
+    };
+    // 0: the envelope holds the body; 1: it must grow; 2: built afresh, its hub having drifted (only when
+    // the checks are throttled, so that an interval of 1 keeps envelopes that only ever grow)
+    std::vector<int> action(num_bodies(), 0);
     int grow = 0;
     for (int b = 0; b < num_bodies(); ++b) {
-        if (owns(b) && !inside(needed[b], m_env[b])) { grow = 1; }
+        if (!owns(b)) { continue; }
+        if (!inside(needed[b], m_env[b])) {
+            action[b] = 1;
+        } else if (m_check_interval > 1 && m_has_hub_at_build[b] != 0 && !is_empty(needed[b])) {
+            std::array<Real,3> h{};
+            if (hub_of(b, h)) {
+                Real d2 = Real(0.0);
+                for (int d = 0; d < 3; ++d) { d2 += (h[d] - m_hub_at_build[b][d]) * (h[d] - m_hub_at_build[b][d]); }
+                const Real half = Real(0.5) * std::max(margin[b], Real(0.0));
+                if (d2 > half * half) { action[b] = 2; }
+            }
+        }
+        if (action[b] != 0) { grow = 1; }
     }
-    // the one operation every rank takes part in: whether any envelope must grow
+    // the one operation every rank takes part in: whether any envelope must change
     ParallelDescriptor::ReduceIntMax(grow);
     if (grow != 0) {
-        // each owner writes its bodies' envelopes, grown where needed; the sum hands every rank all of them
+        // each owner writes its bodies' envelopes, grown or rebuilt where needed; the sum hands every rank all of them
         std::vector<Real> env(6 * static_cast<std::size_t>(num_bodies()), Real(0.0));
         for (int b = 0; b < num_bodies(); ++b) {
             if (!owns(b)) { continue; }
             std::array<Real,6> e = m_env[b];
-            if (!inside(needed[b], e)) {
+            if (action[b] != 0) {
                 const Real m = std::max(margin[b], Real(0.0));
                 const std::array<Real,6>& n = needed[b];
                 const std::array<Real,6> grown{{n[0] - m, n[1] - m, n[2] - m, n[3] + m, n[4] + m, n[5] + m}};
-                if (is_empty(e)) {
+                if (is_empty(e) || action[b] == 2) {
                     e = grown;
                 } else {
                     for (int d = 0; d < 3; ++d) { e[d] = std::min(e[d], grown[d]); e[d+3] = std::max(e[d+3], grown[d+3]); }
                 }
+                // with throttled checks the envelope must hold the points wherever they turn until the next
+                // check, not only where they are now: the whole sphere they sweep about the hub, with the margin
+                if (m_check_interval > 1 && m_has_hub[b] != 0) {
+                    const Real r = m_sweep[b] + m;
+                    for (int d = 0; d < 3; ++d) {
+                        e[d] = std::min(e[d], m_hub[b][d] - r);
+                        e[d+3] = std::max(e[d+3], m_hub[b][d] + r);
+                    }
+                }
+                std::array<Real,3> h{};
+                if (hub_of(b, h)) { m_hub_at_build[b] = h; m_has_hub_at_build[b] = 1; }
             }
             for (int k = 0; k < 6; ++k) { env[6*b+k] = e[k]; }
         }
@@ -402,7 +470,6 @@ BodyExchange::ensure_envelopes (const std::vector<std::array<Real,6>>& needed, c
         }
         ++m_num_updates;
     }
-    const bool grids_changed = !(ba == m_ba) || !(dm == m_dm) || fitted != m_fitted;
     if (grow != 0 || grids_changed) {
         m_ba = ba;
         m_dm = dm;
@@ -431,7 +498,7 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pts[b].size() % 3 == 0, "BodyExchange::sample_velocity: points come as x,y,z triples");
         hold_points(needed[b], pts[b], nullptr);
     }
-    ensure_envelopes(needed, margin, ba, dm, geom, fitted);
+    ensure_envelopes(needed, margin, ba, dm, geom, fitted, 0);
 
     // each owned point, moved into the domain across a periodic seam, to the ranks owning a box over
     // its cell's column (with a cell of slack each way, which the box test below settles exactly)
@@ -575,7 +642,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
         for (std::size_t p = 0; p < eps[b].size(); ++p) { reach[b][p] = Real(3.0) * eps[b][p]; }
         hold_points(needed[b], pos[b], &reach[b]);
     }
-    ensure_envelopes(needed, margin, ba, dm, geom, fitted);
+    ensure_envelopes(needed, margin, ba, dm, geom, fitted, 1);
 
     // each owned point to the ranks owning a box within its kernel's reach (and periodic images)
     std::vector<std::map<int, std::vector<int>>> to(nb);

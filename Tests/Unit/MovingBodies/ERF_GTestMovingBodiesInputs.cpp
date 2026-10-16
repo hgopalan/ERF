@@ -322,3 +322,15 @@ TEST(MovingBodiesInputs, TheRestartRecordHoldsTheWidthsInUse)
     chk.erase("fllc");
     EXPECT_FALSE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
 }
+
+TEST(MovingBodiesInputs, TheEnvelopeCheckIntervalDefaultsToEveryStepAndMustBePositive)
+{
+    set_turbine("Tenv", "adm", "");
+    EXPECT_EQ(MovingBodiesInputs::read().envelope_check_interval, 1);
+    amrex::ParmParse pp("erf.moving_bodies");
+    pp.add("envelope_check_interval", 5);
+    EXPECT_EQ(MovingBodiesInputs::read().envelope_check_interval, 5);
+    pp.add("envelope_check_interval", 0);
+    EXPECT_NE(erf_gtest::abort_message([] { MovingBodiesInputs::read(); }).find("envelope_check_interval"), std::string::npos);
+    pp.add("envelope_check_interval", 1);
+}
