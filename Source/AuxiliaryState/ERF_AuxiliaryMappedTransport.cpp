@@ -184,10 +184,10 @@ bool CopyNativeMappedDryAirCarrierFluxRate (
     std::string& diagnostic)
 {
     diagnostic.clear();
-    if (AMREX_SPACEDIM != 3 || !rate.is_defined() || rate.nComp() != 1 ||
+    if (!rate.is_defined() || rate.nComp() != 1 ||
         rho_u.nComp() < 1 || rho_v.nComp() < 1 || rho_w.nComp() < 1) {
-        diagnostic = "native mapped dry-air carrier requires three dimensions, "
-                     "one output component, and one component per input face";
+        diagnostic = "native mapped dry-air carrier requires one output component "
+                     "and one component per input face";
         return false;
     }
 

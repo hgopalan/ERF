@@ -284,10 +284,6 @@ SBMTransport::SBMTransport (const SBMLayout& layout,
       m_device_metadata(std::make_unique<DeviceMetadata>())
 {
     AMREX_ALWAYS_ASSERT(number_of_levels > 0);
-    if (AMREX_SPACEDIM != 3) {
-        throw std::invalid_argument(
-            "SBM M3 mapped transport currently requires three dimensions");
-    }
 
     std::vector<ConstraintDescriptor> local_descriptors;
     std::vector<ConstraintTerm> local_terms;

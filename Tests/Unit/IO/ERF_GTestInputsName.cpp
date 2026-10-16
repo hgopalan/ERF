@@ -213,7 +213,7 @@ TEST(InputsName, TablesAndPreprocessorRegionsAreReadAsParmParseDoes)
     EXPECT_FALSE(has_duplicates(d.write("gpu", "#ifdef AMREX_USE_GPU\nb = 1\n#else\nb = 2\n#endif\n")));
     // and a duplicate inside the branch that is read is still found
     EXPECT_TRUE(has_duplicates(d.write("dim_dup", "#if AMREX_SPACEDIM == 3\na = 1\na = 2\n#endif\n")));
-    EXPECT_EQ(scan(d.path("dim")).seen.at("a").value, AMREX_SPACEDIM == 3 ? "1" : (AMREX_SPACEDIM == 2 ? "2" : "3"));
+    EXPECT_EQ(scan(d.path("dim")).seen.at("a").value, "1");
 }
 
 TEST(InputsName, TheMessageNamesBothPlacesOnSeparateLines)

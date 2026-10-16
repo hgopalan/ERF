@@ -52,8 +52,6 @@ void validate_sbm_m3_advection (const SolverChoice& choice,
                                 const int max_level)
 {
     if (choice.moisture_type != MoistureType::SBM) return;
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(AMREX_SPACEDIM == 3,
-        "SBM M3 mapped advection requires three dimensions");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(max_level == 0,
         "SBM M3 mapped advection supports one AMR level only");
     const bool anelastic = !choice.anelastic.empty() && choice.anelastic[0] != 0;
@@ -121,8 +119,6 @@ void validate_auxiliary_inert_tracer_fixture (const SolverChoice& choice,
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.moisture_type == MoistureType::None,
         "M2 auxiliary inert tracer fixture requires moisture_model=None");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(AMREX_SPACEDIM == 3,
-        "M2 auxiliary inert tracer fixture requires three dimensions");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(max_level == 0,
         "M2 auxiliary inert tracer fixture supports one AMR level only");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.mesh_type == MeshType::ConstantDz &&
