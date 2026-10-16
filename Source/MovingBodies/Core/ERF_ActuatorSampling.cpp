@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <AMReX.H>
+#include <AMReX_BLProfiler.H>
 #include <AMReX_Algorithm.H>
 #include <AMReX_Array4.H>
 #include <AMReX_Gpu.H>
@@ -104,6 +105,7 @@ sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
                        const std::vector<Real>& wpos, std::vector<Real>& vel, std::vector<int>& cnt,
                        ActuatorDeviceBuffers* buffers)
 {
+    BL_PROFILE("erf_actuator::sample_velocity_local()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(wpos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(U.nGrow() >= 1 && V.nGrow() >= 1 && W.nGrow() >= 1,
                                      "sample_velocity needs one filled ghost cell on the velocities");
@@ -207,6 +209,7 @@ sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
                  const MultiFab* z_phys_nd, const Geometry& geom,
                  const std::vector<Real>& pos, std::vector<Real>& vel)
 {
+    BL_PROFILE("erf_actuator::sample_velocity()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
     const int npts = static_cast<int>(pos.size() / 3);
     std::vector<int> cnt;
@@ -255,6 +258,7 @@ void
 sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, const Geometry& geom,
                     const std::vector<Real>& pos, std::vector<Real>& val)
 {
+    BL_PROFILE("erf_actuator::sample_cell_scalar()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() % 3 == 0, "sample_cell_scalar: pos holds x,y,z triples");
     const int npts = static_cast<int>(pos.size() / 3);
     val.assign(npts, 0.0);
@@ -353,6 +357,7 @@ sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, con
 void
 terrain_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& pos, std::vector<Real>& h)
 {
+    BL_PROFILE("erf_actuator::terrain_heights()");
     const int npts = static_cast<int>(pos.size() / 3);
     h.assign(npts, static_cast<Real>(geom.ProbLo(2)));
     if (npts == 0 || z_phys_nd == nullptr) { return; }
@@ -415,6 +420,7 @@ terrain_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vec
 ZBounds
 mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom, bool over_all_ranks)
 {
+    BL_PROFILE("erf_actuator::mesh_z_bounds()");
     const int kground = geom.Domain().smallEnd(2);
     const Real big = std::numeric_limits<Real>::max();
     ReduceOps<ReduceOpMin, ReduceOpMax, ReduceOpMin, ReduceOpMax> ops;
@@ -632,6 +638,7 @@ struct CellHeightPiece
 void
 tip_cell_heights_batched (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& rows, std::vector<Real>& dz)
 {
+    BL_PROFILE("erf_actuator::tip_cell_heights_batched()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(rows.size() % 9 == 0, "tip_cell_heights_batched: nine values per region");
     const int n = static_cast<int>(rows.size() / 9);
     const Real dz0 = static_cast<Real>(geom.CellSize(2));
@@ -728,6 +735,7 @@ min_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
 void
 tip_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& rows, std::vector<Real>& dz)
 {
+    BL_PROFILE("erf_actuator::tip_cell_heights()");
     cell_heights(z_phys_nd, geom, rows, true, dz);
 }
 
@@ -735,6 +743,7 @@ bool
 points_covered_by (const BoxArray& ba, const Geometry& geom, const std::vector<Real>& pos, Real reach, std::string& first_outside,
                    CoverZ z, const ZBounds* zb)
 {
+    BL_PROFILE("erf_actuator::points_covered_by()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!geom.isPeriodic(2), "points_covered_by: z must not be periodic");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(zb == nullptr || !zb->has_ground() || zb->dz_hi >= zb->dz_lo,
                                      "points_covered_by: the levels' spacing must be positive");

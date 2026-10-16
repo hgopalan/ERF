@@ -128,6 +128,10 @@ MovingBodiesInputs::read ()
         Abort("erf.moving_bodies.alm_max_tip_cells must be > 0 (cells swept by a blade tip per step)");
     }
     pp.query("verify_tip_cells", in.verify_tip_cells);
+    pp.query("timing_int", in.timing_int);
+    if (in.timing_int < 0) {
+        Abort("erf.moving_bodies.timing_int must be >= 0 (steps between two timing summaries; 0 prints none)");
+    }
 
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {

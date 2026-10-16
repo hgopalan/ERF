@@ -364,6 +364,10 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
 
     // two ERF steps of five OpenFAST steps each
     EXPECT_EQ(t.time_index, 10);
+    // the time its FAST_CFD_Step calls took is recorded for the timing summary, which clears it
+    EXPECT_GT(t.step_seconds, 0.0);
+    driver.reset_step_seconds();
+    EXPECT_EQ(t.step_seconds, 0.0);
     // blade 0 turned by omega * 10 dt about +x
     const double az = d.omega() * 10 * d.dt;
     const double r_root = 0.5 / 6 * d.rotor_radius;

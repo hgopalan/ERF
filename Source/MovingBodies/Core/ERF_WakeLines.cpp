@@ -10,6 +10,7 @@
 #include <sstream>
 
 #include <AMReX.H>
+#include <AMReX_BLProfiler.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 
@@ -140,6 +141,7 @@ WakeLines::write_instantaneous_rows (std::ostream& out, double time, const std::
 void
 WakeLines::write_average () const
 {
+    BL_PROFILE("WakeLines::write_average()");
     if (ParallelDescriptor::MyProc() != m_writer) { return; }
     std::ofstream out;
     open_log(out, m_output_root + "_wake_avg.csv", true);

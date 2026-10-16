@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <AMReX.H>
+#include <AMReX_BLProfiler.H>
 #include <AMReX_Algorithm.H>
 #include <AMReX_Array4.H>
 #include <AMReX_Gpu.H>
@@ -339,6 +340,7 @@ spread_partial_norms (const std::vector<Real>& pos, const std::vector<Real>& eps
                       const MultiFab& src_x, std::vector<Real>& norm, const ZBounds* zb_local,
                       ActuatorDeviceBuffers* buffers)
 {
+    BL_PROFILE("erf_actuator::spread_partial_norms()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() == 3 * epsilon.size(), "spread_partial_norms: one kernel width per x,y,z point");
     const int npts = static_cast<int>(epsilon.size());
     norm.assign(3 * static_cast<std::size_t>(npts), Real(0.0));
@@ -478,6 +480,7 @@ add_scaled_kernels (const std::vector<Real>& pos, const std::vector<Real>& f_ove
                     MultiFab& src_x, MultiFab& src_y, MultiFab& src_z, const ZBounds* zb_local,
                     ActuatorDeviceBuffers* buffers)
 {
+    BL_PROFILE("erf_actuator::add_scaled_kernels()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() == 3 * epsilon.size() && f_over_s.size() == pos.size(),
                                      "add_scaled_kernels: one kernel width and one x,y,z scale per x,y,z point");
     const int npts = static_cast<int>(epsilon.size());
@@ -608,6 +611,7 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, con
 Real
 integrate_source (int dir, const MultiFab& src, const MultiFab* detJ_cc, const Geometry& geom)
 {
+    BL_PROFILE("erf_actuator::integrate_source()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dir >= 0 && dir <= 2 && src.ixType() == IndexType(IntVect::TheDimensionVector(dir)),
                                      "integrate_source: src must be face-centred in direction dir (0, 1 or 2)");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(detJ_cc == nullptr || detJ_cc->nGrow() >= 1, "integrate_source: detJ_cc needs one ghost cell");

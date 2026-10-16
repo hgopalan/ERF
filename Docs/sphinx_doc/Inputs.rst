@@ -2853,6 +2853,13 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | fresh search of each rotor's box; the run aborts if they |                          |                          |
 |                                                        | differ                                                   |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.timing_int**                       | print, every this many steps of the anchor level, the    | Int >= 0                 | 0 (off)                  |
+|                                                        | wall-clock seconds each phase of the bodies took over    |                          |                          |
+|                                                        | those steps (minimum, mean and maximum over the ranks)   |                          |                          |
+|                                                        | and the OpenFAST step of the fastest and slowest         |                          |                          |
+|                                                        | turbine; 0 prints nothing. Any build; with it on, each   |                          |                          |
+|                                                        | timed phase waits for the GPU at its start and its end   |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 The diagnostics files are listed below; they are written every ``diagnostics_int`` steps. The
 rows of ``_erf.csv``, ``_flow.csv`` and ``total_load.csv`` carry the time at the end of their

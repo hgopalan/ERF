@@ -66,6 +66,7 @@ struct TurbineState
     double dt_fast{0.0};
     int num_substeps{0};
     int time_index{0};                 //!< OpenFAST steps taken since init
+    double step_seconds{0.0};          //!< wall-clock seconds in FAST_CFD_Step since the last reset_step_seconds(), on the owner
     // sizes reported by OpenFAST
     int num_blades{0};
     int num_blade_elem{0};             //!< structural (velocity) nodes per blade
@@ -156,8 +157,10 @@ public:
      */
     void set_restored_loads (int i, const std::vector<amrex::Real>& force, const std::vector<amrex::Real>& node_vel);
 
-    /** Advance every turbine this rank owns by one ERF step (num_substeps OpenFAST steps). */
+    /** Advance every turbine this rank owns by one ERF step (num_substeps OpenFAST steps), adding the time of each turbine's calls to its step_seconds. */
     void step ();
+    //! zero every turbine's step_seconds (after a timing summary)
+    void reset_step_seconds ();
     //! substeps per ERF step of the turbines this rank owns (-1 when it owns none)
     int local_substeps () const;
     //! abort unless every turbine this rank owns runs the same OpenFAST time step

@@ -9,6 +9,7 @@
 #include <string>
 
 #include <AMReX.H>
+#include <AMReX_BLProfiler.H>
 #include <AMReX_ParallelDescriptor.H>
 
 #include "ERF_ActuatorSampling.H"
@@ -144,6 +145,7 @@ std::vector<int>
 choose_owners (const std::vector<Box>& footprints, const std::vector<Real>& dt, const BoxArray& ba,
                const DistributionMapping& dm, const Geometry& geom, int nranks)
 {
+    BL_PROFILE("erf_actuator::choose_owners()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ba.ixType().cellCentered() && !ba.empty(), "choose_owners: the bodies' level needs cell-centred boxes");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dt.size() == footprints.size(), "choose_owners: one time step per body");
     for (int i = 0; i < static_cast<int>(ba.size()); ++i) {
@@ -239,6 +241,7 @@ void
 exchange_buffers (std::map<int, std::vector<Real>>& send, const std::vector<int>& from, std::map<int, std::vector<Real>>& recv,
                   const std::map<int, std::size_t>* sizes)
 {
+    BL_PROFILE("erf_actuator::exchange_buffers()");
     const int me = ParallelDescriptor::MyProc();
     recv.clear();
 #ifdef AMREX_USE_MPI
@@ -372,6 +375,7 @@ BodyExchange::receivers () const
 void
 BodyExchange::find_participants (const Geometry& geom)
 {
+    BL_PROFILE("BodyExchange::find_participants()");
     for (int b = 0; b < num_bodies(); ++b) {
         m_part[b].clear();
         if (is_empty(m_env[b])) { continue; }
@@ -387,6 +391,7 @@ void
 BodyExchange::ensure_envelopes (const std::vector<std::array<Real,6>>& needed, const std::vector<Real>& margin,
                                 const BoxArray& ba, const DistributionMapping& dm, const Geometry& geom, bool fitted, int kind)
 {
+    BL_PROFILE("BodyExchange::ensure_envelopes()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(needed.size()) == num_bodies() && static_cast<int>(margin.size()) == num_bodies(),
                                      "BodyExchange: one needed box and one margin per body");
     // the same on every rank: the grids, the interval and the count of exchanges of this kind
@@ -483,6 +488,7 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
                                const Geometry& geom, const std::vector<std::vector<Real>>& pts, const std::vector<Real>& margin,
                                std::vector<std::vector<Real>>& vel)
 {
+    BL_PROFILE("BodyExchange::sample_velocity()");
     const int nb = num_bodies();
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(pts.size()) == nb, "BodyExchange::sample_velocity: one point list per body");
     const int me = ParallelDescriptor::MyProc();
@@ -502,6 +508,7 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
 
     // each owned point, moved into the domain across a periodic seam, to the ranks owning a box over
     // its cell's column (with a cell of slack each way, which the box test below settles exactly)
+    BL_PROFILE_VAR("BodyExchange::sample_velocity: route", route);
     std::vector<std::vector<Real>> wpos(nb);
     std::vector<std::map<int, std::vector<int>>> to(nb);   // body: receiver -> its point indices
     for (int b = 0; b < nb; ++b) {
@@ -528,7 +535,12 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
             for (int p : idx) { buf.insert(buf.end(), {wpos[b][3*p], wpos[b][3*p+1], wpos[b][3*p+2]}); }
         }
     }
-    exchange_buffers(out, send_ranks, in);
+    BL_PROFILE_VAR_STOP(route);
+    {
+        // includes the wait for the slowest sender
+        BL_PROFILE("BodyExchange::sample_velocity: points round");
+        exchange_buffers(out, send_ranks, in);
+    }
 
     // sample every point received, from every owner at once, on this rank's boxes
     std::vector<Real> all_pos;
@@ -573,7 +585,10 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
         for (int b : sections(m_owner, m_part, me, r)) { n += to[b][r].size(); }
         reply_size[r] = 4 * n;
     }
-    exchange_buffers(reply_out, recv_ranks, reply_in, &reply_size);
+    {
+        BL_PROFILE("BodyExchange::sample_velocity: replies round");
+        exchange_buffers(reply_out, recv_ranks, reply_in, &reply_size);
+    }
 
     // the owner sums the answers over the ranks it asked, in rank order: one holds the point
     vel.assign(nb, std::vector<Real>());
@@ -614,6 +629,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
                              const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom,
                              MultiFab& src_x, MultiFab& src_y, MultiFab& src_z)
 {
+    BL_PROFILE("BodyExchange::spread_forces()");
     const int nb = num_bodies();
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(pos.size()) == nb && static_cast<int>(force.size()) == nb &&
                                      static_cast<int>(eps.size()) == nb, "BodyExchange::spread_forces: one point list per body");
@@ -645,6 +661,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     ensure_envelopes(needed, margin, ba, dm, geom, fitted, 1);
 
     // each owned point to the ranks owning a box within its kernel's reach (and periodic images)
+    BL_PROFILE_VAR("BodyExchange::spread_forces: route", route);
     std::vector<std::map<int, std::vector<int>>> to(nb);
     for (int b = 0; b < nb; ++b) {
         if (!owns(b) || usable[b] == 0) { continue; }
@@ -662,6 +679,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     }
     const std::vector<int> recv_ranks = receivers();
     const std::vector<int> send_ranks = senders();
+    BL_PROFILE_VAR_STOP(route);
 
     // 0. on a uniform mesh the owner can find a kernel's whole normalisation alone (uniform_mesh_norm), when
     // the level's boxes cover its reach; it then sends F/S with the point, and the point skips the two rounds
@@ -704,7 +722,11 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
             }
         }
     }
-    exchange_buffers(out, send_ranks, in);
+    {
+        // includes the wait for the slowest sender
+        BL_PROFILE("BodyExchange::spread_forces: points round");
+        exchange_buffers(out, send_ranks, in);
+    }
 
     // the points received, per body (each body has one owner, so one sender): positions, widths, and the
     // scales of those normalised on their owner
@@ -780,7 +802,10 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
             norm_size[r] = 3 * n_remote_to[r];
         }
     }
-    exchange_buffers(norm_out, norm_from, norm_in, &norm_size);
+    {
+        BL_PROFILE("BodyExchange::spread_forces: partial norms round");
+        exchange_buffers(norm_out, norm_from, norm_in, &norm_size);
+    }
 
     // 3. the owner sums the parts in rank order and sends back force over normalisation per remote point
     for (int r : norm_from) {
@@ -828,7 +853,10 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
         scale_from.push_back(s);
         scale_size[s] = 3 * n_remote_from[s];
     }
-    exchange_buffers(scale_out, scale_from, scale_in, &scale_size);
+    {
+        BL_PROFILE("BodyExchange::spread_forces: scales round");
+        exchange_buffers(scale_out, scale_from, scale_in, &scale_size);
+    }
 
     // 4. every kernel this rank's faces see, in body order
     for (int s : scale_from) {

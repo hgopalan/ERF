@@ -240,6 +240,11 @@ For large farms (hundreds of turbines and more):
 - Use ``diagnostics_format = farm`` (or ``per_rank`` when the farm file's
   gather to one rank is too large): a few files in place of several per
   turbine.
+- Measure before tuning: ``timing_int`` prints the time of each phase (the
+  sampling, OpenFAST, the spreading, the diagnostics, the wake lines) over
+  the ranks every few steps, and a build with
+  ``-DERF_ENABLE_TINY_PROFILE=ON`` breaks it down further, down to each
+  message round of the exchanges (see the theory section on timing).
 
 Restarting
 ----------
