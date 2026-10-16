@@ -2834,9 +2834,9 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | run aborts if they leave their envelope. For a turbine,  |                          |                          |
 |                                                        | the margin is tip radius + 2 dx. Hub drift below the     |                          |                          |
 |                                                        | margin minus the kernel reach (3 epsilon, using the      |                          |                          |
-|                                                        | largest epsilon) between envelope builds guarantees     |                          |                          |
-|                                                        | coverage. At a check, drift exceeding half the margin   |                          |                          |
-|                                                        | since the last build triggers a rebuild.                |                          |                          |
+|                                                        | largest epsilon) between envelope builds guarantees      |                          |                          |
+|                                                        | coverage. At a check, drift exceeding half the margin    |                          |                          |
+|                                                        | since the last build triggers a rebuild.                 |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
 |                                                        | one step (rotor speed times tip radius times the bodies' |                          |                          |
