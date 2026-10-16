@@ -2825,9 +2825,12 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 | **erf.moving_bodies.envelope_check_interval**          | check the bodies' exchange envelopes (the one reduction  | Int >= 1                 | 1                        |
 |                                                        | of an exchange) on every this many steps only; between   |                          |                          |
 |                                                        | checks each owner checks its points on its own and the   |                          |                          |
-|                                                        | run aborts if they left their envelope. A turbine's      |                          |                          |
-|                                                        | envelope reaches 2 cells beyond its blades' sweep: its   |                          |                          |
-|                                                        | hub must move less than 1 cell per interval              |                          |                          |
+|                                                        | run aborts if they leave their envelope. For a turbine,  |                          |                          |
+|                                                        | the margin is tip radius + 2 dx. Hub drift below the     |                          |                          |
+|                                                        | margin minus the kernel reach (3 epsilon, using the      |                          |                          |
+|                                                        | largest epsilon) between envelope builds guarantees     |                          |                          |
+|                                                        | coverage. At a check, drift exceeding half the margin   |                          |                          |
+|                                                        | since the last build triggers a rebuild.                |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
 |                                                        | one step (rotor speed times tip radius times the bodies' |                          |                          |
