@@ -435,13 +435,14 @@ uniform_mesh_norm (Real px, Real py, Real pz, Real eps, const Geometry& geom, co
     const Real inv_eps2 = Real(1.0) / (eps * eps);
     const Real reach2 = Real(9.0) * eps * eps;
     const Array4<Real const> no_znd{};
-    kf.point_images(px, py, pz, eps);
+    std::vector<std::array<Real,3>> images;
+    kf.point_images(px, py, pz, eps, images);
     // the faces of the domain a box would own (each physical face once): the cells' low faces
     const Box dom_cells = geom.Domain();
     // first check that the boxes hold every cell whose low face is within reach, in every direction
     for (int dir = 0; dir < 3; ++dir) {
         const Box dom_faces = owned_faces(dir, dom_cells);
-        for (const auto& q : kf.images) {
+        for (const auto& q : images) {
             const Box rb = kf.reach_box(dir, q[0], q[1], q[2], eps) & dom_faces;
             if (rb.isEmpty()) { continue; }
             // a face of rb and the cell it is the low face of have the same index
@@ -451,7 +452,7 @@ uniform_mesh_norm (Real px, Real py, Real pz, Real eps, const Geometry& geom, co
     Real s[3] = {Real(0.0), Real(0.0), Real(0.0)};
     for (int dir = 0; dir < 3; ++dir) {
         const Box dom_faces = owned_faces(dir, dom_cells);
-        for (const auto& q : kf.images) {
+        for (const auto& q : images) {
             const Box rb = kf.reach_box(dir, q[0], q[1], q[2], eps) & dom_faces;
             if (rb.isEmpty()) { continue; }
             const auto lo = amrex::lbound(rb);
