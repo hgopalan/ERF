@@ -17,6 +17,8 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
 
+#include "ERF_ActuatorDeviceBuffers.H"
+
 namespace erf_actuator {
 
 /**
@@ -102,6 +104,8 @@ public:
     int num_envelope_updates () const { return m_num_updates; }
     /** The points this rank has received from other ranks, over every exchange so far: for the tests. */
     long points_received () const { return m_points_received; }
+    /** The device memory its sampling and spreading kernels reuse from step to step (and their launch count): for the tests. */
+    const ActuatorDeviceBuffers& device_buffers () const { return m_buffers; }
 
     /**
      * Collective. Sample the face-centred velocities at the points of every body this rank owns,
@@ -140,6 +144,7 @@ private:
     bool m_fitted{false};
     int m_num_updates{0};
     long m_points_received{0};
+    ActuatorDeviceBuffers m_buffers;                //!< kept from step to step: grows to the largest exchange, never shrinks
 
     /**
      * Collective. Grow the envelope of every body whose needed box (lo, hi in m, on its owner; lo > hi

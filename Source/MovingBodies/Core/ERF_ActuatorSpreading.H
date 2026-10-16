@@ -10,6 +10,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
 
+#include "ERF_ActuatorDeviceBuffers.H"
 #include "ERF_ActuatorSampling.H"
 
 namespace erf_actuator {
@@ -88,7 +89,12 @@ void spread_forces (const std::vector<amrex::Real>& pos,
  * point reaches, in rank order). The boxes are src_x's, which z_phys_nd and detJ_cc must share.
  * zb_local, when given, is this rank's mesh_z_bounds(z_phys_nd, geom, false), which the call then
  * need not compute; the same for add_scaled_kernels.
+ *
+ * The periodic images of the points are made once, and binned to the boxes: one kernel per box and
+ * face grid, one thread per point, which adds the point's terms in a fixed order (its images, then
+ * their faces k, j, i) without atomics, so the result does not depend on the device's scheduling.
  * @param[out] norm 3*n partial normalisations (m^3), component fastest
+ * @param buffers device memory kept from call to call (the call uses its own when nullptr)
  */
 void spread_partial_norms (const std::vector<amrex::Real>& pos,
                            const std::vector<amrex::Real>& epsilon,
@@ -97,12 +103,18 @@ void spread_partial_norms (const std::vector<amrex::Real>& pos,
                            const amrex::Geometry& geom,
                            const amrex::MultiFab& src_x,
                            std::vector<amrex::Real>& norm,
-                           const ZBounds* zb_local = nullptr);
+                           const ZBounds* zb_local = nullptr,
+                           ActuatorDeviceBuffers* buffers = nullptr);
 
 /**
  * The second pass, on this rank's boxes only: add (F_p / S_p) w_p to every face of every box (both
  * copies of a shared face alike), each point with its own width.
+ *
+ * The images are binned to tiles of 8^3 faces of each box: one kernel per box and face grid, one
+ * thread per face of the tiles some kernel reaches, which adds its terms in point then image order
+ * without atomics on the sources (deterministic, and the order of the point-by-point sum).
  * @param[in] f_over_s 3*n forces over their whole normalisations (N/m^3), component fastest; a zero skips the point's component
+ * @param buffers device memory kept from call to call (the call uses its own when nullptr)
  */
 void add_scaled_kernels (const std::vector<amrex::Real>& pos,
                          const std::vector<amrex::Real>& f_over_s,
@@ -113,7 +125,8 @@ void add_scaled_kernels (const std::vector<amrex::Real>& pos,
                          amrex::MultiFab& src_x,
                          amrex::MultiFab& src_y,
                          amrex::MultiFab& src_z,
-                         const ZBounds* zb_local = nullptr);
+                         const ZBounds* zb_local = nullptr,
+                         ActuatorDeviceBuffers* buffers = nullptr);
 
 /** What is wrong with the points, forces and widths for spread_forces (an empty string when nothing is). */
 std::string spread_points_problem (const std::vector<amrex::Real>& pos, const std::vector<amrex::Real>& force,

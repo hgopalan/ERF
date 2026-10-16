@@ -437,7 +437,7 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
     }
     std::vector<Real> all_vel;
     std::vector<int> all_cnt;
-    sample_velocity_local(U, V, W, z_phys_nd, geom, all_pos, all_vel, all_cnt);
+    sample_velocity_local(U, V, W, z_phys_nd, geom, all_pos, all_vel, all_cnt, &m_buffers);
 
     // each sender gets, per point it sent, how many of this rank's boxes hold it and the velocity there
     std::map<int, std::vector<Real>> reply_out, reply_in;
@@ -586,7 +586,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     ZBounds zb;
     if (z_phys_nd != nullptr && !all_eps.empty()) { zb = mesh_z_bounds(*z_phys_nd, geom, false); }
     std::vector<Real> part_norm;
-    spread_partial_norms(all_pos, all_eps, z_phys_nd, detJ_cc, geom, src_x, part_norm, &zb);
+    spread_partial_norms(all_pos, all_eps, z_phys_nd, detJ_cc, geom, src_x, part_norm, &zb, &m_buffers);
     std::map<int, std::vector<Real>> norm_out, norm_in;
     {
         // the offset of each body's points in the body-ordered list
@@ -659,7 +659,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     }
     std::vector<Real> all_scale;
     for (int b = 0; b < nb; ++b) { all_scale.insert(all_scale.end(), rscale[b].begin(), rscale[b].end()); }
-    add_scaled_kernels(all_pos, all_scale, all_eps, z_phys_nd, detJ_cc, geom, src_x, src_y, src_z, &zb);
+    add_scaled_kernels(all_pos, all_scale, all_eps, z_phys_nd, detJ_cc, geom, src_x, src_y, src_z, &zb, &m_buffers);
     if (!failed.empty()) { Abort(failed); }
 }
 

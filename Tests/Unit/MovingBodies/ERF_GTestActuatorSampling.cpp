@@ -239,6 +239,35 @@ TEST(ActuatorSampling, IndependentOfBoxDecomposition)
     fz.check(pos, tol);
 }
 
+// The local sampler with buffers kept from call to call: one kernel per box, the same answers as with
+// its own buffers, and a call with fewer points after one with more (the buffers keep their size) gets
+// zeros and no counts at the points its boxes do not hold, not the previous call's answers
+TEST(ActuatorSampling, KeptBuffersGiveTheSameAnswersAndOneKernelPerBox)
+{
+    MeshSpec m;
+    m.hill = 60.0;
+    m.max_grid = {{4, 5, 1024}};
+    Fields f(m, false);
+    const std::vector<Real> many = test_points(m);
+    // the first two points: the second call reads only the start of the buffers the first one filled
+    const std::vector<Real> few(many.begin(), many.begin() + 6);
+    erf_actuator::ActuatorDeviceBuffers buf;
+    int nlocal = 0;
+    for (amrex::MFIter mfi(f.u, false); mfi.isValid(); ++mfi) { ++nlocal; }
+    for (const std::vector<Real>* pts : {&many, &few, &many}) {
+        std::vector<Real> vel_kept, vel_own;
+        std::vector<int> cnt_kept, cnt_own;
+        const long before = buf.kernel_launches;
+        erf_actuator::sample_velocity_local(f.u, f.v, f.w, f.znd.get(), f.geom, *pts, vel_kept, cnt_kept, &buf);
+        EXPECT_EQ(buf.kernel_launches - before, nlocal);
+        erf_actuator::sample_velocity_local(f.u, f.v, f.w, f.znd.get(), f.geom, *pts, vel_own, cnt_own);
+        EXPECT_EQ(vel_kept, vel_own);
+        EXPECT_EQ(cnt_kept, cnt_own);
+        EXPECT_GE(buf.sample_vel.device.size(), many.size());
+        EXPECT_GE(buf.sample_cnt.device.size(), many.size() / 3);
+    }
+}
+
 TEST(ActuatorSampling, AnEmptyPointListGivesNoVelocities)
 {
     MeshSpec m;
