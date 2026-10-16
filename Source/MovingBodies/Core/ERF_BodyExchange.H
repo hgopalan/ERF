@@ -18,6 +18,8 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
 
+#include "ERF_ActuatorDeviceBuffers.H"
+
 namespace erf_actuator {
 
 /**
@@ -132,6 +134,8 @@ public:
      * how far from the hub its points turn (m; a rotor's tip radius), which a throttled envelope holds whole.
      */
     void set_hub (int b, const std::array<amrex::Real,3>& x, amrex::Real sweep = 0);
+    /** The device memory its sampling and spreading kernels reuse from step to step (and their launch count): for the tests. */
+    const ActuatorDeviceBuffers& device_buffers () const { return m_buffers; }
 
     /**
      * Collective. Sample the face-centred velocities at the points of every body this rank owns,
@@ -179,6 +183,7 @@ private:
     std::vector<amrex::Real> m_sweep;               //!< per owned body: how far its points turn about the hub
     std::vector<std::array<amrex::Real,3>> m_hub_at_build;   //!< per owned body: its hub when its envelope was last built
     std::vector<char> m_has_hub_at_build;
+    ActuatorDeviceBuffers m_buffers;                //!< kept from step to step: grows to the largest exchange, never shrinks
 
     /**
      * Collective. Grow the envelope of every body whose needed box (lo, hi in m, on its owner; lo > hi

@@ -18,6 +18,8 @@
 // - min_cell_heights: the shortest physical cell (z_phys_nd node spacing) under a region, over the
 //   region's heights only, across periodic seams.
 // - tip_cell_heights: the cell height that limits a blade tip, each cell weighed by the tip speed that can cross it.
+// - tip_cell_heights_batched: the same heights as tip_cell_heights, every region in one reduction, whatever
+//   the regions (empty, non-finite, zero radius, across a periodic seam, beyond the domain) and their order.
 
 #include <algorithm>
 #include <array>
@@ -235,6 +237,35 @@ TEST(ActuatorSampling, IndependentOfBoxDecomposition)
         add(5.5 * mz.dx(), 5.5 * mz.dy(), zf + Real(0.01) * mz.H);
     }
     fz.check(pos, tol);
+}
+
+// The local sampler with buffers kept from call to call: one kernel per box, the same answers as with
+// its own buffers, and a call with fewer points after one with more (the buffers keep their size) gets
+// zeros and no counts at the points its boxes do not hold, not the previous call's answers
+TEST(ActuatorSampling, KeptBuffersGiveTheSameAnswersAndOneKernelPerBox)
+{
+    MeshSpec m;
+    m.hill = 60.0;
+    m.max_grid = {{4, 5, 1024}};
+    Fields f(m, false);
+    const std::vector<Real> many = test_points(m);
+    // the first two points: the second call reads only the start of the buffers the first one filled
+    const std::vector<Real> few(many.begin(), many.begin() + 6);
+    erf_actuator::ActuatorDeviceBuffers buf;
+    int nlocal = 0;
+    for (amrex::MFIter mfi(f.u, false); mfi.isValid(); ++mfi) { ++nlocal; }
+    for (const std::vector<Real>* pts : {&many, &few, &many}) {
+        std::vector<Real> vel_kept, vel_own;
+        std::vector<int> cnt_kept, cnt_own;
+        const long before = buf.kernel_launches;
+        erf_actuator::sample_velocity_local(f.u, f.v, f.w, f.znd.get(), f.geom, *pts, vel_kept, cnt_kept, &buf);
+        EXPECT_EQ(buf.kernel_launches - before, nlocal);
+        erf_actuator::sample_velocity_local(f.u, f.v, f.w, f.znd.get(), f.geom, *pts, vel_own, cnt_own);
+        EXPECT_EQ(vel_kept, vel_own);
+        EXPECT_EQ(cnt_kept, cnt_own);
+        EXPECT_GE(buf.sample_vel.device.size(), many.size());
+        EXPECT_GE(buf.sample_cnt.device.size(), many.size() / 3);
+    }
 }
 
 TEST(ActuatorSampling, AnEmptyPointListGivesNoVelocities)
@@ -657,6 +688,80 @@ TEST(ActuatorSampling, TheTipCellHeightWeighsEachCellByTheTipSpeedThatCrossesIt)
     erf_actuator::tip_cell_heights(plane.znd.get(), plane.geom, side, dz);
     EXPECT_EQ(dz[0], clean[0]);
     EXPECT_GT(dz[0], Real(10.0));
+}
+
+// tip_cell_heights_batched: one reduction over every region gives each region the height the per-region
+// search gives it, on a flat stretched mesh, over the hill, with periodic seams in x and y and boxes split
+// in every direction, for regions empty, non-finite, without blades, straddling a seam or far outside, in
+// any order and any subset (a cache searches only the rotors that moved)
+TEST(ActuatorSampling, TheBatchedTipCellHeightsMatchThePerRegionSearch)
+{
+    // equal to the last bit on the host, where both take the same expression per cell; to rounding on a
+    // device, which may contract the two kernels differently
+    auto same = [](Real a, Real b) {
+#ifdef AMREX_USE_GPU
+        return a == b || std::abs(a - b) <= Real(8.0) * std::numeric_limits<Real>::epsilon() * std::max(std::abs(a), std::abs(b));
+#else
+        return a == b;
+#endif
+    };
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    for (const Real hill : {Real(0.0), Real(100.0)}) {
+        for (const std::array<int,3>& periodic : {std::array<int,3>{{0, 0, 0}}, std::array<int,3>{{1, 1, 0}}}) {
+            MeshSpec m; m.hill = hill; m.max_grid = {{4, 5, 3}};
+            Fields f(m, false);
+            const amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)}, {AMREX_D_DECL(m.Lx, m.Ly, m.H)});
+            const amrex::Geometry geom(f.geom.Domain(), &rb, 0, periodic.data());
+            // the hand-picked regions, then a sweep of rotors over the domain and beyond its sides, with
+            // tilted, yawed and coned shapes (box widths, slack) that differ from row to row
+            std::vector<Real> rows{
+                100.0, 100.0, 80.0, 500.0, 500.0, 320.0, 200.0, 120.0, 0.0,               // the middle
+                -150.0, 400.0, 30.0, 90.0, 640.0, 270.0, 150.0, 120.0, 4.0,               // across x = 0
+                1000.0, 850.0, 20.0, 1300.0, 1150.0, 260.0, 140.0, 120.0, 0.0,            // across both upper sides
+                1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,                              // empty: no line
+                nan, 100.0, 80.0, 500.0, 500.0, 320.0, 200.0, 120.0, 0.0,                 // a diverged hub
+                100.0, 100.0, 80.0, 500.0, 500.0, 320.0, 200.0, 0.0, 0.0,                 // no blades
+                -1.0e12, 100.0, 0.0, 1.0e12, 300.0, 400.0, 200.0, 120.0, 0.0,             // huge but finite
+                5000.0, 5000.0, 80.0, 5200.0, 5200.0, 320.0, 200.0, 120.0, 0.0,           // far outside
+                300.0, 200.0, 350.0, 900.0, 800.0, 500.0, 420.0, 120.0, 10.0};            // above the top
+            for (int s = 0; s < 24; ++s) {
+                const Real cx = Real(-200.0) + Real(70.0) * s, cy = Real(-150.0) + Real(53.0) * s;
+                const Real cz = Real(120.0) + Real(7.0) * (s % 9), rad = Real(60.0) + Real(5.0) * (s % 7);
+                const Real hx = rad * Real(0.1) * (s % 5), hy = rad * (Real(1.0) - Real(0.05) * (s % 3));
+                rows.insert(rows.end(), {cx - hx, cy - hy, cz - rad, cx + hx, cy + hy, cz + rad, cz, rad, Real(0.5) * (s % 4)});
+            }
+            const int n = static_cast<int>(rows.size() / 9);
+            std::vector<Real> one, batched;
+            erf_actuator::tip_cell_heights(f.znd.get(), geom, rows, one);
+            erf_actuator::tip_cell_heights_batched(f.znd.get(), geom, rows, batched);
+            ASSERT_EQ(batched.size(), one.size());
+            int limited = 0;   // regions whose height is a cell's, not the nominal dz
+            for (int r = 0; r < n; ++r) {
+                EXPECT_TRUE(same(batched[r], one[r])) << "hill " << hill << " periodic " << periodic[0] << " region " << r
+                                                      << ": batched " << batched[r] << ", per region " << one[r];
+                if (one[r] != m.H / m.nz) { ++limited; }
+            }
+            EXPECT_GT(limited, n / 2);
+            // any subset, in any order: a region's height does not depend on the others searched with it
+            std::vector<int> pick;
+            for (int r = n - 1; r >= 0; r -= 3) { pick.push_back(r); }
+            std::vector<Real> sub, part;
+            for (const int r : pick) { sub.insert(sub.end(), rows.begin() + 9 * r, rows.begin() + 9 * r + 9); }
+            erf_actuator::tip_cell_heights_batched(f.znd.get(), geom, sub, part);
+            ASSERT_EQ(part.size(), pick.size());
+            for (std::size_t k = 0; k < pick.size(); ++k) { EXPECT_TRUE(same(part[k], one[pick[k]])) << "region " << pick[k]; }
+        }
+    }
+    // no regions, and a null z_phys_nd (the nominal dz), as for the per-region search
+    MeshSpec m;
+    Fields nominal(m, true);
+    std::vector<Real> dz{1.0};
+    erf_actuator::tip_cell_heights_batched(nominal.znd.get(), nominal.geom, std::vector<Real>{}, dz);
+    EXPECT_TRUE(dz.empty());
+    const std::vector<Real> row{100.0, 100.0, 80.0, 500.0, 500.0, 320.0, 200.0, 120.0, 0.0};
+    erf_actuator::tip_cell_heights_batched(nominal.znd.get(), nominal.geom, row, dz);
+    ASSERT_EQ(dz.size(), 1u);
+    EXPECT_DOUBLE_EQ(dz[0], m.H / m.nz);
 }
 
 // A point a few ulps below a non-zero prob_lo wraps to lo + (len - tiny), which rounds onto prob_hi, owned by

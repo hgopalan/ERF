@@ -96,6 +96,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
  *   erf.moving_bodies.alm_max_tip_cells = 1.0      (abort when a blade tip sweeps more cells than this per step)
  *   erf.moving_bodies.envelope_check_interval = 1  (check the bodies' exchange envelopes, one reduction, every this many steps)
+ *   erf.moving_bodies.verify_tip_cells = 0         (1: check the cached limiting cell heights against a fresh search every step)
  *   erf.moving_bodies.density_tolerance = 0.05     (abort when ERF's density at a hub is further from the model's)
  *   erf.moving_bodies.anchor_level    = 1          (the level the bodies are sampled and forced on; default the finest)
  *   erf.moving_bodies.prescribed_velocity = 10.59 0 0   (testing aid: fixed inflow to every body)
@@ -122,6 +123,7 @@ struct MovingBodiesInputs
     amrex::Real avg_start{0.0};              //!< time from which the running averages and statistics accumulate
     amrex::Real alm_max_tip_cells{1.0};      //!< actuator line: largest tip travel per ERF step, in cells
     int envelope_check_interval{1};          //!< check the exchange envelopes every this many steps (BodyExchange::set_check_interval)
+    bool verify_tip_cells{false};            //!< actuator line: check the cached tip cell heights against a fresh per-region search every step (debug)
     amrex::Real density_tolerance{0.05};     //!< relative tolerance between ERF's density at a hub and the OpenFAST model's
     int anchor_level{-1};                    //!< the level the bodies live on (-1: the finest level, amr.max_level)
 

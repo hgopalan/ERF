@@ -718,6 +718,10 @@ height, base z); the ridge top is a mesh node, so the recorded height is exactly
 100 m. The plotfile gold and the ``fx == -thrust_x`` check exercise the sampler
 and the spreader in the fitted mesh's physical heights and cell volumes.
 ``OpenFASTADM_Terrain_BoxParity`` splits the ridge between boxes.
+``OpenFAST_ALM_Terrain_VerifyTipCells`` runs the deck as an actuator line (the
+tip limit raised over the 1.11 physical cells it sweeps per step) with and
+without ``erf.moving_bodies.verify_tip_cells``, which checks the cached tip cell
+heights against the per-region search every step; the plotfiles must be identical.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Terrain`_
 

@@ -83,7 +83,17 @@ differs from the point loads': the whole rotor's torque by 0.4 % at 40 m and
 visited over the faces within three widths of it, and again as its periodic
 images, so a kernel wraps across a periodic boundary and the cost grows with
 the number of points and the cube of their widths, not with the mesh. Faces on a non-periodic domain
-boundary get no source. The normalisation of a turbine's kernel is the sum of
+boundary get no source.
+Each pass launches one GPU kernel per box and staggered grid, whatever the
+number of points: the periodic images are made once per point and binned to
+the boxes their kernels reach. The normalisation pass gives each point one
+thread, which adds its terms in a fixed order (its images, then their faces),
+and the spreading pass gives each face one thread, which adds the terms of
+the images binned to its tile of faces in point order. Neither uses atomic
+additions, so the sources do not depend on how the device schedules its
+threads, and on a CPU they equal, to the last bit, those of spreading one
+point at a time. The device buffers the kernels read are kept from step to
+step, and grow to the largest exchange. The normalisation of a turbine's kernel is the sum of
 the parts the ranks its kernel reaches compute on their own boxes, added by
 the owner of the turbine or disk in rank order and sent back with the force. The sources are computed once per step, from the
 velocities sampled at the start of the step (the disks) or from the OpenFAST
@@ -351,7 +361,17 @@ one. The start-up audit's cells across the rotor
 still use the nominal spacing. For the IEA 15 MW at rated speed (tip speed about
 95 m/s) one cell per step means ``dt <= min(dx, dy, dz) / 95``: 0.43 s on the
 50 m Askervein mesh. The check runs every
-step because the rotor speed is OpenFAST's to change. The velocities OpenFAST
+step because the rotor speed is OpenFAST's to change. The limiting height itself
+is kept from step to step: it is searched for every rotor at the first step and
+after every regrid of the anchor level, and again for a rotor only when a value
+of its box (the hub position, the tip radius, the axis or the blades' distance
+off the rotor plane) has moved more than a tenth of the smallest nominal cell
+size from the box last searched, as a floating platform's hub does; a single
+integer reduction per step tells the ranks whether any has, and the rotors that
+have are searched together in one batched reduction.
+``erf.moving_bodies.verify_tip_cells = 1`` checks the kept heights every step
+against a fresh search of each rotor's box, one at a time, and aborts if they
+differ. The velocities OpenFAST
 receives are still sampled at its structural nodes, and the same ``Wake_Mod = 0``
 requirement and hub-axis check apply as for the disk.
 

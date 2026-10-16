@@ -2838,6 +2838,12 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | run aborts above it, naming the largest ``erf.fixed_dt`` |                          |                          |
 |                                                        | that passes                                              |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.verify_tip_cells**                 | actuator line, debugging: check every step the limiting  | 0 or 1                   | 0                        |
+|                                                        | cell heights kept from step to step (searched again only |                          |                          |
+|                                                        | after a regrid or when a rotor's box moves) against a    |                          |                          |
+|                                                        | fresh search of each rotor's box; the run aborts if they |                          |                          |
+|                                                        | differ                                                   |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 The diagnostics files are listed below; they are written every ``diagnostics_int`` steps. The
 rows of ``_erf.csv``, ``_flow.csv`` and ``total_load.csv`` carry the time at the end of their
