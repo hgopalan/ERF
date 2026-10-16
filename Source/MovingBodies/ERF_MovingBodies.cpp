@@ -463,6 +463,92 @@ MovingBodies::turbine_table (int k, bool io_only, const std::function<void(int, 
                        [this] (int i) { return m_driver->is_owner(i); }, fill);
 }
 
+Real
+MovingBodies::tip_cells_tolerance (const Geometry& geom)
+{
+    return Real(0.1) * static_cast<Real>(std::min({geom.CellSize(0), geom.CellSize(1), geom.CellSize(2)}));
+}
+
+void
+MovingBodies::update_tip_cells (const MultiFab* z_phys_nd, const Geometry& geom)
+{
+    const auto& turbs = m_driver->turbines();
+    const int nturb = static_cast<int>(turbs.size());
+    // the region turbine i's tips sweep, as one row of erf_actuator::tip_cell_heights; on its owner
+    auto region = [this, &turbs] (int i, Real* row) {
+        if (m_turbine_mode[i] != "alm") {
+            for (int d = 0; d < 3; ++d) { row[d] = Real(1.0); row[d+3] = Real(0.0); }   // empty: no line
+            row[6] = Real(0.0); row[7] = Real(0.0); row[8] = Real(0.0);
+            return;
+        }
+        erf_actuator::tip_sweep_region(turbs[i], row);
+    };
+    // a region has moved when a value differs from the one last searched by more than the tolerance
+    // (a non-finite value, a diverged hub, always has); a radius that becomes or stops being positive
+    // changes whether the region counts at all
+    const Real tol = tip_cells_tolerance(geom);
+    auto moved = [tol] (const Real* now, const Real* was) {
+        for (int d = 0; d < 9; ++d) {
+            if (!(now[d] == was[d] || std::abs(now[d] - was[d]) <= tol)) { return true; }
+        }
+        return (now[7] > Real(0.0)) != (was[7] > Real(0.0));
+    };
+    if (static_cast<int>(m_tip_rows.size()) != 9 * nturb || static_cast<int>(m_tip_dz.size()) != nturb) {
+        m_tip_cells_valid = false;
+    }
+    // each owner compares its own turbines, without communication; one reduction tells every rank
+    int stale = m_tip_cells_valid ? 0 : 1;
+    if (stale == 0) {
+        std::array<Real,9> row{};
+        for (int i = 0; i < nturb && stale == 0; ++i) {
+            if (!m_driver->is_owner(i)) { continue; }
+            region(i, row.data());
+            if (moved(row.data(), &m_tip_rows[static_cast<std::size_t>(9 * i)])) { stale = 1; }
+        }
+    }
+    ParallelDescriptor::ReduceIntMax(stale);
+    if (stale != 0) {
+        // every rank now holds every region and so picks the same turbines to search again
+        const std::vector<Real> rows = turbine_table(9, false, region);
+        std::vector<int> redo;
+        std::vector<Real> sub;
+        for (int i = 0; i < nturb; ++i) {
+            const Real* now = &rows[static_cast<std::size_t>(9 * i)];
+            if (m_tip_cells_valid && !moved(now, &m_tip_rows[static_cast<std::size_t>(9 * i)])) { continue; }
+            redo.push_back(i);
+            sub.insert(sub.end(), now, now + 9);
+        }
+        if (!m_tip_cells_valid) {
+            m_tip_rows.assign(static_cast<std::size_t>(9 * nturb), Real(0.0));
+            m_tip_dz.assign(nturb, static_cast<Real>(geom.CellSize(2)));
+        }
+        std::vector<Real> dz;
+        erf_actuator::tip_cell_heights_batched(z_phys_nd, geom, sub, dz);
+        for (std::size_t k = 0; k < redo.size(); ++k) {
+            const int i = redo[k];
+            std::copy(sub.begin() + static_cast<std::ptrdiff_t>(9 * k), sub.begin() + static_cast<std::ptrdiff_t>(9 * k + 9),
+                      m_tip_rows.begin() + static_cast<std::ptrdiff_t>(9 * i));
+            m_tip_dz[i] = dz[k];
+        }
+        m_tip_cells_valid = true;
+    }
+    if (m_in.verify_tip_cells) {
+        // the cached heights against the per-region search of the same regions on the current mesh
+        std::vector<Real> fresh;
+        erf_actuator::tip_cell_heights(z_phys_nd, geom, m_tip_rows, fresh);
+        const Real eps = std::numeric_limits<Real>::epsilon();
+        for (int i = 0; i < nturb; ++i) {
+            const Real a = m_tip_dz[i], b = fresh[i];
+            if (!(a == b || std::abs(a - b) <= Real(8.0) * eps * std::max(std::abs(a), std::abs(b)))) {
+                std::ostringstream msg;
+                msg << std::setprecision(17) << "erf.moving_bodies.verify_tip_cells: the cached limiting cell height of " << m_turbine_in[i].name
+                    << " is " << a << " m but a fresh search of its region finds " << b << " m (step " << m_step << ")";
+                Abort(msg.str());
+            }
+        }
+    }
+}
+
 bool
 MovingBodies::print_turbine_texts (const std::vector<std::string>& text, const std::vector<int>& fatal) const
 {
@@ -1118,20 +1204,14 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         // stretched mesh the height that limits the tip is the smallest over the cells of the disk
         // of dz over the fraction of the tip speed that can cross the cell there (vertically, less
         // towards the top and bottom of the disk; sideways across a sloping face), from z_phys_nd,
-        // not the nominal dz (a collective: every rank takes part, each rotor's region from its owner)
+        // not the nominal dz (a collective: every rank takes part, each rotor's region from its owner;
+        // kept from step to step and searched again only after a regrid or when the region moves)
         std::vector<Real> dz_rotor(nturb, static_cast<Real>(geom.CellSize(2)));
         bool any_alm = false;
         for (const std::string& m : m_turbine_mode) { any_alm = any_alm || (m == "alm"); }
         if (any_alm && z_phys_nd != nullptr) {
-            const std::vector<Real> regions = turbine_table(9, false, [this, &turbs] (int i, Real* row) {
-                if (m_turbine_mode[i] != "alm") {
-                    for (int d = 0; d < 3; ++d) { row[d] = Real(1.0); row[d+3] = Real(0.0); }   // empty: no line
-                    row[6] = Real(0.0); row[7] = Real(0.0); row[8] = Real(0.0);
-                    return;
-                }
-                erf_actuator::tip_sweep_region(turbs[i], row);
-            });
-            erf_actuator::tip_cell_heights(z_phys_nd, geom, regions, dz_rotor);
+            update_tip_cells(z_phys_nd, geom);
+            dz_rotor = m_tip_dz;
         }
         for (int i = 0; i < nturb; ++i) {
             if (m_turbine_mode[i] == "none" || !m_driver->is_owner(i)) { continue; }
@@ -1400,6 +1480,10 @@ void
 MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phys_nd, const Geometry& geom)
 {
     m_audited_grids = level_grids;
+#ifdef ERF_USE_OPENFAST
+    // the cells under the rotors may have changed with the grids: the tip cell heights are searched again
+    m_tip_cells_valid = false;
+#endif
     // on a fitted or stretched mesh a point's cell is not its height over dz: the kernel must be on the
     // grids over every height its reach may span (mesh_z_bounds), a sampled point anywhere in its column
     erf_actuator::ZBounds zb;

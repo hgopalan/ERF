@@ -273,6 +273,21 @@ private:
     bool m_audited_setup{false};
     bool m_audited_flow{false};
     bool m_axis_checked{false};
+    /**
+     * Collective. The cell height that limits each actuator line's tip (erf_actuator::tip_cell_heights of
+     * the region its tips sweep, turbine i's in m_tip_dz[i]), kept from step to step: searched for every
+     * turbine after a regrid (and at the first step), and for a turbine whose region (hub, tip radius,
+     * axis, blades' off-plane reach) has moved more than tip_cells_tolerance() from the one last searched,
+     * all such turbines in one batched search. One integer reduction a step decides whether any has moved.
+     * With erf.moving_bodies.verify_tip_cells every step also searches each cached region afresh, one
+     * region at a time, and aborts unless the two agree.
+     */
+    void update_tip_cells (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    /** How far (m) a value of a turbine's tip region may move before its cell height is searched again: a tenth of the smallest nominal cell size. */
+    static amrex::Real tip_cells_tolerance (const amrex::Geometry& geom);
+    bool m_tip_cells_valid{false};         //!< m_tip_rows and m_tip_dz hold the anchor level's current grids (cleared by check_coverage)
+    std::vector<amrex::Real> m_tip_rows;   //!< per turbine, on every rank: the nine values of the region last searched
+    std::vector<amrex::Real> m_tip_dz;     //!< per turbine, on every rank: the limiting cell height found for it (m)
     /** Build the lifting-line correction of every turbine that asks for it, once the node layout and chords are known. */
     void build_fllc (const amrex::Geometry& geom);
     /** The points of turbine i grouped by the kernel they are spread with, and that kernel's width (m). */

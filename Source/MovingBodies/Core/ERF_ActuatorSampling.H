@@ -193,6 +193,18 @@ void min_cell_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& 
 void tip_cell_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
                        const std::vector<amrex::Real>& rows, std::vector<amrex::Real>& dz);
 
+/**
+ * tip_cell_heights for every region at once: the same heights, with one device launch over the
+ * columns every region covers in this rank's boxes (each column's minimum folded into its region's
+ * with an atomic minimum) and one reduction over the ranks, rather than a reduction, and a device
+ * synchronisation, per region. A collective: the same on every rank.
+ *
+ * @param[in] rows 9*n values (m), as for tip_cell_heights
+ * @param[out] dz n heights (m)
+ */
+void tip_cell_heights_batched (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                               const std::vector<amrex::Real>& rows, std::vector<amrex::Real>& dz);
+
 bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
                         const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,
                         CoverZ z = CoverZ::Reach, const ZBounds* zb = nullptr);
