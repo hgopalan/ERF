@@ -102,7 +102,6 @@ jobs:
               '.github/workflows/openfast-stub.yml',
               '.github/workflows/style.yml',
               '.github/workflows/sycl.yml',
-              '.github/workflows/windows-mpi.yml',
               '.github/workflows/windows.yml',
             ]);
 
