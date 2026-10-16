@@ -7,7 +7,8 @@
 //   step (then the most cells, then the lowest rank); otherwise the nearest least loaded such rank, so
 //   that the bodies stay one per rank while there are as many ranks; a footprint no box overlaps goes
 //   to the nearest box.
-// - exchange_buffers: each rank gets what was sent to it, sizes unknown beforehand.
+// - exchange_buffers: each rank gets what was sent to it, sizes unknown beforehand (in arrival order) or
+//   given (all receives posted at once).
 // - sample_velocity and spread_forces: the owners' points sampled and spread through point-to-point
 //   messages give exactly what the global sampler and spreader give over all the points (bit for bit
 //   on one and two ranks over terrain, to 1e-12 on a uniform mesh, whose owners normalise their kernels
@@ -303,6 +304,34 @@ TEST(BodyExchange, BuffersReachTheRanksTheyAreSentTo)
     if (np >= 4) {
         ASSERT_EQ(in.count((me - 2 + np) % np), 1u);
         EXPECT_TRUE(in[(me - 2 + np) % np].empty());
+    }
+    // the same with the sizes given: every receive posted at once with its exact size; then several
+    // senders at once, arriving in any order (each rank sends to every rank, itself too)
+    {
+        std::map<int, std::vector<Real>> o2, i2;
+        std::map<int, std::size_t> sizes;
+        o2[(me + 1) % np] = std::vector<Real>(static_cast<std::size_t>(me + 1), Real(me));
+        sizes[prev] = static_cast<std::size_t>(prev + 1);
+        if (np >= 4) { o2[(me + 2) % np]; sizes[(me - 2 + np) % np] = 0; }
+        erf_actuator::exchange_buffers(o2, from, i2, &sizes);
+        ASSERT_EQ(i2[prev].size(), static_cast<std::size_t>(prev + 1));
+        for (Real x : i2[prev]) { EXPECT_EQ(x, Real(prev)); }
+        if (np >= 4) { EXPECT_TRUE(i2[(me - 2 + np) % np].empty()); }
+    }
+    for (int known = 0; known < 2; ++known) {
+        std::map<int, std::vector<Real>> o3, i3;
+        std::map<int, std::size_t> sizes;
+        std::vector<int> all;
+        for (int r = 0; r < np; ++r) {
+            o3[r] = std::vector<Real>(static_cast<std::size_t>(r + 2 * me + 1), Real(100 * me + r));
+            all.push_back(r);
+            sizes[r] = static_cast<std::size_t>(me + 2 * r + 1);
+        }
+        erf_actuator::exchange_buffers(o3, all, i3, known ? &sizes : nullptr);
+        for (int r = 0; r < np; ++r) {
+            ASSERT_EQ(i3[r].size(), static_cast<std::size_t>(me + 2 * r + 1)) << "from " << r;
+            for (Real x : i3[r]) { EXPECT_EQ(x, Real(100 * r + me)); }
+        }
     }
 }
 

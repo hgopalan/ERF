@@ -8,6 +8,7 @@
  */
 
 #include <array>
+#include <cstddef>
 #include <map>
 #include <vector>
 
@@ -164,13 +165,18 @@ private:
 
 /**
  * Collective. Send send[r] to every rank r it names and receive one buffer from every rank in
- * from (whose sizes need not be known); a buffer for this rank itself is moved across without MPI.
- * Every rank must call it, with sends and receives that pair up: a rank that names r in send must
- * be named in r's from. Uses one MPI tag of the ParallelDescriptor sequence, so every rank calls
- * it the same number of times.
+ * from; a buffer for this rank itself is moved across without MPI. Every rank must call it, with
+ * sends and receives that pair up: a rank that names r in send must be named in r's from. Uses one
+ * MPI tag of the ParallelDescriptor sequence, so every rank calls it the same number of times.
+ *
+ * With sizes (the length of the buffer from each rank in from, which the caller knows when it
+ * is a reply to its own message) every receive is posted at once with its exact size, before the
+ * sends, and one wait completes them all; a message of another size aborts. Without, the sizes
+ * are learned from the messages, which are taken in the order they arrive (matched probes).
  */
 void exchange_buffers (std::map<int, std::vector<amrex::Real>>& send, const std::vector<int>& from,
-                       std::map<int, std::vector<amrex::Real>>& recv);
+                       std::map<int, std::vector<amrex::Real>>& recv,
+                       const std::map<int, std::size_t>* sizes = nullptr);
 
 } // namespace erf_actuator
 

@@ -236,7 +236,8 @@ choose_owners (const std::vector<Box>& footprints, const std::vector<Real>& dt, 
 }
 
 void
-exchange_buffers (std::map<int, std::vector<Real>>& send, const std::vector<int>& from, std::map<int, std::vector<Real>>& recv)
+exchange_buffers (std::map<int, std::vector<Real>>& send, const std::vector<int>& from, std::map<int, std::vector<Real>>& recv,
+                  const std::map<int, std::size_t>* sizes)
 {
     const int me = ParallelDescriptor::MyProc();
     recv.clear();
@@ -247,28 +248,70 @@ exchange_buffers (std::map<int, std::vector<Real>>& send, const std::vector<int>
         MPI_Comm comm = ParallelDescriptor::Communicator();
         MPI_Datatype type = ParallelDescriptor::Mpi_typemap<Real>::type();
         std::vector<MPI_Request> reqs;
-        reqs.reserve(send.size());
+        reqs.reserve(send.size() + from.size());
+        // with the sizes known, every receive is posted before any send, with its exact size
+        if (sizes != nullptr) {
+            for (int src : from) {
+                if (src == me) { continue; }
+                const auto it = sizes->find(src);
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(it != sizes->end(), "exchange_buffers: no size for a rank received from");
+                std::vector<Real>& buf = recv[src];
+                buf.resize(it->second);
+                reqs.push_back(MPI_REQUEST_NULL);
+                MPI_Irecv(buf.data(), static_cast<int>(buf.size()), type, src, tag, comm, &reqs.back());
+            }
+        }
         for (auto& kv : send) {
             if (kv.first == me) { continue; }
             reqs.push_back(MPI_REQUEST_NULL);
             MPI_Isend(kv.second.data(), static_cast<int>(kv.second.size()), type, kv.first, tag, comm, &reqs.back());
         }
-        for (int src : from) {
-            if (src == me) { continue; }
-            MPI_Status st;
-            MPI_Probe(src, tag, comm, &st);
-            int n = 0;
-            MPI_Get_count(&st, type, &n);
-            std::vector<Real>& buf = recv[src];
-            buf.resize(static_cast<std::size_t>(n));
-            MPI_Recv(buf.data(), n, type, src, tag, comm, MPI_STATUS_IGNORE);
+        if (sizes == nullptr) {
+            // sizes unknown: take the messages in the order they arrive (not in sender order), each matched
+            // and received as one (MPI_Mprobe, MPI_Mrecv), so that no other receive can take it in between
+            std::set<int> pending;
+            for (int src : from) { if (src != me) { pending.insert(src); } }
+            while (!pending.empty()) {
+                MPI_Message msg;
+                MPI_Status st;
+                MPI_Mprobe(MPI_ANY_SOURCE, tag, comm, &msg, &st);
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pending.erase(st.MPI_SOURCE) == 1,
+                                                 "exchange_buffers: a message from a rank not expected, or twice");
+                int n = 0;
+                MPI_Get_count(&st, type, &n);
+                std::vector<Real>& buf = recv[st.MPI_SOURCE];
+                buf.resize(static_cast<std::size_t>(n));
+                MPI_Mrecv(buf.data(), n, type, &msg, MPI_STATUS_IGNORE);
+            }
         }
-        if (!reqs.empty()) { MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), MPI_STATUSES_IGNORE); }
+        if (!reqs.empty()) {
+            // the receives, when posted, are the first requests; a message longer than its posted size fails
+            // here (MPI_ERR_TRUNCATE aborts under MPI's default error handler), a shorter one is caught below
+            std::vector<MPI_Status> st(reqs.size());
+            MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), st.data());
+            if (sizes != nullptr) {
+                std::size_t q = 0;
+                for (int src : from) {
+                    if (src == me) { continue; }
+                    int n = 0;
+                    MPI_Get_count(&st[q++], type, &n);
+                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<std::size_t>(n) == recv[src].size(),
+                                                     "exchange_buffers: a message is not the size expected");
+                }
+            }
+        }
     }
+#else
+    amrex::ignore_unused(sizes);
 #endif
     if (std::find(from.begin(), from.end(), me) != from.end()) {
         auto it = send.find(me);
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(it != send.end(), "exchange_buffers: this rank expects a buffer from itself but sends none");
+        if (sizes != nullptr) {
+            const auto sz = sizes->find(me);
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(sz != sizes->end() && sz->second == it->second.size(),
+                                             "exchange_buffers: this rank's buffer to itself is not the size expected");
+        }
         recv[me] = std::move(it->second);
     }
 }
@@ -456,7 +499,14 @@ BodyExchange::sample_velocity (const MultiFab& U, const MultiFab& V, const Multi
             }
         }
     }
-    exchange_buffers(reply_out, recv_ranks, reply_in);
+    // the owner knows how many points it asked each rank about: four values come back for each
+    std::map<int, std::size_t> reply_size;
+    for (int r : recv_ranks) {
+        std::size_t n = 0;
+        for (int b : sections(m_owner, m_part, me, r)) { n += to[b][r].size(); }
+        reply_size[r] = 4 * n;
+    }
+    exchange_buffers(reply_out, recv_ranks, reply_in, &reply_size);
 
     // the owner sums the answers over the ranks it asked, in rank order: one holds the point
     vel.assign(nb, std::vector<Real>());
@@ -642,6 +692,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     }
     spread_partial_norms(rem_pos, rem_eps, z_phys_nd, detJ_cc, geom, src_x, part_norm, &zb);
     std::map<int, std::vector<Real>> norm_out, norm_in;
+    std::map<int, std::size_t> norm_size;
     std::vector<int> norm_from;
     {
         // the offset of each body's remote points in the body-ordered list
@@ -659,9 +710,10 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
         for (int r : recv_ranks) {
             if (n_remote_to[r] == 0) { continue; }
             norm_from.push_back(r);
+            norm_size[r] = 3 * n_remote_to[r];
         }
     }
-    exchange_buffers(norm_out, norm_from, norm_in);
+    exchange_buffers(norm_out, norm_from, norm_in, &norm_size);
 
     // 3. the owner sums the parts in rank order and sends back force over normalisation per remote point
     for (int r : norm_from) {
@@ -693,6 +745,7 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
         }
     }
     std::map<int, std::vector<Real>> scale_out, scale_in;
+    std::map<int, std::size_t> scale_size;
     std::vector<int> scale_from;
     for (int r : norm_from) {
         std::vector<Real>& buf = scale_out[r];
@@ -706,8 +759,9 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     for (int s : send_ranks) {
         if (n_remote_from[s] == 0) { continue; }
         scale_from.push_back(s);
+        scale_size[s] = 3 * n_remote_from[s];
     }
-    exchange_buffers(scale_out, scale_from, scale_in);
+    exchange_buffers(scale_out, scale_from, scale_in, &scale_size);
 
     // 4. every kernel this rank's faces see, in body order
     for (int s : scale_from) {
