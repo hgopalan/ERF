@@ -546,29 +546,75 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
     const std::vector<int> recv_ranks = receivers();
     const std::vector<int> send_ranks = senders();
 
-    // 1. the points and widths to the ranks they reach
+    // 0. on a uniform mesh the owner can find a kernel's whole normalisation alone (uniform_mesh_norm), when
+    // the level's boxes cover its reach; it then sends F/S with the point, and the point skips the two rounds
+    // of partial sums and scales. The other points (terrain, stretched dz, a reach beyond a refined level's
+    // boxes) take those rounds. Decided per point by the owner, and sent as a flag with it
+    std::vector<std::vector<Real>> norm(nb);
+    std::vector<std::vector<char>> local(nb);
+    const bool uniform = (z_phys_nd == nullptr && detJ_cc == nullptr);
+    for (int b = 0; b < nb; ++b) {
+        if (!owns(b) || usable[b] == 0) { continue; }
+        norm[b].assign(pos[b].size(), Real(0.0));
+        local[b].assign(eps[b].size(), 0);
+        if (!uniform) { continue; }
+        for (std::size_t p = 0; p < eps[b].size(); ++p) {
+            if (uniform_mesh_norm(pos[b][3*p], pos[b][3*p+1], pos[b][3*p+2], eps[b][p], geom, ba, &norm[b][3*p])) { local[b][p] = 1; }
+        }
+    }
+    auto scale_of = [&] (int b, int p, int d) {
+        return norm[b][3*p+d] > Real(0.0) ? force[b][3*p+d] / norm[b][3*p+d] : Real(0.0);
+    };
+
+    // 1. the points, widths, and (for a local normalisation) scales to the ranks they reach:
+    // x, y, z, epsilon, local, then F/S per component when local
     std::map<int, std::vector<Real>> out, in;
+    // per owned body and receiver: how many of the points sent to it need the partial sums
+    std::map<int, std::size_t> n_remote_to;
     for (int r : recv_ranks) {
         std::vector<Real>& buf = out[r];
         for (int b : sections(m_owner, m_part, me, r)) {
             const std::vector<int>& idx = to[b][r];
             buf.push_back(static_cast<Real>(idx.size()));
-            for (int p : idx) { buf.insert(buf.end(), {pos[b][3*p], pos[b][3*p+1], pos[b][3*p+2], eps[b][p]}); }
+            for (int p : idx) {
+                buf.insert(buf.end(), {pos[b][3*p], pos[b][3*p+1], pos[b][3*p+2], eps[b][p], static_cast<Real>(local[b][p])});
+                if (local[b][p] != 0) {
+                    buf.insert(buf.end(), {scale_of(b, p, 0), scale_of(b, p, 1), scale_of(b, p, 2)});
+                } else {
+                    ++n_remote_to[r];
+                    ++m_remote_norms;
+                }
+            }
         }
     }
     exchange_buffers(out, send_ranks, in);
 
-    // the points received, per body (each body has one owner, so one sender): positions and widths
-    std::vector<std::vector<Real>> rpos(nb), reps(nb);
+    // the points received, per body (each body has one owner, so one sender): positions, widths, and the
+    // scales of those normalised on their owner
+    std::vector<std::vector<Real>> rpos(nb), reps(nb), rscale(nb);
+    std::vector<std::vector<char>> rlocal(nb);
+    std::map<int, std::size_t> n_remote_from;   // per sender: its points that need this rank's partial sums
     for (int s : send_ranks) {
         const std::vector<Real>& buf = in[s];
         std::size_t k = 0;
         for (int b : sections(m_owner, m_part, s, me)) {
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k < buf.size(), "BodyExchange::spread_forces: a message is shorter than its sections");
             const auto n = static_cast<std::size_t>(buf[k++]);
-            for (std::size_t p = 0; p < n; ++p, k += 4) {
+            for (std::size_t p = 0; p < n; ++p) {
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k + 5 <= buf.size(), "BodyExchange::spread_forces: a message is shorter than its points");
                 rpos[b].insert(rpos[b].end(), {buf[k], buf[k+1], buf[k+2]});
                 reps[b].push_back(buf[k+3]);
+                const bool loc = (buf[k+4] != Real(0.0));
+                rlocal[b].push_back(loc ? 1 : 0);
+                k += 5;
+                if (loc) {
+                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k + 3 <= buf.size(), "BodyExchange::spread_forces: a message is shorter than its points");
+                    rscale[b].insert(rscale[b].end(), {buf[k], buf[k+1], buf[k+2]});
+                    k += 3;
+                } else {
+                    rscale[b].insert(rscale[b].end(), {Real(0.0), Real(0.0), Real(0.0)});
+                    ++n_remote_from[s];
+                }
             }
             if (s != me) { m_points_received += static_cast<long>(n); }
         }
@@ -581,34 +627,49 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
         all_eps.insert(all_eps.end(), reps[b].begin(), reps[b].end());
     }
 
-    // 2. this rank's part of every kernel's normalisation, back to the owners
-    // this rank's bounds of a fitted mesh's heights, once for both passes
+    // 2. this rank's part of the normalisation of every point not normalised on its owner, back to the owners
+    // (only between the ranks that have such points: none at all on a uniform mesh whose boxes cover the kernels).
+    // This rank's bounds of a fitted mesh's heights, once for both passes
     ZBounds zb;
     if (z_phys_nd != nullptr && !all_eps.empty()) { zb = mesh_z_bounds(*z_phys_nd, geom, false); }
-    std::vector<Real> part_norm;
-    spread_partial_norms(all_pos, all_eps, z_phys_nd, detJ_cc, geom, src_x, part_norm, &zb);
+    std::vector<Real> rem_pos, rem_eps, part_norm;
+    for (int b = 0; b < nb; ++b) {
+        for (std::size_t p = 0; p < reps[b].size(); ++p) {
+            if (rlocal[b][p] != 0) { continue; }
+            rem_pos.insert(rem_pos.end(), {rpos[b][3*p], rpos[b][3*p+1], rpos[b][3*p+2]});
+            rem_eps.push_back(reps[b][p]);
+        }
+    }
+    spread_partial_norms(rem_pos, rem_eps, z_phys_nd, detJ_cc, geom, src_x, part_norm, &zb);
     std::map<int, std::vector<Real>> norm_out, norm_in;
+    std::vector<int> norm_from;
     {
-        // the offset of each body's points in the body-ordered list
+        // the offset of each body's remote points in the body-ordered list
         std::vector<std::size_t> first(nb + 1, 0);
-        for (int b = 0; b < nb; ++b) { first[b+1] = first[b] + reps[b].size(); }
+        for (int b = 0; b < nb; ++b) {
+            first[b+1] = first[b] + static_cast<std::size_t>(std::count(rlocal[b].begin(), rlocal[b].end(), char(0)));
+        }
         for (int s : send_ranks) {
+            if (n_remote_from[s] == 0) { continue; }
             std::vector<Real>& buf = norm_out[s];
             for (int b : sections(m_owner, m_part, s, me)) {
                 buf.insert(buf.end(), part_norm.begin() + 3 * first[b], part_norm.begin() + 3 * first[b+1]);
             }
         }
+        for (int r : recv_ranks) {
+            if (n_remote_to[r] == 0) { continue; }
+            norm_from.push_back(r);
+        }
     }
-    exchange_buffers(norm_out, recv_ranks, norm_in);
+    exchange_buffers(norm_out, norm_from, norm_in);
 
-    // 3. the owner sums the parts in rank order and sends back force over normalisation per point
-    std::vector<std::vector<Real>> norm(nb);
-    for (int b = 0; b < nb; ++b) { if (owns(b) && usable[b] != 0) { norm[b].assign(pos[b].size(), Real(0.0)); } }
-    for (int r : recv_ranks) {
+    // 3. the owner sums the parts in rank order and sends back force over normalisation per remote point
+    for (int r : norm_from) {
         const std::vector<Real>& buf = norm_in[r];
         std::size_t k = 0;
         for (int b : sections(m_owner, m_part, me, r)) {
             for (int p : to[b][r]) {
+                if (local[b][p] != 0) { continue; }
                 AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k + 3 <= buf.size(), "BodyExchange::spread_forces: a reply is too short");
                 for (int d = 0; d < 3; ++d) { norm[b][3*p+d] += buf[k+d]; }
                 k += 3;
@@ -632,28 +693,33 @@ BodyExchange::spread_forces (const std::vector<std::vector<Real>>& pos, const st
         }
     }
     std::map<int, std::vector<Real>> scale_out, scale_in;
-    for (int r : recv_ranks) {
+    std::vector<int> scale_from;
+    for (int r : norm_from) {
         std::vector<Real>& buf = scale_out[r];
         for (int b : sections(m_owner, m_part, me, r)) {
             for (int p : to[b][r]) {
-                for (int d = 0; d < 3; ++d) {
-                    buf.push_back(norm[b][3*p+d] > Real(0.0) ? force[b][3*p+d] / norm[b][3*p+d] : Real(0.0));
-                }
+                if (local[b][p] != 0) { continue; }
+                buf.insert(buf.end(), {scale_of(b, p, 0), scale_of(b, p, 1), scale_of(b, p, 2)});
             }
         }
     }
-    exchange_buffers(scale_out, send_ranks, scale_in);
+    for (int s : send_ranks) {
+        if (n_remote_from[s] == 0) { continue; }
+        scale_from.push_back(s);
+    }
+    exchange_buffers(scale_out, scale_from, scale_in);
 
     // 4. every kernel this rank's faces see, in body order
-    std::vector<std::vector<Real>> rscale(nb);
-    for (int s : send_ranks) {
+    for (int s : scale_from) {
         const std::vector<Real>& buf = scale_in[s];
         std::size_t k = 0;
         for (int b : sections(m_owner, m_part, s, me)) {
-            const std::size_t n = 3 * reps[b].size();
-            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k + n <= buf.size(), "BodyExchange::spread_forces: a scale message is too short");
-            rscale[b].assign(buf.begin() + k, buf.begin() + k + n);
-            k += n;
+            for (std::size_t p = 0; p < reps[b].size(); ++p) {
+                if (rlocal[b][p] != 0) { continue; }
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k + 3 <= buf.size(), "BodyExchange::spread_forces: a scale message is too short");
+                for (int d = 0; d < 3; ++d) { rscale[b][3*p+d] = buf[k+d]; }
+                k += 3;
+            }
         }
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k == buf.size(), "BodyExchange::spread_forces: a scale message is too long");
     }

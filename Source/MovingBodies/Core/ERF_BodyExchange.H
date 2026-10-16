@@ -79,9 +79,12 @@ std::vector<int> choose_owners (const std::vector<amrex::Box>& footprints, const
  * check is the only operation of an exchange in which every rank takes part.
  *
  * The results are those of sample_velocity() and spread_forces() over all the points, whatever
- * the owners: a sampled velocity is the one value of the one box holding the point, and a kernel's
- * normalisation is the sum of the participants' partial sums taken in rank order (an MPI reduction
- * may take another order, so with more than two ranks the two can differ in the last bits).
+ * the owners: a sampled velocity is the one value of the one box holding the point. A kernel's
+ * normalisation is, on a uniform mesh whose boxes cover its reach, the owner's own sum over the
+ * faces it reaches (uniform_mesh_norm(), sent with the point, so that spreading takes one message
+ * each way instead of three); otherwise the sum of the participants' partial sums taken in rank
+ * order. Either way the faces are those spread_forces() sums, added in another order, so the two
+ * can differ in the last bits.
  */
 class BodyExchange
 {
@@ -102,6 +105,8 @@ public:
     int num_envelope_updates () const { return m_num_updates; }
     /** The points this rank has received from other ranks, over every exchange so far: for the tests. */
     long points_received () const { return m_points_received; }
+    /** The kernels this rank's bodies sent whose normalisation the ranks they reach had to sum (not normalised on the owner): for the tests. */
+    long remote_normalisations () const { return m_remote_norms; }
 
     /**
      * Collective. Sample the face-centred velocities at the points of every body this rank owns,
@@ -140,6 +145,7 @@ private:
     bool m_fitted{false};
     int m_num_updates{0};
     long m_points_received{0};
+    long m_remote_norms{0};
 
     /**
      * Collective. Grow the envelope of every body whose needed box (lo, hi in m, on its owner; lo > hi

@@ -100,6 +100,21 @@ void spread_partial_norms (const std::vector<amrex::Real>& pos,
                            const ZBounds* zb_local = nullptr);
 
 /**
+ * The whole normalisation S_p of one kernel on a uniform mesh (no z_phys_nd, no detJ_cc), on any
+ * rank, without communication: there a face's weight and volume depend only on the geometry, so
+ * S_p is the sum of w_p dx dy dz over the faces of the domain within 3 epsilon of the point or one
+ * of its periodic images (boundary faces excluded), which this rank can add up alone. The spherical
+ * cut-off keeps the sum from factoring into three 1-D sums, so the faces are visited one by one,
+ * as spread_partial_norms() visits them; only the order of the additions differs (a relative
+ * difference of a few ulps). Returns false, leaving norm alone, when the boxes of ba (cell-centred,
+ * the level's) do not cover every cell the kernel can reach: on a refined level the faces outside
+ * them get no source, and spread_partial_norms() must be summed over the ranks instead.
+ * @param[out] norm the 3 components of S_p (m^3)
+ */
+bool uniform_mesh_norm (amrex::Real px, amrex::Real py, amrex::Real pz, amrex::Real eps,
+                        const amrex::Geometry& geom, const amrex::BoxArray& ba, amrex::Real norm[3]);
+
+/**
  * The second pass, on this rank's boxes only: add (F_p / S_p) w_p to every face of every box (both
  * copies of a shared face alike), each point with its own width.
  * @param[in] f_over_s 3*n forces over their whole normalisations (N/m^3), component fastest; a zero skips the point's component

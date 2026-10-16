@@ -10,7 +10,8 @@
 // - exchange_buffers: each rank gets what was sent to it, sizes unknown beforehand.
 // - sample_velocity and spread_forces: the owners' points sampled and spread through point-to-point
 //   messages give exactly what the global sampler and spreader give over all the points (bit for bit
-//   on one and two ranks), on a uniform and on a terrain-following mesh with unequal boxes, a body's
+//   on one and two ranks over terrain, to 1e-12 on a uniform mesh, whose owners normalise their kernels
+//   alone), on a uniform and on a terrain-following mesh with unequal boxes, a body's
 //   owner need not take part in its exchanges, and a rank whose boxes no kernel reaches receives no
 //   point at all; a body whose points leave its envelope gets a larger one, and the results do not change.
 // - a point outside the domain aborts on its owner, naming it, as the global sampler does.
@@ -355,6 +356,11 @@ void expect_spreading_matches (const SlabMesh& m)
     m.define_sources(ax, ay, az);
     m.define_sources(gx, gy, gz);
     ex.spread_forces(pos, force, eps, std::vector<Real>(3, Real(0.0)), m.znd.get(), m.detj.get(), m.geom, ax, ay, az);
+    // on a uniform mesh covered by the boxes every kernel is normalised on its owner: no partial sums travel
+    if (!m.znd) { EXPECT_EQ(ex.remote_normalisations(), 0L); }
+    long remote = ex.remote_normalisations();
+    amrex::ParallelDescriptor::ReduceLongSum(remote);
+    if (m.znd) { EXPECT_GT(remote, 0L); }
     erf_actuator::spread_forces(all_pos, all_force, all_eps, m.znd.get(), m.detj.get(), m.geom, gx, gy, gz);
     const std::array<std::pair<amrex::MultiFab*, amrex::MultiFab*>,3> pairs{{{&ax, &gx}, {&ay, &gy}, {&az, &gz}}};
     for (int d = 0; d < 3; ++d) {
@@ -362,11 +368,12 @@ void expect_spreading_matches (const SlabMesh& m)
         ASSERT_GT(scale, Real(0.0));
         amrex::MultiFab::Subtract(*pairs[d].first, *pairs[d].second, 0, 0, 1, 0);
         const Real diff = pairs[d].first->norm0();
-        if (np <= 2) {
-            // a normalisation is the same sum of the same parts on two ranks or one
+        if (np <= 2 && m.znd) {
+            // over terrain a normalisation is the same sum of the same parts on two ranks or one
             EXPECT_EQ(diff, Real(0.0)) << "component " << d;
         } else {
-            // an MPI reduction may add more than two parts in another order than rank order
+            // on a uniform mesh the owner adds up the faces alone (uniform_mesh_norm), in another order than
+            // the boxes do; and an MPI reduction may add more than two parts in another order than rank order
             EXPECT_LE(diff, near_tol * scale) << "component " << d;
         }
     }
