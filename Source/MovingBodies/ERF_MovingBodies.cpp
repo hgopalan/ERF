@@ -489,13 +489,16 @@ MovingBodies::update_tip_cells (const MultiFab* z_phys_nd, const Geometry& geom)
     const Real tol = tip_cells_tolerance(geom);
     auto moved = [tol] (const Real* now, const Real* was) {
         for (int d = 0; d < 9; ++d) {
-            if (!(now[d] == was[d] || std::abs(now[d] - was[d]) <= tol)) { return true; }
+            if (!std::isfinite(now[d]) || !std::isfinite(was[d]) ||
+                !(now[d] == was[d] || std::abs(now[d] - was[d]) <= tol)) { return true; }
         }
         return (now[7] > Real(0.0)) != (was[7] > Real(0.0));
     };
     if (static_cast<int>(m_tip_rows.size()) != 9 * nturb || static_cast<int>(m_tip_dz.size()) != nturb) {
         m_tip_cells_valid = false;
     }
+    // MovingFittedMesh updates z_phys_nd in place every step, even when its boxes do not change.
+    if (SolverChoice::terrain_type == TerrainType::MovingFittedMesh) { m_tip_cells_valid = false; }
     // each owner compares its own turbines, without communication; one reduction tells every rank
     int stale = m_tip_cells_valid ? 0 : 1;
     if (stale == 0) {
