@@ -119,6 +119,7 @@ MovingBodiesInputs::read ()
     if (!(in.alm_max_tip_cells > 0.0) || !std::isfinite(in.alm_max_tip_cells)) {
         Abort("erf.moving_bodies.alm_max_tip_cells must be > 0 (cells swept by a blade tip per step)");
     }
+    pp.query("verify_tip_cells", in.verify_tip_cells);
 
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
@@ -314,6 +315,7 @@ MovingBodiesInputs::read ()
     }
     if (!any_alm) {
         warn_inactive(pp, "erf.moving_bodies", "alm_max_tip_cells", "no body has mode = alm");
+        warn_inactive(pp, "erf.moving_bodies", "verify_tip_cells", "no body has mode = alm");
     }
     return in;
 }

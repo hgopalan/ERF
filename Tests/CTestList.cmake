@@ -1487,6 +1487,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
+  # The ridge case as an actuator line (the limit raised over its 1.11 physical cells per step), with
+  # and without erf.moving_bodies.verify_tip_cells: every step checks the cached tip cell heights
+  # against the per-region search, and the check changes nothing in the flow (identical plotfiles)
+  add_test_option_parity(OpenFAST_ALM_Terrain_VerifyTipCells OpenFAST_ADM_Terrain "plt00010"
+      COMMON_OPTIONS "erf.moving_bodies.T1.fst_file=../stub_turbine.fst erf.moving_bodies.T1.mode=alm erf.moving_bodies.T1.fllc=false erf.moving_bodies.alm_max_tip_cells=2"
+      ON_OPTIONS "erf.moving_bodies.verify_tip_cells=1")
+  set_property(TEST OpenFAST_ALM_Terrain_VerifyTipCells APPEND PROPERTY LABELS "moving-bodies")
 
   # The same stub turbine as an actuator line (mode = alm): one point per rotating blade node,
   # the tip sweeping 0.9 cells per step under the one-cell limit. Same three checks; the
@@ -2647,10 +2654,16 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   add_test_abort(MovingBodies_ALMTipTravelStretched ${_mb_cases}/OpenFAST_ALM_Uniform OpenFAST_ALM_Uniform.i
       "the blade tip sweeps 0[.]97[0-9]* cells per step.*limiting cell height 47[.]59"
       "erf.moving_bodies.alm_max_tip_cells=0.5 'erf.terrain_z_levels=0 7.7 15.7 23.7 40.8 78.5 125 175 225 275 350 450 600'")
+  # the line over the ridge with the cached tip cell heights checked against the per-region search: the
+  # check passes and the run stops as above, with the same count and limiting height
+  add_test_abort(MovingBodies_ALMTipTravelPhysicalCells_Verify ${_mb_cases}/OpenFAST_ADM_Terrain OpenFAST_ADM_Terrain.i
+      "the blade tip sweeps 1[.]11[0-9]* cells per step.*limiting cell height 41[.]65"
+      "erf.moving_bodies.T1.mode=alm erf.moving_bodies.T1.fllc=false erf.moving_bodies.verify_tip_cells=1")
   foreach(_t MovingBodies_AnchorLevelAboveFinest MovingBodies_StopTimeNotWholeSteps MovingBodies_CtDiskDensityMismatch
              MovingBodies_MixedTimeSteps_OneRank
              MovingBodies_FinerLevelOverTheBodies MovingBodies_FPETrapsRefused MovingBodies_CorrectionRelaxOutOfRange
              MovingBodies_ALMTipTravelLimit MovingBodies_ALMTipTravelPhysicalCells MovingBodies_ALMTipTravelStretched
+             MovingBodies_ALMTipTravelPhysicalCells_Verify
              MovingBodies_StopTimeNotWholeCoarseSteps
              MovingBodies_AnchorLevelMissingAtStart
              MovingBodies_MaxStepEndsTheRunFirst MovingBodies_NacelleKernelTooNarrow MovingBodies_TowerWidthWithoutTower)

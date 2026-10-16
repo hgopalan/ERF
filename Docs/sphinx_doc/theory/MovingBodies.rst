@@ -351,7 +351,17 @@ one. The start-up audit's cells across the rotor
 still use the nominal spacing. For the IEA 15 MW at rated speed (tip speed about
 95 m/s) one cell per step means ``dt <= min(dx, dy, dz) / 95``: 0.43 s on the
 50 m Askervein mesh. The check runs every
-step because the rotor speed is OpenFAST's to change. The velocities OpenFAST
+step because the rotor speed is OpenFAST's to change. The limiting height itself
+is kept from step to step: it is searched for every rotor at the first step and
+after every regrid of the anchor level, and again for a rotor only when a value
+of its box (the hub position, the tip radius, the axis or the blades' distance
+off the rotor plane) has moved more than a tenth of the smallest nominal cell
+size from the box last searched, as a floating platform's hub does; a single
+integer reduction per step tells the ranks whether any has, and the rotors that
+have are searched together in one batched reduction.
+``erf.moving_bodies.verify_tip_cells = 1`` checks the kept heights every step
+against a fresh search of each rotor's box, one at a time, and aborts if they
+differ. The velocities OpenFAST
 receives are still sampled at its structural nodes, and the same ``Wake_Mod = 0``
 requirement and hub-axis check apply as for the disk.
 
