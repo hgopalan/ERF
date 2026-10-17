@@ -655,3 +655,67 @@ TEST(ActuatorSpreading, BatchedKernelsMatchThePointByPointReference)
 #endif
     }
 }
+
+// Columns split in z (boxes stacked over the same columns, some aloft): the spreading bounds each kernel's
+// cells from the table of this rank's node heights, where without it the whole column was swept. Only
+// faces of exactly zero weight are skipped, so the norms and every face of the source must be the
+// full-column answer bit for bit, on the same layout.
+TEST(ActuatorSpreading, AColumnSplitInZGivesTheFullColumnsAnswerBitForBit)
+{
+    Mesh m;
+    m.hill = 60.0;
+    m.nz = 40;
+    m.H = 2000.0;                 // 50 m cells: a kernel reaches a few hundred metres of the column
+    m.max_grid = {{24, 12, 10}};  // four boxes up each column, three of them aloft
+    const Real eps = 1.5 * m.dx();
+    // near the ground, mid-height and near the top, each with a kernel a few cells tall
+    std::vector<Real> pos, force, epsv;
+    for (const Real zf : {Real(0.18), Real(0.5), Real(0.8)}) {
+        const auto p = xyz(9.3 * m.dx(), 5.6 * m.dy(), zf * m.H);
+        pos.insert(pos.end(), p.begin(), p.end());
+        const auto f = xyz(-1.0e6 * zf, 2.0e5, -3.0e4);
+        force.insert(force.end(), f.begin(), f.end());
+        epsv.push_back(eps);
+    }
+    Sources table(m, true);
+    Sources column(m, true, &table.dm);
+    const erf_actuator::ZBounds zb = erf_actuator::mesh_z_bounds(*table.znd, table.geom, false);
+    ASSERT_TRUE(zb.has_table());
+    ASSERT_FALSE(zb.all_ground);
+    // the table bounds each kernel to part of the column (without it: all of it), so faces are skipped
+    for (std::size_t p = 0; p < epsv.size(); ++p) {
+        int kb = 0, kt = 0;
+        zb.k_range(pos[3*p+2] - Real(3.0) * eps, pos[3*p+2] + Real(3.0) * eps, 0, m.nz - 1, kb, kt);
+        EXPECT_LT(kt - kb + 1, 3 * m.nz / 4) << "point " << p;
+    }
+    const erf_actuator::ZBounds none{};
+    auto run = [&] (Sources& s, const erf_actuator::ZBounds* bounds, std::vector<Real>& norm) {
+        erf_actuator::spread_partial_norms(pos, epsv, s.znd.get(), s.detj.get(), s.geom, s.sx, norm, bounds);
+        std::vector<Real> f_over_s(force.size());
+        for (std::size_t q = 0; q < force.size(); ++q) { f_over_s[q] = force[q] / norm[q]; }
+        s.sx.setVal(0.0); s.sy.setVal(0.0); s.sz.setVal(0.0);
+        erf_actuator::add_scaled_kernels(pos, f_over_s, epsv, s.znd.get(), s.detj.get(), s.geom, s.sx, s.sy, s.sz, bounds);
+    };
+    std::vector<Real> n_table, n_column;
+    run(table, &zb, n_table);
+    run(column, &none, n_column);
+    ASSERT_EQ(n_table.size(), n_column.size());
+    for (std::size_t q = 0; q < n_table.size(); ++q) { EXPECT_EQ(n_table[q], n_column[q]) << "norm " << q; }
+    long nonzero = 0, faces = 0;
+    for (int dir = 0; dir < 3; ++dir) {
+        const amrex::MultiFab& a = (dir == 0) ? table.sx : (dir == 1) ? table.sy : table.sz;
+        const amrex::MultiFab& b = (dir == 0) ? column.sx : (dir == 1) ? column.sy : column.sz;
+        for (amrex::MFIter mfi(a, false); mfi.isValid(); ++mfi) {
+            const auto x = a.const_array(mfi);
+            const auto y = b.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                ++faces;
+                if (x(i,j,k) != Real(0.0)) { ++nonzero; }
+                if (x(i,j,k) != y(i,j,k)) { ADD_FAILURE() << "dir " << dir << " face (" << i << "," << j << "," << k << "): "
+                                                          << x(i,j,k) << " vs " << y(i,j,k); }
+            });
+        }
+    }
+    EXPECT_GT(nonzero, 0);
+    EXPECT_LT(nonzero, faces);
+}

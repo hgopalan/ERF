@@ -462,6 +462,46 @@ mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom, bool over_all_ra
         ParallelDescriptor::ReduceIntMin(all);
     }
     b.all_ground = (all != 0);
+    if (!over_all_ranks) {
+        // the table of this rank's boxes: each node level's lowest and highest height, and the cells they hold
+        const Box& dom = geom.Domain();
+        b.k0 = dom.smallEnd(2);
+        const int nnode = dom.length(2) + 1;
+        b.node_lo.assign(nnode, big);
+        b.node_hi.assign(nnode, -big);
+        b.has_cell.assign(nnode - 1, 0);
+        for (MFIter mfi(z_phys_nd, false); mfi.isValid(); ++mfi) {
+            const Box nbx = mfi.validbox();
+            const int kb = nbx.smallEnd(2), nk = nbx.length(2);
+            const int ilo = nbx.smallEnd(0), ihi = nbx.bigEnd(0), jlo = nbx.smallEnd(1), jhi = nbx.bigEnd(1);
+            Array4<Real const> const& znd = z_phys_nd.const_array(mfi);
+            Gpu::DeviceVector<Real> lo(nk), hi(nk);
+            Real* plo = lo.data();
+            Real* phi = hi.data();
+            // one thread per node level, over its nodes in a fixed order
+            ParallelFor(nk, [=] AMREX_GPU_DEVICE (int n) noexcept
+            {
+                const int k = kb + n;
+                Real l = big, h = -big;
+                for (int j = jlo; j <= jhi; ++j) {
+                    for (int i = ilo; i <= ihi; ++i) { l = amrex::min(l, znd(i,j,k)); h = amrex::max(h, znd(i,j,k)); }
+                }
+                plo[n] = l;
+                phi[n] = h;
+            });
+            std::vector<Real> hlo(nk), hhi(nk);
+            Gpu::copyAsync(Gpu::deviceToHost, lo.begin(), lo.end(), hlo.begin());
+            Gpu::copyAsync(Gpu::deviceToHost, hi.begin(), hi.end(), hhi.begin());
+            Gpu::streamSynchronize();
+            for (int n = 0; n < nk; ++n) {
+                const int at = kb + n - b.k0;
+                b.node_lo[at] = std::min(b.node_lo[at], hlo[n]);
+                b.node_hi[at] = std::max(b.node_hi[at], hhi[n]);
+            }
+            // the box's cells: between its lowest and highest node levels
+            for (int k = kb; k < kb + nk - 1; ++k) { b.has_cell[k - b.k0] = 1; }
+        }
+    }
     return b;
 }
 

@@ -142,10 +142,11 @@ struct KernelFaces
         }
         has_znd = (z_phys_nd != nullptr);
         has_detj = (detJ_cc != nullptr);
-        // over this rank's boxes only: the faces this rank visits are in them, so their bounds hold
-        // (bounds from the boxes that reach the ground do not hold for a box aloft over higher ground)
+        // over this rank's boxes only: the faces this rank visits are in them, so their bounds hold. With the
+        // table of its node heights they hold for any box (one aloft, a column split in z); without it the
+        // bounds from the boxes that reach the ground do not hold for a box aloft over higher ground
         if (has_znd) { zb = (zb_local != nullptr) ? *zb_local : mesh_z_bounds(*z_phys_nd, geom, false); }
-        if (!zb.all_ground) { zb = ZBounds{}; }
+        if (!zb.all_ground && !zb.has_table()) { zb = ZBounds{}; }
     }
 
     // The index box of the faces of grid dir within reach of a point at (px,py,pz); with z_phys_nd
@@ -165,6 +166,12 @@ struct KernelFaces
         if (has_znd) {
             int kb = dlo[2], kt = dhi[2];
             zb.k_range(pz - Real(3.0) * eps, pz + Real(3.0) * eps, dlo[2], dhi[2], kb, kt);
+            if (kb > kt) {
+                // none of this rank's cells holds a height within reach: no face of its boxes is
+                lo[2] = dhi[2] + 2;
+                hi[2] = dhi[2] + 1;
+                return Box(lo, hi, IntVect::TheDimensionVector(dir));
+            }
             // the faces bounding those cells, one more each way for the faces of a cell's neighbours
             lo[2] = std::max(kb - 1, dlo[2]);
             hi[2] = std::min(kt + 2, dhi[2] + 1);
