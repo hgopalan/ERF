@@ -1308,6 +1308,34 @@ endfunction()
 # per_turbine files: one deck run in both formats, each body's rows picked out of the rank or farm
 # files by their body column must equal its own files (Tests/RunDiagnosticsFormat.cmake). LOGS lists
 # body/log pairs; EXTRA_LOGS the run's own files, which must not change with the format.
+# The same deck with two settings that change how the bodies' files are written, never what they hold at
+# the end (Tests/RunSameLogs.cmake): every file in FILES must hold the same bytes after both runs.
+function(add_test_same_logs TEST_NAME TEST_FILES_DIR NRANKS)
+    set(oneValueArgs "COMMON_OPTIONS" "OPTIONS_A" "OPTIONS_B" "FILES" "EXPECT_B")
+    cmake_parse_arguments(ADD_TEST_SL "" "${oneValueArgs}" "" ${ARGN})
+    setup_test()
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+        "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+        "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+        "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+        "-DNRANKS=${NRANKS}"
+        "-DTEST_EXE=${TEST_EXE}"
+        "-DCONFIG=$<CONFIG>"
+        "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i"
+        "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+        "-DRUN_TIMEOUT=600"
+        "-DCOMMON_OPTIONS=${ADD_TEST_SL_COMMON_OPTIONS}"
+        "-DOPTIONS_A=${ADD_TEST_SL_OPTIONS_A}"
+        "-DOPTIONS_B=${ADD_TEST_SL_OPTIONS_B}"
+        "-DFILES=${ADD_TEST_SL_FILES}"
+        "-DEXPECT_B=${ADD_TEST_SL_EXPECT_B}"
+        -P ${PROJECT_SOURCE_DIR}/Tests/RunSameLogs.cmake)
+    set_tests_properties(${TEST_NAME} PROPERTIES
+        LABELS "regression;moving-bodies" TIMEOUT 1800 PROCESSORS ${NRANKS} WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/run_a/simulation.log;${CURRENT_TEST_BINARY_DIR}/run_b/simulation.log")
+endfunction()
+
 function(add_test_diagnostics_format TEST_NAME TEST_FILES_DIR FORMAT)
     set(oneValueArgs "COMMON_OPTIONS" "LOGS" "EXTRA_LOGS")
     cmake_parse_arguments(ADD_TEST_DF "" "${oneValueArgs}" "" ${ARGN})
@@ -1763,10 +1791,58 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "moving_bodies/rank00000_erf.csv moving_bodies/rank00001_erf.csv moving_bodies/rank00000_flow.csv moving_bodies/rank00001_correction.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
 
+  # The logs written with one file open at a time (erf.moving_bodies.max_open_logs = 1): on one rank,
+  # which owns both turbines and writes the farm's totals, every row closes another file and opens its
+  # own again to append. Every file must hold the bytes of the run with no limit.
+  set(_two_logs "T1_erf.csv T1_flow.csv T1_correction.csv T1_stats.csv T2_erf.csv T2_flow.csv T2_correction.csv T2_stats.csv")
+  add_test_same_logs(MovingBodies_Logs_OneOpenFile OpenFAST_ADM_TwoTurbines 1
+      OPTIONS_A "erf.moving_bodies.diagnostics_format=per_turbine" OPTIONS_B "erf.moving_bodies.max_open_logs=1"
+      EXPECT_B "at most 1 diagnostics file"
+      FILES "${_two_logs} moving_bodies/total_load.csv moving_bodies/momentum_source.csv")
+  # the same through the farm and rank files, two ranks
+  add_test_same_logs(MovingBodies_Logs_OneOpenFile_PerRank OpenFAST_ADM_TwoTurbines 2
+      COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.diagnostics_format=per_rank"
+      OPTIONS_A "erf.moving_bodies.max_open_logs=0" OPTIONS_B "erf.moving_bodies.max_open_logs=1"
+      EXPECT_B "at most 1 diagnostics file"
+      FILES "moving_bodies/rank00000_erf.csv moving_bodies/rank00001_erf.csv moving_bodies/rank00000_flow.csv moving_bodies/rank00001_flow.csv moving_bodies/rank00000_stats.csv moving_bodies/rank00001_stats.csv moving_bodies/total_load.csv")
+  # The statistics rewritten every 4 steps (erf.moving_bodies.stats_int) in a 10-step run without
+  # checkpoints: the last rewrite is the one at the end of the run, which must leave the files of the run
+  # that rewrites them at every step.
+  add_test_same_logs(MovingBodies_StatsInt_EndOfRun OpenFAST_ADM_TwoTurbines 2
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
+      OPTIONS_A "erf.moving_bodies.stats_int=0" OPTIONS_B "erf.moving_bodies.stats_int=4"
+      FILES "${_two_logs}")
+  add_test_same_logs(MovingBodies_StatsInt_EndOfRun_Farm OpenFAST_ADM_TwoTurbines 2
+      COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.diagnostics_format=farm"
+      OPTIONS_A "erf.moving_bodies.stats_int=0" OPTIONS_B "erf.moving_bodies.stats_int=4"
+      FILES "moving_bodies/farm_stats.csv moving_bodies/farm_erf.csv")
+  # the summary files across a restart: rewritten at the checkpoint at step 5 (the first leg goes on past
+  # it), every 3 steps and at the end, with one log open at a time; the restarted run must leave the
+  # straight run's statistics and logs
+  add_test_restart_parity(MovingBodies_StatsInt_OneOpenFile_Restart OpenFAST_ADM_TwoTurbines 5 10
+      COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.stats_int=3 erf.moving_bodies.max_open_logs=1"
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2
+      DATALOG "T1_erf.csv T1_flow.csv T1_correction.csv T1_stats.csv T2_erf.csv T2_stats.csv moving_bodies/total_load.csv"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+  # a restart with no step left, after a first run that went on to step 10: the statistics files must
+  # be rewritten from the checkpoint's state, not left as the first run wrote them at step 10
+  add_test_restart_parity(MovingBodies_StatsInt_RestartAtTheEnd OpenFAST_ADM_TwoTurbines 5 5
+      COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.stats_int=3"
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2 CHK_LEG_END 10
+      DATALOG "T1_stats.csv T2_stats.csv"
+      DATALOG_SIGDIGITS 10)
+
   # The same case with wake lines 2, 4 and 7 D behind the rotor, sampled every two steps and
   # averaged from 2 s: the running average must match its gold (the sampler is exact on the
   # faces' trilinear field) and the plotfile its gold.
   add_test_openfast_adm(OpenFAST_ADM_Wake OpenFAST_ADM_Wake "plt00010" "T1_wake_avg.csv")
+  # the wake averages and statistics rewritten every 4 steps (stats_int) in this 10-step run, the last at
+  # its end: the same files as rewriting them at every sample
+  add_test_same_logs(MovingBodies_StatsInt_Wake OpenFAST_ADM_Wake 1
+      OPTIONS_A "erf.moving_bodies.stats_int=0" OPTIONS_B "erf.moving_bodies.stats_int=4"
+      FILES "T1_wake_avg.csv T1_wake.csv T1_stats.csv T1_erf.csv")
 
   # The wake lines sampled with the domain in one box and split unevenly: the instantaneous
   # wake file must agree, so a line point on a box face reads the same through the ghost cells.

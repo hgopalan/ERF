@@ -4,6 +4,7 @@
 // the statistics or the file; a quantity renamed since the checkpoint (an older span checkpoint's
 // drag_y) continues when it is the same quantity and starts afresh when it is not.
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +15,10 @@
 #include <vector>
 
 #include <AMReX_REAL.H>
+
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
 
 #include <gtest/gtest.h>
 
@@ -223,4 +228,101 @@ TEST(LogStreams, AFileIsOpenedOnceAndAppendedToAfterARestart)
     std::ifstream in(f);
     std::string all((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     EXPECT_EQ(all, "time,body,a,b\n0.1,T1,1.5,-2\n0.2,T1,2.5,-3\n0.3,1.5,-2\n");
+}
+
+namespace {
+std::string read_all (const std::string& f)
+{
+    std::ifstream in(f);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+} // namespace
+
+TEST(LogStreams, CappedStreamsWriteTheSameBytesAsUncapped)
+{
+    // seven files written in turn, the way an owner of seven bodies writes one log row for each per
+    // step, with at most two open: each later row closes another file and opens its own again
+    const auto dir = gtest_scratch_root() / "erf_gtest_logstreams_cap";
+    const int nf = 7, nrow = 4;
+    auto name = [&dir] (const char* run, int f) { return (dir / run / ("T" + std::to_string(f) + "_erf.csv")).string(); };
+    // a fresh run truncates: each capped file holds stale rows first, which its first open must drop and its reopenings keep
+    std::filesystem::create_directories(dir / "capped");
+    for (int f = 0; f < nf; ++f) { std::ofstream(name("capped", f)) << "stale\n"; }
+    auto write = [&] (erf_actuator::LogStreams& logs, const char* run) {
+        for (int r = 0; r < nrow; ++r) {
+            for (int f = 0; f < nf; ++f) {
+                const Real v[2] = {Real(r), Real(10 * f + r)};
+                erf_actuator::write_log_row(logs.get(name(run, f), true, "time,a,b"), 0.5 * r, nullptr, v, 2);
+                EXPECT_LE(logs.size(), logs.max_open());
+            }
+        }
+    };
+    {
+        erf_actuator::LogStreams all(100);
+        erf_actuator::LogStreams two(2);
+        write(all, "uncapped");
+        write(two, "capped");
+        EXPECT_EQ(all.size(), static_cast<std::size_t>(nf));
+        EXPECT_EQ(two.size(), 2u);
+    }
+    for (int f = 0; f < nf; ++f) {
+        std::string expect = "time,a,b\n";
+        for (int r = 0; r < nrow; ++r) {
+            std::ostringstream row;
+            row << 0.5 * r << "," << r << "," << 10 * f + r << "\n";
+            expect += row.str();
+        }
+        EXPECT_EQ(read_all(name("uncapped", f)), expect) << "file " << f;
+        EXPECT_EQ(read_all(name("capped", f)), expect) << "file " << f;
+    }
+    // a restarted run's capped streams append to every file, closed and opened again as above, with no second header
+    {
+        erf_actuator::LogStreams two(2);
+        for (int f = 0; f < nf; ++f) {
+            const Real v[2] = {Real(9), Real(9)};
+            erf_actuator::write_log_row(two.get(name("capped", f), false, "time,a,b"), 9.0, nullptr, v, 2);
+            erf_actuator::write_log_row(two.get(name("capped", (f + 3) % nf), false, "time,a,b"), 9.5, nullptr, v, 2);
+        }
+    }
+    EXPECT_EQ(read_all(name("capped", 0)), read_all(name("uncapped", 0)) + "9,9,9\n9.5,9,9\n");
+}
+
+TEST(LogStreams, TheDefaultCapIsAQuarterOfTheOpenFileLimit)
+{
+    const std::size_t n = erf_actuator::default_max_open_logs();
+#ifndef _WIN32
+    rlimit rl{};
+    ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &rl), 0);
+    if (rl.rlim_cur != RLIM_INFINITY) {
+        const auto quarter = static_cast<std::size_t>(rl.rlim_cur / 4);
+        EXPECT_EQ(n, std::min<std::size_t>(4096, std::max<std::size_t>(16, quarter))) << "soft limit " << rl.rlim_cur;
+    }
+#endif
+    EXPECT_GE(n, 16u);
+    EXPECT_LE(n, 4096u);
+    EXPECT_EQ(erf_actuator::LogStreams().max_open(), n);
+    EXPECT_EQ(erf_actuator::LogStreams(0).max_open(), 1u);
+}
+
+TEST(LogStreams, OpeningOneMoreClosesTheFileWrittenToMostRecently)
+{
+    // logs written in the same order every step: closing the most recent one keeps the others open
+    const auto dir = gtest_scratch_root() / "erf_gtest_logstreams_order";
+    auto f = [&dir] (const char* n) { return (dir / n).string(); };
+    erf_actuator::LogStreams two(2);
+    two.get(f("A.csv"), true, "h");
+    two.get(f("B.csv"), true, "h");
+    two.get(f("A.csv"), true, "h");   // A is now the most recent
+    two.get(f("C.csv"), true, "h");   // closes A, keeps B
+    EXPECT_TRUE(two.is_open(f("B.csv")));
+    EXPECT_TRUE(two.is_open(f("C.csv")));
+    EXPECT_FALSE(two.is_open(f("A.csv")));
+    // cycles over four files with two open: on average one file is still open at its next row, so 8
+    // cycles open at most 8 x 3 files (2, 3 or 3 a cycle); closing the least recent instead opens all 4 every cycle
+    for (const char* n : {"B.csv", "A.csv", "C.csv", "D.csv"}) { two.get(f(n), true, "h"); }
+    const std::size_t before = two.opens();
+    for (int cycle = 0; cycle < 8; ++cycle) {
+        for (const char* n : {"B.csv", "A.csv", "C.csv", "D.csv"}) { two.get(f(n), true, "h"); }
+    }
+    EXPECT_LE(two.opens() - before, 24u);
 }

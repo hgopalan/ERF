@@ -86,6 +86,14 @@ MovingBodiesInputs::read ()
     if (!valid_diagnostics_format(in.diagnostics_format)) {
         Abort("erf.moving_bodies.diagnostics_format = " + in.diagnostics_format + ": use per_turbine, per_rank or farm");
     }
+    pp.query("stats_int", in.stats_int);
+    if (in.stats_int < 0) {
+        Abort("erf.moving_bodies.stats_int must be >= 0 (0 rewrites the statistics at every diagnostics step and the wake averages at every sample)");
+    }
+    pp.query("max_open_logs", in.max_open_logs);
+    if (in.max_open_logs < 0) {
+        Abort("erf.moving_bodies.max_open_logs must be >= 0 (0: a quarter of the process's open-file limit)");
+    }
 
     {
         ParmParse pw("erf.moving_bodies.wake");

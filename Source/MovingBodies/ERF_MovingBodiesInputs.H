@@ -94,6 +94,9 @@ struct MovingBodyInputs
  *   erf.moving_bodies.diagnostics_int = 1
  *   erf.moving_bodies.diagnostics_format = per_turbine  (per_turbine: one file per body and log; per_rank: one per rank
  *                                                       and log; farm: one per log, gathered to the I/O rank)
+ *   erf.moving_bodies.stats_int = 0               (rewrite _stats and _wake_avg every this many steps, at checkpoints
+ *                                                  and at the end; 0: at every diagnostics step and wake sample)
+ *   erf.moving_bodies.max_open_logs = 0           (logs a rank keeps open at once; 0: a quarter of its open-file limit)
  *   erf.moving_bodies.wake.lines_xD   = 2 4 7      (wake lines behind every rotor; see WakeInputs)
  *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
  *   erf.moving_bodies.alm_max_tip_cells = 1.0      (abort when a blade tip sweeps more cells than this per step)
@@ -127,6 +130,13 @@ struct MovingBodiesInputs
      * I/O rank, with the body as a column.
      */
     std::string diagnostics_format{"per_turbine"};
+    /**
+     * Rewrite the statistics (_stats) and the wake averages (_wake_avg) every this many steps, at
+     * every checkpoint and at the end of the run; 0 rewrites the statistics at every diagnostics step
+     * and the wake averages at every wake sample.
+     */
+    int stats_int{0};
+    int max_open_logs{0};                    //!< logs a rank keeps open at once (0: a quarter of its open-file limit)
     bool has_prescribed_velocity{false};
     std::array<amrex::Real,3> prescribed_velocity{{0.0, 0.0, 0.0}};
     WakeInputs wake;

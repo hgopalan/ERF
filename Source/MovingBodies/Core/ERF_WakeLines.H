@@ -85,7 +85,7 @@ public:
     void write_instantaneous (double time, const std::vector<amrex::Real>& vel, bool truncate) const;
     /** The same through logs, which keeps the file open from one write to the next (LogStreams). */
     void write_instantaneous (LogStreams& logs, double time, const std::vector<amrex::Real>& vel, bool truncate) const;
-    /** Rewrite <output_root>_wake_avg.csv with the running average (the file always holds the current mean). */
+    /** Rewrite <output_root>_wake_avg.csv with the running average so far. */
     void write_average () const;
 
     /**
