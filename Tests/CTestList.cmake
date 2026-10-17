@@ -1308,6 +1308,35 @@ endfunction()
 # per_turbine files: one deck run in both formats, each body's rows picked out of the rank or farm
 # files by their body column must equal its own files (Tests/RunDiagnosticsFormat.cmake). LOGS lists
 # body/log pairs; EXTRA_LOGS the run's own files, which must not change with the format.
+# A restart cuts the logs back to the checkpoint, each on the rank that writes it (Tests/RunTrimOnRestart.cmake):
+# FILES must hold a straight run's bytes after the restart, and TRIMMED_BY names the rank that cuts each file.
+function(add_test_trim_on_restart TEST_NAME TEST_FILES_DIR STEP_CHK CHK_LEG_END CHK_NRANKS RESTART_NRANKS)
+    set(oneValueArgs "COMMON_OPTIONS" "FILES" "TRIMMED_BY")
+    cmake_parse_arguments(ADD_TEST_TF "" "${oneValueArgs}" "" ${ARGN})
+    setup_test()
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+        "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+        "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+        "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+        "-DTEST_EXE=${TEST_EXE}"
+        "-DCONFIG=$<CONFIG>"
+        "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i"
+        "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+        "-DRUN_TIMEOUT=600"
+        "-DSTEP_CHK=${STEP_CHK}"
+        "-DCHK_LEG_END=${CHK_LEG_END}"
+        "-DCHK_NRANKS=${CHK_NRANKS}"
+        "-DRESTART_NRANKS=${RESTART_NRANKS}"
+        "-DCOMMON_OPTIONS=${ADD_TEST_TF_COMMON_OPTIONS}"
+        "-DFILES=${ADD_TEST_TF_FILES}"
+        "-DTRIMMED_BY=${ADD_TEST_TF_TRIMMED_BY}"
+        -P ${PROJECT_SOURCE_DIR}/Tests/RunTrimOnRestart.cmake)
+    set_tests_properties(${TEST_NAME} PROPERTIES
+        LABELS "regression;moving-bodies;restart-parity" TIMEOUT 1800 PROCESSORS ${CHK_NRANKS} WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/run/simulation.log;${CURRENT_TEST_BINARY_DIR}/run/restart.log")
+endfunction()
+
 # The same deck with two settings that change how the bodies' files are written, never what they hold at
 # the end (Tests/RunSameLogs.cmake): every file in FILES must hold the same bytes after both runs.
 function(add_test_same_logs TEST_NAME TEST_FILES_DIR NRANKS)
@@ -1783,13 +1812,30 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       CHK_NRANKS 2 RESTART_NRANKS 2
       DATALOG "moving_bodies/farm_erf.csv moving_bodies/farm_flow.csv moving_bodies/farm_correction.csv moving_bodies/total_load.csv moving_bodies/momentum_source.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
-  # the same with one file per rank: each rank's files are trimmed by the I/O rank and appended to by their owner
+  # the same with one file per rank: each rank trims and appends to its own files
   add_test_restart_parity(MovingBodies_DiagnosticsFormat_PerRank_Restart OpenFAST_ADM_TwoTurbines 5 10
       COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.diagnostics_format=per_rank"
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
       CHK_NRANKS 2 RESTART_NRANKS 2
       DATALOG "moving_bodies/rank00000_erf.csv moving_bodies/rank00001_erf.csv moving_bodies/rank00000_flow.csv moving_bodies/rank00001_correction.csv moving_bodies/total_load.csv"
       DATALOG_SIGDIGITS 10 OVERRUN)
+  # a restart on fewer ranks: the first run (2 ranks) goes on to step 10, the restart (1 rank, no step left)
+  # must cut rank 1's files too, though no rank of this run writes them, back to a straight 5-step run's
+  # (Tests/RunTrimOnRestart.cmake)
+  add_test_trim_on_restart(MovingBodies_DiagnosticsFormat_PerRank_RestartOnOneRank OpenFAST_ADM_TwoTurbines 5 10 2 1
+      COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.diagnostics_format=per_rank"
+      FILES "moving_bodies/rank00001_erf.csv moving_bodies/rank00001_flow.csv moving_bodies/rank00001_correction.csv moving_bodies/rank00000_erf.csv moving_bodies/total_load.csv"
+      TRIMMED_BY "moving_bodies/rank00001_erf.csv:0 moving_bodies/rank00000_erf.csv:0")
+  # each owner cuts its own body's files on two ranks: T1 is owned by rank 1, T2 by rank 0, and the I/O rank cuts the totals
+  add_test_trim_on_restart(MovingBodies_Restart_OwnersCutTheirLogs OpenFAST_ADM_TwoTurbines 5 10 2 2
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
+      FILES "T1_erf.csv T1_flow.csv T1_correction.csv T2_erf.csv T2_flow.csv T2_correction.csv moving_bodies/total_load.csv moving_bodies/momentum_source.csv"
+      TRIMMED_BY "T1_erf.csv:1 T1_correction.csv:1 T2_erf.csv:0 T2_correction.csv:0 moving_bodies/total_load.csv:0 moving_bodies/momentum_source.csv:0")
+  # the same for the wake file: the turbine and its wake lines owned by rank 1
+  add_test_trim_on_restart(MovingBodies_Restart_WakeOwnerCutsItsLog OpenFAST_ADM_Restart 5 10 2 2
+      COMMON_OPTIONS "amr.max_grid_size_x=24"
+      FILES "T1_erf.csv T1_wake.csv"
+      TRIMMED_BY "T1_erf.csv:1 T1_wake.csv:1")
 
   # The logs written with one file open at a time (erf.moving_bodies.max_open_logs = 1): on one rank,
   # which owns both turbines and writes the farm's totals, every row closes another file and opens its

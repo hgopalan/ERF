@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -325,4 +326,125 @@ TEST(LogStreams, OpeningOneMoreClosesTheFileWrittenToMostRecently)
         for (const char* n : {"B.csv", "A.csv", "C.csv", "D.csv"}) { two.get(f(n), true, "h"); }
     }
     EXPECT_LE(two.opens() - before, 24u);
+}
+
+namespace {
+
+// the trim as the I/O rank did it before it cut files from their end: read the whole file and
+// rewrite the rows to keep (the reference the new trim must reproduce, byte for byte)
+std::size_t trim_by_rewrite (const std::string& fname, double t_chk, bool keep_at_chk, double tol)
+{
+    std::ifstream in(fname);
+    if (!in) { return 0; }
+    std::vector<std::string> keep;
+    std::string line;
+    bool header = true;
+    std::size_t dropped = 0;
+    while (std::getline(in, line)) {
+        if (header) { keep.push_back(line); header = false; continue; }
+        if (line.empty()) { continue; }
+        double t = 0.0;
+        try { t = std::stod(line.substr(0, line.find(','))); } catch (...) { keep.push_back(line); continue; }
+        const bool before = keep_at_chk ? (t <= t_chk + tol) : (t < t_chk - tol);
+        if (before) { keep.push_back(line); } else { ++dropped; }
+    }
+    in.close();
+    if (dropped == 0) { return 0; }
+    std::ofstream out(fname, std::ios::trunc);
+    for (const auto& l : keep) { out << l << "\n"; }
+    return dropped;
+}
+
+void write_file (const std::string& f, const std::string& text)
+{
+    std::ofstream out(f, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+} // namespace
+
+TEST(TrimLog, CuttingFromTheEndLeavesTheBytesOfTheRewrite)
+{
+    // logs in time order as ERF writes them: a header, rows whole steps apart (several bodies per time in
+    // the rank and farm files), rows stamped at the checkpoint time, and some files longer than the first
+    // block read from the end (64 KiB). (A row that does not parse, which ERF does not write, is kept
+    // with the rows before it; the rewrite also dropped the rows before it that lie past the checkpoint.)
+    const auto dir = gtest_scratch_root() / "erf_gtest_trim";
+    std::filesystem::create_directories(dir);
+    std::mt19937 gen(20261017);
+    int cases = 0, cut_cases = 0, long_cases = 0;
+    for (int c = 0; c < 400; ++c) {
+        const double dt = 0.5;
+        const int nrow = (c % 10 == 0) ? 4000 + static_cast<int>(gen() % 3000) : static_cast<int>(gen() % 40);
+        const int per_time = 1 + static_cast<int>(gen() % 3);
+        std::ostringstream text;
+        text << "time,body,a,b";
+        if (gen() % 4 != 0) { text << "\n"; }
+        else if (nrow > 0) { text << "\n"; }
+        for (int r = 0; r < nrow; ++r) {
+            const double t = dt * (r / per_time);
+            text << std::setprecision(10) << t << ",T" << r % per_time << "," << 1.5 * r << ",-" << r << ",padding-to-make-rows-longer";
+            // the last row may lack its newline (a run stopped while writing)
+            if (r + 1 < nrow || gen() % 3 != 0) { text << "\n"; }
+        }
+        const double t_chk = dt * static_cast<double>(gen() % (nrow / per_time + 3));
+        const bool keep_at_chk = (gen() % 2 == 0);
+        const double tol = 0.25 * dt;
+        const std::string a = (dir / ("a" + std::to_string(c) + ".csv")).string();
+        const std::string b = (dir / ("b" + std::to_string(c) + ".csv")).string();
+        write_file(a, text.str());
+        write_file(b, text.str());
+        const std::size_t na = trim_by_rewrite(a, t_chk, keep_at_chk, tol);
+        const std::size_t nb = erf_actuator::trim_log_after(b, t_chk, keep_at_chk, tol);
+        EXPECT_EQ(nb, na) << "case " << c;
+        EXPECT_EQ(read_all(b), read_all(a)) << "case " << c << ": " << nrow << " rows, t_chk " << t_chk << ", keep_at_chk " << keep_at_chk;
+        ++cases;
+        if (na > 0) { ++cut_cases; }
+        if (text.str().size() - read_all(a).size() > 2 * 65536) { ++long_cases; }
+    }
+    // the sweep reaches the cases it is for: files cut, and cuts more than two blocks back from the end
+    EXPECT_GT(cut_cases, 100);
+    EXPECT_GT(long_cases, 5);
+    EXPECT_EQ(cases, 400);
+}
+
+TEST(TrimLog, EdgeCases)
+{
+    const auto dir = gtest_scratch_root() / "erf_gtest_trim_edges";
+    std::filesystem::create_directories(dir);
+    const std::string f = (dir / "log.csv").string();
+    // a missing file is left alone, and not made
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 0u);
+    EXPECT_FALSE(std::filesystem::exists(f));
+    // an empty file, and a header alone
+    write_file(f, "");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 0u);
+    EXPECT_EQ(read_all(f), "");
+    write_file(f, "time,a\n");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 0u);
+    EXPECT_EQ(read_all(f), "time,a\n");
+    // no row past the checkpoint: the file is not touched
+    write_file(f, "time,a\n0.5,1\n1,2\n");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 0u);
+    EXPECT_EQ(read_all(f), "time,a\n0.5,1\n1,2\n");
+    // a row at the checkpoint time: kept when stamped at the end of its step, dropped when stamped at its start
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, false, 0.1), 1u);
+    EXPECT_EQ(read_all(f), "time,a\n0.5,1\n");
+    // every row past it: the header stays; empty lines past the last row kept go too, uncounted
+    write_file(f, "time,a\n2,1\n\n3,2\n\n");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 2u);
+    EXPECT_EQ(read_all(f), "time,a\n");
+    // a row that does not parse is kept, and the rows before it
+    write_file(f, "time,a\n1,1\nnote\n3,2\n4,3");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 2u);
+    EXPECT_EQ(read_all(f), "time,a\n1,1\nnote\n");
+    // an empty line among the rows kept stays (the earlier rewrite removed it)
+    write_file(f, "time,a\n1,1\n\n1.5,2\n3,3\n");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 2.0, true, 0.1), 1u);
+    EXPECT_EQ(read_all(f), "time,a\n1,1\n\n1.5,2\n");
+    // rows longer than the first block read from the end (64 KiB): the block grows until a row fits
+    const std::string wide(200000, '7');
+    write_file(f, "time,a\n1," + wide + "\n2," + wide + "\n3," + wide + "\n");
+    EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 2u);
+    EXPECT_EQ(read_all(f), "time,a\n1," + wide + "\n");
 }
