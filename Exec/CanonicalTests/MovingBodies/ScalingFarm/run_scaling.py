@@ -5,7 +5,8 @@ For each farm and rank count it writes the deck (make_scaling_farm.py), runs eve
 that alternates from one rank count to the next, so that neither binary always runs first), reads the "Moving
 bodies timing" summaries of the run log (erf.moving_bodies.timing_int) and prints one markdown table:
 - the start-up (the constructor, set_ground) as the maximum over the ranks, and the first step's start-up
-  checks and wake-line set-up (coverage, audits), also the maximum, from the first summary;
+  checks (coverage, audits) and wake lines (their set-up and first sample), also the maxima, from the first
+  summary;
 - each phase's mean over the ranks per step from the later summaries (n/a when the run gave only one);
 - with two binaries, whether their farm logs (everything under moving_bodies/, to the 10 digits they are
   printed with) are identical.
@@ -117,7 +118,7 @@ def main():
                         first = s[0][2]
                         row["startup"] = first.get("startup", (0, 0, 0))[2]
                         row["checks"] = first.get("checks", (0, 0, 0))[2]
-                        row["wake setup"] = first.get("wake", (0, 0, 0))[2]
+                        row["step-1 wake"] = first.get("wake", (0, 0, 0))[2]
                         steady = s[1:]
                         nsteps = sum(x[1] - x[0] + 1 for x in steady)
                         for p in phases:
@@ -133,8 +134,8 @@ def main():
                             if ok else "n/a")
                     xa["same"] = xb["same"] = same
 
-    first_cols = ["startup", "checks", "wake setup"]
-    head = (["mode", "N", "ranks", "binary", "status", "startup max (s)", "step-1 checks max (s)", "wake set-up max (s)"] +
+    first_cols = ["startup", "checks", "step-1 wake"]
+    head = (["mode", "N", "ranks", "binary", "status", "startup max (s)", "step-1 checks max (s)", "step-1 wake max (s)"] +
             [f"{p} mean (s/step)" for p in phases])
     if len(exes) == 2:
         head.append("farm logs identical")

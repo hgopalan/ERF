@@ -18,7 +18,8 @@ not a regression test: nothing here compares output with a gold, and CTest does 
 - `run_scaling.py` writes the decks for several N, runs one or two ERF binaries on each at several rank
   counts, and prints a markdown table:
   - from the first timing summary, as the maximum over the ranks: the start-up (the constructor,
-    `set_ground`), and the first step's start-up checks (coverage, audits) and wake-line set-up;
+    `set_ground`), and the first step's start-up checks (coverage, audits) and wake lines (their set-up
+    and first sample);
   - each phase's mean seconds per step over the ranks, from the later summaries;
   - a status column, so a failed run shows its exit code instead of numbers;
   - with two binaries, whether their farm logs (everything under `moving_bodies/`) are identical.
