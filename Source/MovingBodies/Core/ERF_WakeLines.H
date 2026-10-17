@@ -96,11 +96,14 @@ public:
      */
     void write_state (const std::string& dir) const;
     /**
-     * Restore the state written by write_state(), geometry included; false when there is none.
-     * Aborts, changing nothing, when the file is malformed: a negative count, a diameter that is
-     * not positive, an axis that is not a horizontal unit vector, or a non-finite value.
+     * Restore the state written by write_state(), geometry included, read on this rank alone (not
+     * collective: the rotor's owner calls it); false when there is none. When the file is malformed
+     * (a negative count, a diameter that is not positive, an axis that is not a horizontal unit
+     * vector, a non-finite value, or other lines than the inputs') it changes nothing and aborts,
+     * or, given error, returns false with the message there, for the caller to stop every rank with
+     * it (first_failure()).
      */
-    bool read_state (const std::string& dir);
+    bool read_state (const std::string& dir, std::string* error = nullptr);
 
 private:
     void write_rows (std::ostream& out, const std::vector<amrex::Real>& vel, const std::string& prefix) const;

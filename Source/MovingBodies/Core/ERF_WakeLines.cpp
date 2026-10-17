@@ -169,14 +169,19 @@ WakeLines::write_state (const std::string& dir) const
 }
 
 bool
-WakeLines::read_state (const std::string& dir)
+WakeLines::read_state (const std::string& dir, std::string* error)
 {
     const std::string fname = dir + "/" + m_name + "_wake_avg.dat";
-    // decided on the I/O rank for every rank: the read below is collective
-    if (!file_exists_everywhere(fname)) { return false; }
-    Vector<char> chars;
-    ParallelDescriptor::ReadAndBcastFile(fname, chars);
-    std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+    // read on this rank alone: the rotor's owner, which alone samples the lines and keeps their average
+    auto fail = [error] (const std::string& msg) {
+        if (error == nullptr) { Abort(msg); }
+        *error = msg;
+        return false;
+    };
+    if (!FileExists(fname)) { return false; }
+    std::ifstream in(fname);
+    if (!in) { return fail("cannot read the wake-average checkpoint '" + fname + "' on rank " +
+                           std::to_string(ParallelDescriptor::MyProc()) + ", the rotor's owner"); }
     std::string key, eq;
     std::size_t size = 0;
     int count = 0;
@@ -186,30 +191,35 @@ WakeLines::read_state (const std::string& dir)
         !(in >> key >> eq >> hub[0] >> hub[1] >> hub[2]) || key != "hub" ||
         !(in >> key >> eq >> axis[0] >> axis[1] >> axis[2]) || key != "axis" ||
         !(in >> key >> eq >> diameter) || key != "diameter") {
-        Abort("malformed wake-average checkpoint '" + fname + "'");
+        return fail("malformed wake-average checkpoint '" + fname + "'");
     }
     if (size != m_sum.size()) {
-        Abort("the wake-average checkpoint '" + fname + "' holds " + std::to_string(size) + " values but the lines of " +
+        return fail("the wake-average checkpoint '" + fname + "' holds " + std::to_string(size) + " values but the lines of " +
               m_name + " have " + std::to_string(m_sum.size()) + "; the wake inputs must match the run being restarted");
     }
     const Real naxis = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
     const bool finite = std::isfinite(hub[0]) && std::isfinite(hub[1]) && std::isfinite(hub[2]) && std::isfinite(naxis);
     if (count < 0 || !finite || !(std::isfinite(diameter) && diameter > 0.0) ||
         !(std::abs(naxis - Real(1.0)) < Real(1.0e-4) && std::abs(axis[2]) < Real(1.0e-4))) {
-        Abort("malformed wake-average checkpoint '" + fname + "': the count must be >= 0, the diameter positive, "
+        return fail("malformed wake-average checkpoint '" + fname + "': the count must be >= 0, the diameter positive, "
               "the axis a horizontal unit vector and every value finite");
     }
     // the line layout (checkpoints from before it was written have none): it must be the inputs' own
     in >> std::ws;
     if (std::isalpha(in.peek())) {
         std::size_t nxd = 0;
-        if (!(in >> key >> eq >> nxd) || key != "lines_xD") { Abort("malformed wake-average checkpoint '" + fname + "'"); }
+        if (!(in >> key >> eq >> nxd) || key != "lines_xD") { return fail("malformed wake-average checkpoint '" + fname + "'"); }
+        // another number of lines than the inputs': refused before its values are read (a corrupt count allocates nothing)
+        if (nxd != m_xD.size()) {
+            return fail("erf.moving_bodies.wake: the checkpoint '" + fname + "' holds the running averages of other lines "
+                        "(lines_xD, half_width or num_points differ from the inputs); restart with the same wake inputs");
+        }
         std::vector<Real> xd(nxd);
-        for (auto& x : xd) { if (!(in >> x)) { Abort("malformed wake-average checkpoint '" + fname + "'"); } }
+        for (auto& x : xd) { if (!(in >> x)) { return fail("malformed wake-average checkpoint '" + fname + "'"); } }
         Real hw = 0.0;
         int np = 0;
         if (!(in >> key >> eq >> hw) || key != "half_width" || !(in >> key >> eq >> np) || key != "num_points") {
-            Abort("malformed wake-average checkpoint '" + fname + "'");
+            return fail("malformed wake-average checkpoint '" + fname + "'");
         }
         bool same = (xd.size() == m_xD.size()) && (np == m_npts) &&
                     (std::abs(hw - m_half_width) <= Real(1.0e-6) * std::max(Real(1.0), std::abs(m_half_width)));
@@ -217,26 +227,27 @@ WakeLines::read_state (const std::string& dir)
             same = std::abs(xd[k] - m_xD[k]) <= Real(1.0e-6) * std::max(Real(1.0), std::abs(m_xD[k]));
         }
         if (!same) {
-            Abort("erf.moving_bodies.wake: the checkpoint '" + fname + "' holds the running averages of other lines "
+            return fail("erf.moving_bodies.wake: the checkpoint '" + fname + "' holds the running averages of other lines "
                   "(lines_xD, half_width or num_points differ from the inputs); restart with the same wake inputs");
         }
     } else {
-        amrex::Print() << "WakeLines " << m_name << ": the checkpoint '" << fname << "' does not record the line layout; "
+        amrex::AllPrint() << "WakeLines " << m_name << ": the checkpoint '" << fname << "' does not record the line layout; "
                        << "taking it as the inputs' own\n";
     }
     // the geometry is taken over as it was: the rotor's hub and diameter come from OpenFAST's
     // single-precision arrays and differ at the last digits from one build of the lines to another
     std::vector<Real> s(m_s.size()), pos(size);
     std::vector<double> sum(size);
-    auto read_all = [&] (auto& v) {
+    auto read_all = [&] (auto& v) -> std::string {
         for (auto& x : v) {
-            if (!(in >> x)) { Abort("truncated wake-average checkpoint '" + fname + "'"); }
-            if (!std::isfinite(x)) { Abort("malformed wake-average checkpoint '" + fname + "': a value is not finite"); }
+            if (!(in >> x)) { return "truncated wake-average checkpoint '" + fname + "'"; }
+            if (!std::isfinite(x)) { return "malformed wake-average checkpoint '" + fname + "': a value is not finite"; }
         }
+        return "";
     };
-    read_all(s);
-    read_all(pos);
-    read_all(sum);
+    for (std::string bad : {read_all(s), read_all(pos), read_all(sum)}) {
+        if (!bad.empty()) { return fail(bad); }
+    }
     m_s = s;
     m_pos = pos;
     m_sum = sum;

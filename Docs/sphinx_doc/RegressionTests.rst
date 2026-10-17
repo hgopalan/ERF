@@ -848,7 +848,10 @@ the end of the run, and requires the files of the run that rewrites them at ever
 ``stats_int = 3`` and one open file, after a first run that went on past the checkpoint, and
 requires the straight run's logs and statistics. ``MovingBodies_StatsInt_RestartAtTheEnd``
 restarts from step 5 with no step left, after a first run that went on to step 10: the
-statistics files must be rewritten from the checkpoint's state.
+statistics files must be rewritten from the checkpoint's state. ``MovingBodies_StatsInt_Farm_RestartAtTheEnd_OwnerRank1``
+does the same through the farm file, with the turbine owned by rank 1 and rank 0
+owning none: the ranks must agree to rewrite the file, as that rewrite is
+collective, and it must hold the straight run's bytes.
 
 ``OpenFAST_ADM_TwoWidths`` is that farm with a kernel width per turbine (T1
 2 cells, T2 1 cell, which also sets T2's filtered-disk correction): the same
@@ -962,7 +965,12 @@ restart-parity test runs this way.
 and ``_AddedBody`` (``Tests/RunRestartAbort.cmake``) restart the same
 checkpoint with one change each (a body's ``num_points_t``, ``erf.fixed_dt``,
 a stop time past the one OpenFAST was started with, a second body) and require
-the restart to stop with a message naming it. ``MovingBodies_CtDisk_Restart`` does the
+the restart to stop with a message naming it. ``MovingBodies_Restart_MalformedStatsOnRank1``
+and ``_MalformedWakeOnRank1`` write the checkpoint on two ranks with the turbine
+owned by rank 1 (the restart's log must say so), overwrite its statistics or wake-average file with a malformed
+one, and require the restart to stop with that file's message: only the owner
+reads the file, and every rank stops with its message (a rank that skipped the
+reduction would hang until the 180 s limit). ``MovingBodies_CtDisk_Restart`` does the
 same restart-parity check (with ``OVERRUN``) for the prescribed-Ct disk, asking
 for a later stop time on restart, which a run without turbines may do, and
 ``MovingBodies_Restart_ChangedDiskDensity`` requires a changed ``air_density`` to

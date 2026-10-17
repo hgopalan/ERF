@@ -847,6 +847,40 @@ TEST(ActuatorSampling, TheUpperFaceIsTheLastCellAndPeriodicPointsTheirImage)
     Fields f(m, true);
     // on the domain's upper x and y faces (an end of a line placed on the boundary)
     f.check({m.Lx, Real(0.37) * m.Ly, Real(0.5) * m.H, Real(0.41) * m.Lx, m.Ly, Real(0.5) * m.H, m.Lx, m.Ly, Real(0.25) * m.H}, tol);
+    // and on its top face (a vertical wake line that reaches the top), on the uniform and the stretched mesh,
+    // with the column in one box and split in z
+    const std::vector<Real> top{Real(0.41) * m.Lx, Real(0.37) * m.Ly, m.H, m.Lx, m.Ly, m.H};
+    f.check(top, tol);
+    {
+        MeshSpec ms = m;
+        ms.stretch = 1.15;
+        Fields fs(ms, false);
+        fs.check(top, tol);
+        MeshSpec mz = ms;
+        mz.max_grid = {{5, 4, 4}};
+        Fields fz(mz, false);
+        fz.check(top, tol);
+        MeshSpec mu = m;
+        mu.max_grid = {{5, 4, 4}};
+        Fields fu(mu, true);
+        fu.check(top, tol);
+        // and a cell-centred scalar (sample_cell_scalar) linear in z, with the column in one box and split in z
+        for (const Fields* fc : {&f, &fu}) {
+            amrex::MultiFab c(fc->ba, fc->dm, 1, 1);
+            const Real dz = m.H / m.nz;
+            for (amrex::MFIter mfi(c, false); mfi.isValid(); ++mfi) {
+                auto ca = c.array(mfi);
+                amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+                    amrex::ignore_unused(i, j);
+                    ca(i,j,k) = Real(2.5) + Real(0.0125) * (k + Real(0.5)) * dz;
+                });
+            }
+            std::vector<Real> val;
+            erf_actuator::sample_cell_scalar(c, 0, nullptr, fc->geom, top, val);
+            ASSERT_EQ(val.size(), top.size() / 3);
+            for (const Real x : val) { EXPECT_NEAR(x, Real(2.5) + Real(0.0125) * m.H, tol * Real(10.0)); }
+        }
+    }
     {
         // 1000 m on 88 cells: prob_hi / dx rounds one ulp above 88 in double, as 5000 m on 96 cells does in float
         MeshSpec m88 = m;

@@ -19,6 +19,7 @@
 
 #ifndef _WIN32
 #include <sys/resource.h>
+#include <unistd.h>
 #endif
 
 #include <gtest/gtest.h>
@@ -447,4 +448,35 @@ TEST(TrimLog, EdgeCases)
     write_file(f, "time,a\n1," + wide + "\n2," + wide + "\n3," + wide + "\n");
     EXPECT_EQ(erf_actuator::trim_log_after(f, 1.0, true, 0.1), 2u);
     EXPECT_EQ(read_all(f), "time,a\n1," + wide + "\n");
+}
+
+TEST(RunningStats, AMalformedStateReturnsItsMessageWhenAskedAndChangesNothing)
+{
+    // the owner's read (read_checkpoint) takes the message instead of aborting, so every rank can stop with it
+    const auto dir = gtest_scratch_root() / "erf_gtest_stats_error";
+    std::filesystem::create_directories(dir);
+    erf_actuator::RunningStats a("T1", (dir / "T1").string(), {"thrust", "power"});
+    a.accumulate(1.0, {Real(2.0), Real(3.0)});
+    a.accumulate(2.0, {Real(4.0), Real(5.0)});
+    { std::ofstream bad(dir / "T1_stats.dat"); bad << "count = -3\nsize = 2\nt_first = 0\nt_last = 1\n"; }
+    std::string err;
+    EXPECT_FALSE(a.read_state(dir.string(), &err));
+    EXPECT_NE(err.find("malformed statistics checkpoint"), std::string::npos) << err;
+    EXPECT_EQ(a.num_samples(), 2);
+    EXPECT_EQ(a.mean(0), Real(3.0));
+    // a missing file is no state and no error
+    std::filesystem::remove(dir / "T1_stats.dat");
+    err.clear();
+    EXPECT_FALSE(a.read_state(dir.string(), &err));
+    EXPECT_TRUE(err.empty());
+#ifndef _WIN32
+    // a file that is there but cannot be read is an error, not a fresh start
+    if (::geteuid() != 0) {
+        { std::ofstream locked(dir / "T1_stats.dat"); locked << "count = 1\n"; }
+        std::filesystem::permissions(dir / "T1_stats.dat", std::filesystem::perms::none);
+        EXPECT_FALSE(a.read_state(dir.string(), &err));
+        EXPECT_NE(err.find("cannot read the statistics checkpoint"), std::string::npos) << err;
+        std::filesystem::permissions(dir / "T1_stats.dat", std::filesystem::perms::owner_all);
+    }
+#endif
 }
