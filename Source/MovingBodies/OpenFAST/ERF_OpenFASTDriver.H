@@ -2,6 +2,7 @@
 #define ERF_OPENFAST_DRIVER_H
 
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,7 @@
 #include <AMReX_REAL.H>
 
 #include "ERF_MovingBodiesInputs.H"
+#include "ERF_OpenFASTModelFiles.H"
 
 // OpenFAST 5 C API, unchanged since 4.0 (the real header, or Stub/FAST_Library.h when ERF_OPENFAST_USE_STUB is set)
 #include "FAST_Library.h"
@@ -36,6 +38,8 @@ std::string check_induction_off (const std::string& fst_file);
  * induction model (Wake_Mod != 0).
  */
 std::string check_induction (const std::string& fst_file, bool want_off);
+/** As above, with the files read once in files. */
+std::string check_induction (ModelFiles& files, const std::string& fst_file, bool want_off);
 
 /**
  * Whether the OpenFAST model applies its own tower-shadow correction to the blade inflow. When
@@ -44,6 +48,27 @@ std::string check_induction (const std::string& fst_file, bool want_off);
  * (or the model has no AeroDyn file), otherwise a warning naming the setting.
  */
 std::string check_tower_shadow_off (const std::string& fst_file);
+std::string check_tower_shadow_off (ModelFiles& files, const std::string& fst_file);
+
+/**
+ * What start-up takes from one model (a primary .fst file and the module files it names): both
+ * induction checks, the tower-shadow check, and the rotor radius and time step owner choice uses.
+ */
+struct ModelFacts
+{
+    std::string induction_off;     //!< check_induction(fst, true): for sampling = disk
+    std::string induction_on;      //!< check_induction(fst, false): for sampling = upstream or disk_corrected
+    std::string tower_shadow;      //!< check_tower_shadow_off(fst)
+    amrex::Real rotor_radius{-1};  //!< model_rotor_radius(fst)
+    amrex::Real time_step{-1};     //!< model_time_step(fst)
+};
+
+/**
+ * Collective. Every model's facts, on every rank: model p is read on rank p mod nprocs alone (each of
+ * its files once), and one gather of the texts and one reduction of the numbers hand every rank all of
+ * them, exactly as the reading rank found them. The same paths, in the same order, on every rank.
+ */
+std::vector<ModelFacts> gather_model_facts (const std::vector<std::string>& paths);
 
 /**
  * One OpenFAST turbine. Every rank holds its inputs (name, files, base) and its owner rank; the
@@ -101,7 +126,13 @@ struct TurbineState
 class OpenFASTDriver
 {
 public:
-    explicit OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies);
+    /**
+     * The turbines of bodies, after checking each model's induction setting for the turbine's sampling
+     * (it aborts naming the turbine). With facts (by .fst path, gather_model_facts()) the check is the
+     * one found there; without, each distinct model is read here, on this rank.
+     */
+    explicit OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies,
+                             const std::map<std::string, ModelFacts>* facts = nullptr);
     ~OpenFASTDriver ();
 
     /**

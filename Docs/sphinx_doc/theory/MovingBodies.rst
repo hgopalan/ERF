@@ -742,8 +742,10 @@ the wind at its hub or yawed more than 30 degrees from it. The bundled stub's
 deck is not an OpenFAST primary file, so its model-file checks are skipped
 with a note. The checks made at start-up before the flow exists remain: the
 fixed step a whole multiple of the OpenFAST step, external inflow on,
-``Wake_Mod`` paired with the sampling, ``TwrShadow = 0`` with a forced tower,
-and later the tip-travel limit and the hub-axis convention. For a disk the
+``Wake_Mod`` paired with the sampling, ``TwrShadow = 0`` with a forced tower
+(each distinct model read on one rank, ``erf_openfast::gather_model_facts``,
+and the results shared with every rank), and later the tip-travel limit and
+the hub-axis convention. For a disk the
 audit also notes rings whose points lie more than two kernel widths apart,
 where the ring's force breaks into separate blobs.
 

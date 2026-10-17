@@ -220,9 +220,13 @@ The wake lines behind a rotor belong to the rotor's owner, which samples them,
 keeps their running average and writes their files; sampling them adds one
 integer reduction at each step that writes them.
 
-At start-up the turbines' OpenFAST input files are read once per distinct
-``.fst`` (a farm usually shares a few models), the distinct files spread over
-the ranks, for each rotor's radius and time step. At each diagnostics step the
+At start-up each distinct ``.fst`` (a farm usually shares a few models, or
+gives each turbine its own) is read by one rank only, the distinct files
+spread over the ranks, each of its files once: the ``Wake_Mod`` and
+``TwrShadow`` checks and the rotor's radius and time step. One gather hands
+every rank the results, so a check fails on every rank alike, with the same
+message. A turbine's owner reads its model once more, each file once, for the
+start-up audits. At each diagnostics step the
 farm's totals (``total_load.csv``) and, in the ``farm`` format, every body's
 rows reach the I/O rank in one reduction.
 

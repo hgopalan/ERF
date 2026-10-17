@@ -328,3 +328,71 @@ TEST(OpenFASTAudit, DiscsTextsAndTheRadiusBeforeOpenFASTStarts)
     EXPECT_LT(erf_openfast::model_time_step(write(dir, "nodt.fst", "num_blades = 3\n")), Real(0.0));
     EXPECT_LT(erf_openfast::model_time_step((dir / "missing.fst").string()), Real(0.0));
 }
+
+// The readers with the files read once (ModelFiles) give exactly what the readers that open the file
+// for every value give, on the IEA 15 MW models (one with BEM induction and tower shadow on, one with
+// both off) and on the stub's deck, missing files included, and each file is opened once however many
+// values and checks read it.
+TEST(OpenFASTAudit, FilesReadOnceGiveWhatReadingThemEachTimeGives)
+{
+    const std::string cases = ERF_GTEST_MOVING_BODIES_CASES;
+    const std::vector<std::string> models{cases + "/IEA15_land_model/IEA15-land-bem.fst", cases + "/IEA15_land_model/IEA15-land.fst",
+                                          cases + "/OpenFAST_ALM_Tower/stub_turbine.fst", cases + "/no_such_model.fst"};
+    erf_openfast::ModelFiles files;
+    for (const std::string& fst : models) {
+        for (const char* key : {"CompAero", "AirDens", "Gravity", "DT", "AeroFile", "EDFile", "NoSuchKey"}) {
+            EXPECT_EQ(erf_openfast::openfast_value(files, fst, key), erf_openfast::openfast_value(fst, key)) << fst << " " << key;
+        }
+        for (const char* key : {"AeroFile", "EDFile"}) {
+            EXPECT_EQ(erf_openfast::openfast_module_path(files, fst, key), erf_openfast::openfast_module_path(fst, key)) << fst;
+        }
+        EXPECT_EQ(erf_openfast::is_openfast_model(files, fst), erf_openfast::is_openfast_model(fst)) << fst;
+        Real a = -1.0, b = -1.0;
+        EXPECT_EQ(erf_openfast::openfast_air_density(files, fst, a), erf_openfast::openfast_air_density(fst, b)) << fst;
+        EXPECT_EQ(a, b) << fst;
+        a = -1.0; b = -1.0;
+        EXPECT_EQ(erf_openfast::openfast_gravity(files, fst, a), erf_openfast::openfast_gravity(fst, b)) << fst;
+        EXPECT_EQ(a, b) << fst;
+        EXPECT_EQ(erf_openfast::model_rotor_radius(files, fst), erf_openfast::model_rotor_radius(fst)) << fst;
+        EXPECT_EQ(erf_openfast::model_time_step(files, fst), erf_openfast::model_time_step(fst)) << fst;
+        for (const bool off : {true, false}) {
+            EXPECT_EQ(erf_openfast::check_induction(files, fst, off), erf_openfast::check_induction(fst, off)) << fst;
+        }
+        EXPECT_EQ(erf_openfast::check_tower_shadow_off(files, fst), erf_openfast::check_tower_shadow_off(fst)) << fst;
+        MovingBodyInputs turbine;
+        turbine.name = "T1";
+        turbine.fst_file = fst;
+        turbine.mode = "adm";
+        turbine.air_density = Real(1.2);
+        turbine.num_force_points_tower = 10;
+        const auto fa = erf_openfast::audit_model(files, turbine, Real(9.81));
+        const auto fb = erf_openfast::audit_model(turbine, Real(9.81));
+        ASSERT_EQ(fa.size(), fb.size()) << fst;
+        for (std::size_t k = 0; k < fa.size(); ++k) {
+            EXPECT_EQ(fa[k].fatal, fb[k].fatal) << fst;
+            EXPECT_EQ(fa[k].message, fb[k].message) << fst;
+        }
+    }
+    // the checks are not vacuous here: the BEM model fails the induction-off check and has tower shadow on,
+    // the other passes both, and the stub's deck gives its radius and step
+    EXPECT_NE(erf_openfast::check_induction(files, models[0], true).find("Wake_Mod = 1"), std::string::npos);
+    EXPECT_NE(erf_openfast::check_tower_shadow_off(files, models[0]).find("TwrShadow = 1"), std::string::npos);
+    EXPECT_TRUE(erf_openfast::check_induction(files, models[1], true).empty());
+    EXPECT_NE(erf_openfast::check_induction(files, models[1], false).find("Wake_Mod = 0"), std::string::npos);
+    EXPECT_EQ(erf_openfast::model_rotor_radius(files, models[2]), Real(120.0));
+    // and the values themselves, as the files hold them (not only as the other readers find them)
+    EXPECT_EQ(erf_openfast::openfast_value(files, models[0], "CompAero"), "2");
+    EXPECT_EQ(erf_openfast::openfast_value(files, models[0], "AeroFile"), "IEA15-land_AeroDyn15_bem.dat");
+    EXPECT_EQ(erf_openfast::model_rotor_radius(files, models[0]), Real(120.97));
+    EXPECT_EQ(erf_openfast::model_time_step(files, models[1]), Real(0.005));
+    EXPECT_EQ(erf_openfast::model_time_step(files, models[2]), Real(0.01));
+    Real rho = 0.0, g = 0.0;
+    EXPECT_TRUE(erf_openfast::openfast_air_density(files, models[1], rho));
+    EXPECT_EQ(rho, Real(1.225));
+    EXPECT_TRUE(erf_openfast::openfast_gravity(files, models[1], g));
+    EXPECT_EQ(g, Real(9.81));
+    EXPECT_EQ(erf_openfast::openfast_value(files, models[3], "CompAero"), "");
+    // each file opened once: the two primaries, their two AeroDyn files and the ElastoDyn file they share, the
+    // stub's deck and the missing file
+    EXPECT_EQ(files.num_reads(), 7);
+}
