@@ -82,3 +82,5 @@ was fitted for, which is fine for a regression of the feature each deck tests.
   it only when the physics changes, and say why in the pull request.
 - New cases go here with a row in this table and an entry in
   `Docs/sphinx_doc/RegressionTests.rst`.
+- `ScalingFarm` is not a case: it holds the tools that write and time farms of
+  16 to 1024+ stub turbines (see its README); nothing in it is registered with CTest.
