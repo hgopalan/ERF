@@ -837,44 +837,61 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
     {
         const double tol = 0.25 * m_dt;
         const bool keep_end_rows = (solved0 != 0);
-        std::vector<std::string> end_stamped{m_in.diagnostics_dir + "/total_load.csv"};
-        std::vector<std::string> start_stamped{m_in.diagnostics_dir + "/momentum_source.csv"};
+        // each file is trimmed by the rank that appends to it in this run: the I/O rank the run's own files
+        // and the farm files, each rank its per_rank files (and the I/O rank those of ranks this run does not
+        // have), each body's owner the body's files and its wake lines'. Every file is cut from its end, so a
+        // rank reads only the rows past the checkpoint
+        std::vector<std::string> end_stamped, start_stamped;
+        const bool io = ParallelDescriptor::IOProcessor();
+        if (io) {
+            end_stamped.push_back(m_in.diagnostics_dir + "/total_load.csv");
+            start_stamped.push_back(m_in.diagnostics_dir + "/momentum_source.csv");
+        }
         // the bodies' time series where this run writes them (a run continued in another format starts
         // new files and leaves the old ones as they are)
         if (!format_chk.empty() && format_chk != m_in.diagnostics_format) {
             Print() << "Moving bodies: the run being continued wrote its logs as " << format_chk << ", this one as "
                     << m_in.diagnostics_format << " (erf.moving_bodies.diagnostics_format); the old files are not trimmed\n";
         }
+        const int nturb = num_turbines();
+        const int nbody = nturb + static_cast<int>(m_disks.size());
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_exchange.num_bodies() == nbody, "MovingBodies::read_checkpoint: the owners are chosen before the logs are trimmed");
         if (m_in.diagnostics_format == "per_turbine") {
-            for (const auto& b : m_in.bodies) {
-                if (b.type == "openfast_turbine") {
-                    end_stamped.push_back(b.output_root + "_erf.csv");
-                    end_stamped.push_back(b.output_root + "_flow.csv");
-                    start_stamped.push_back(b.output_root + "_correction.csv");
-                    start_stamped.push_back(b.output_root + "_fllc.csv");
+            for (int b = 0; b < nbody; ++b) {
+                if (!m_exchange.owns(b)) { continue; }
+                if (b < nturb) {
+                    end_stamped.push_back(body_log_file(b, "erf"));
+                    end_stamped.push_back(body_log_file(b, "flow"));
+                    start_stamped.push_back(body_log_file(b, "correction"));
+                    start_stamped.push_back(body_log_file(b, "fllc"));
                 } else {
-                    start_stamped.push_back(b.output_root + "_disk.csv");
+                    start_stamped.push_back(body_log_file(b, "disk"));
                 }
             }
         } else {
             // farm: one file per log; per_rank: the files of every rank of this run and of the run being continued
-            const int nr = std::max(ParallelDescriptor::NProcs(), nranks_chk);
+            const int me = ParallelDescriptor::MyProc();
+            const int np = ParallelDescriptor::NProcs();
+            const int nr = std::max(np, nranks_chk);
             auto add = [&] (std::vector<std::string>& to, const std::string& log) {
                 if (m_in.diagnostics_format == "farm") {
-                    to.push_back(farm_log_file(log));
+                    if (io) { to.push_back(farm_log_file(log)); }
                 } else {
-                    for (int r = 0; r < nr; ++r) { to.push_back(rank_log_file(r, log)); }
+                    for (int r = 0; r < nr; ++r) {
+                        if (r == me || (r >= np && io)) { to.push_back(rank_log_file(r, log)); }
+                    }
                 }
             };
             for (const char* log : {"erf", "flow"}) { add(end_stamped, log); }
             for (const char* log : {"correction", "fllc", "disk"}) { add(start_stamped, log); }
         }
-        for (const auto& b : m_in.bodies) { start_stamped.push_back(b.output_root + "_wake.csv"); }
-        // the I/O rank trims every body's files (the output directory is shared); the owner rank of a turbine
-        // or disk appends to its own files (and its wake lines') only after this barrier
+        for (int b = 0; b < nbody; ++b) {
+            if (m_exchange.owns(b)) { start_stamped.push_back(body_log_file(b, "wake")); }
+        }
         BL_PROFILE("MovingBodies::read_checkpoint: trim the logs");
         for (const auto& f : end_stamped) { erf_actuator::trim_log_after(f, time, keep_end_rows, tol); }
         for (const auto& f : start_stamped) { erf_actuator::trim_log_after(f, time, false, tol); }
+        // every file is cut before any rank goes on (a shared file system shows the cut files alike)
         ParallelDescriptor::Barrier();
     }
     m_resumed = true;

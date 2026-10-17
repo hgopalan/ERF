@@ -273,7 +273,13 @@ run aborts otherwise, naming the input. The diagnostics files drop any rows
 written after the checkpoint (by a run that went on past it) and continue from
 there (in the ``per_rank`` format, the files of every rank of either run; a
 restart in another ``diagnostics_format`` starts that format's files and leaves
-the old ones as they are). To run on past the first run's stop time, start the turbines again:
+the old ones as they are). Each file is cut by the rank that writes it in the
+restarted run (a body's owner its files, each rank its ``per_rank`` files, the
+I/O rank the farm files, the run's own and the ``per_rank`` files of ranks the
+restarted run does not have), reading back from the file's end to the
+checkpoint, so a long log costs only the rows written after it. The cut assumes
+the rows are in time order, as ERF writes them; a file that went back and forth
+between two formats over several restarts may not be. To run on past the first run's stop time, start the turbines again:
 remove the ``moving_bodies`` directory from a copy of the checkpoint and restart
 from that copy, which starts OpenFAST afresh at the checkpoint's time (and also
 starts the wake averages, the statistics and the FLLC afresh). A run with

@@ -973,12 +973,22 @@ turbine and its wake lines are owned by rank 1 (checked by
 checkpoint come from rank 1. ``OpenFAST_ADM_TwoTurbines_Restart`` restarts the two-turbine
 farm on two ranks with three 20-cell boxes in x (``amr.max_grid_size_x = 24``),
 so the first turbine's logs and checkpoint
-files are written by rank 1 while the I/O rank trims the logs, and requires every
+files are written, and on the restart trimmed, by rank 1, and requires every
 turbine's logs to match. ``OpenFAST_ADM_TwoTurbines_RestartOnOneRank``
 checkpoints the same farm on two ranks and restarts it on one, which then owns
 both turbines and reads the files rank 1 wrote; plotfile and logs must agree
 with the straight run to the roundoff of the FFT solution on another rank count
 (the plotfile to the default tolerances, the logs to 8 digits).
+``MovingBodies_DiagnosticsFormat_PerRank_RestartOnOneRank`` writes the farm's
+logs one file per rank on two ranks, runs on past the checkpoint at step 5 to
+step 10, and restarts on one rank with no step left: rank 1's files, which no
+rank of the restarted run writes, must be cut back to a straight 5-step run's
+bytes, and by the I/O rank (``Tests/RunTrimOnRestart.cmake``, which reads who
+cut each file from the restart's log). ``MovingBodies_Restart_OwnersCutTheirLogs``
+does the same on two ranks with one file per body: each turbine's files must be
+cut once, by its owner (rank 1 for T1, rank 0 for T2), and the farm's totals by
+the I/O rank. ``MovingBodies_Restart_WakeOwnerCutsItsLog`` checks the wake file
+of a turbine owned by rank 1.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart`_
 

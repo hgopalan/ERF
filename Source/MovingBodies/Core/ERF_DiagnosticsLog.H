@@ -4,6 +4,7 @@
 /** Opening of the moving-bodies diagnostics files for a fresh or a restarted run. */
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -217,31 +218,75 @@ inline bool file_exists_everywhere (const std::string& fname)
  * being restarted from it), so the appended rows continue the series once. The first column is
  * the row's time (s). keep_at_chk says whether a row stamped at the checkpoint time belongs to the
  * run before it (rows stamped at the end of their step) or after it (rows stamped at its start).
- * Done by the I/O rank alone; a missing file is left alone.
+ *
+ * The rows of a log are in time order, so the rows to drop are the file's last ones: the file is read
+ * backwards from its end, in blocks, to the last row to keep, and cut there in place. A long log costs
+ * only the rows past the checkpoint. The first line (the header) is always kept. For the files ERF
+ * writes (rows in time order, no empty lines, a number in the first column) this leaves the bytes the
+ * earlier rewrite of the whole file left. Elsewhere it differs:
+ * - a row whose first column is not a number is kept, and so is every row before it (the rewrite
+ *   kept that row but dropped the rows before it past the checkpoint);
+ * - empty lines past the last row kept go with the rows dropped (uncounted); those before it stay
+ *   (the rewrite removed every empty line);
+ * - rows out of time order (a file appended to by runs restarted in another diagnostics_format and
+ *   back, or a row whose time is nan) stay when a row to keep follows them.
+ * Called by the one rank that writes fname; a missing or empty file is left alone. Returns the number
+ * of rows dropped, and prints it, with the rank, when it is not zero.
  */
-inline void trim_log_after (const std::string& fname, double t_chk, bool keep_at_chk, double tol)
+inline std::size_t trim_log_after (const std::string& fname, double t_chk, bool keep_at_chk, double tol)
 {
-    if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
-    std::ifstream in(fname);
-    if (!in) { return; }
-    std::vector<std::string> keep;
-    std::string line;
-    bool header = true;
-    std::size_t dropped = 0;
-    while (std::getline(in, line)) {
-        if (header) { keep.push_back(line); header = false; continue; }
-        if (line.empty()) { continue; }
+    std::error_code ec;
+    const std::uintmax_t size = std::filesystem::file_size(fname, ec);
+    if (ec || size == 0) { return 0; }
+    std::ifstream in(fname, std::ios::binary);
+    if (!in) { return 0; }
+    auto keeps = [=] (const std::string& line) {
         double t = 0.0;
-        try { t = std::stod(line.substr(0, line.find(','))); } catch (...) { keep.push_back(line); continue; }
-        const bool before = keep_at_chk ? (t <= t_chk + tol) : (t < t_chk - tol);
-        if (before) { keep.push_back(line); } else { ++dropped; }
+        try { t = std::stod(line.substr(0, line.find(','))); } catch (...) { return true; }
+        return keep_at_chk ? (t <= t_chk + tol) : (t < t_chk - tol);
+    };
+    std::size_t dropped = 0;
+    std::uintmax_t cut = size;    // the file keeps its bytes before cut
+    std::uintmax_t block = 65536;
+    std::string buf;
+    for (;;) {
+        // the bytes [start, cut): the lines not classified yet, the last first
+        const std::uintmax_t start = (cut > block) ? cut - block : 0;
+        buf.resize(static_cast<std::size_t>(cut - start));
+        in.seekg(static_cast<std::streamoff>(start));
+        in.read(&buf[0], static_cast<std::streamsize>(buf.size()));
+        if (!in) { amrex::Abort("cannot read moving-bodies diagnostics file '" + fname + "'"); }
+        // the end of the line being classified, its newline excluded; a block ending with a newline reads
+        // an empty line first, which goes uncounted
+        std::size_t end = buf.size();
+        bool done = false;
+        const std::uintmax_t cut_before = cut;
+        for (;;) {
+            const std::size_t nl = (end == 0) ? std::string::npos : buf.rfind('\n', end - 1);
+            if (nl == std::string::npos && start > 0) { break; }   // the line may begin before this block
+            const std::size_t begin = (nl == std::string::npos) ? 0 : nl + 1;
+            const bool header = (start + begin == 0);
+            if (header || (end > begin && keeps(buf.substr(begin, end - begin)))) {
+                // the header, or the last row to keep: the file ends with its newline
+                cut = start + end + ((start + end < size) ? 1 : 0);
+                done = true;
+                break;
+            }
+            if (end > begin) { ++dropped; }   // a row past the checkpoint; an empty line goes uncounted
+            cut = start + begin;
+            end = begin - 1;   // the previous line ends at this line's leading newline
+        }
+        if (done) { break; }
+        // read on back from the last line classified; a longer block only when no line was (a line longer than it)
+        if (cut == cut_before) { block *= 2; }
     }
     in.close();
-    if (dropped == 0) { return; }
-    std::ofstream out(fname, std::ios::trunc);
-    if (!out) { amrex::Abort("cannot rewrite moving-bodies diagnostics file '" + fname + "'"); }
-    for (const auto& l : keep) { out << l << "\n"; }
-    amrex::Print() << "Moving bodies: dropped " << dropped << " row(s) after t = " << t_chk << " s from " << fname << "\n";
+    if (dropped == 0) { return 0; }
+    std::filesystem::resize_file(fname, cut, ec);
+    if (ec) { amrex::Abort("cannot cut moving-bodies diagnostics file '" + fname + "': " + ec.message()); }
+    amrex::AllPrint() << "Moving bodies: rank " << amrex::ParallelDescriptor::MyProc() << " dropped " << dropped << " row(s) after t = "
+                      << t_chk << " s from " << fname << "\n";
+    return dropped;
 }
 
 } // namespace erf_actuator
