@@ -348,6 +348,59 @@ TEST(ActuatorSampling, CoverageIsIndependentOfTheBoxDecomposition)
     EXPECT_LT(covered, points - points / 10);
 }
 
+// The level's boxes built once (CoverageGrids) and reused for every test of a check give the answer, and name
+// the point, that building them afresh for each test gives: over a sweep across the level's edges and a
+// periodic seam, with every reach and every z rule, on boxes cut unevenly
+TEST(ActuatorSampling, CoverageOnGridsBuiltOnceIsCoverageOnGridsBuiltEachTime)
+{
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    // a level across the x seam (cells 50..59 and 0..9) and an island, cut unevenly
+    amrex::BoxList bl;
+    bl.push_back(amrex::Box(amrex::IntVect(50, 4, 0), amrex::IntVect(59, 19, 8)));
+    bl.push_back(amrex::Box(amrex::IntVect(0, 4, 0), amrex::IntVect(9, 19, 8)));
+    bl.push_back(amrex::Box(amrex::IntVect(25, 8, 0), amrex::IntVect(34, 15, 11)));
+    amrex::BoxArray ba(bl);
+    ba.maxSize(amrex::IntVect(7, 5, 3));
+    const erf_actuator::CoverageGrids grids(ba, geom);
+    // the grids themselves: the cell-centred boxes, and each flattened onto the bottom layer, built here apart
+    ASSERT_EQ(grids.cells.size(), ba.size());
+    ASSERT_EQ(grids.footprints.size(), ba.size());
+    for (int b = 0; b < static_cast<int>(ba.size()); ++b) {
+        EXPECT_EQ(grids.cells[b], ba[b]);
+        amrex::Box flat = ba[b];
+        flat.setSmall(2, 0);
+        flat.setBig(2, 0);
+        EXPECT_EQ(grids.footprints[b], flat);
+    }
+    erf_actuator::ZBounds zb;
+    zb.ground_lo = 0.0; zb.ground_hi = 0.0; zb.dz_lo = 50.0; zb.dz_hi = 50.0;
+    int points = 0, covered = 0;
+    for (const auto z : {erf_actuator::CoverZ::Reach, erf_actuator::CoverZ::Footprint, erf_actuator::CoverZ::Column}) {
+        for (const amrex::Real reach : {amrex::Real(0.0), amrex::Real(60.0), amrex::Real(130.0)}) {
+            for (amrex::Real x = -90.0; x < 3090.0; x += 71.0) {
+                for (amrex::Real y = 110.0; y < 1110.0; y += 83.0) {
+                    for (amrex::Real h = 5.0; h < 590.0; h += 97.0) {
+                        const std::vector<amrex::Real> pos{x, y, h, 1500.0, 600.0, 300.0};
+                        std::string a, b;
+                        const bool once = erf_actuator::points_covered_by(grids, geom, pos, reach, a, z, &zb);
+                        const bool fresh = erf_actuator::points_covered_by(ba, geom, pos, reach, b, z, &zb);
+                        ASSERT_EQ(once, fresh) << "(" << x << ", " << y << ", " << h << ") reach " << reach << " rule " << static_cast<int>(z);
+                        EXPECT_EQ(a, b);
+                        ++points;
+                        if (once) { ++covered; }
+                    }
+                }
+            }
+        }
+    }
+    // the sweep is not vacuous: some points are covered and some are not
+    EXPECT_GT(covered, 0);
+    EXPECT_LT(covered, points);
+}
+
+
 // In a periodic direction the cells a point needs wrap across the seam: a level that covers part
 // of the periodic extent must also hold the cells on the far side of the seam
 TEST(ActuatorSampling, CoverageWrapsAcrossAPeriodicSeam)

@@ -664,10 +664,16 @@ with sums across all ranks, gives (bit for bit, but for the sign of an exact
 zero); with more ranks the kernels' normalisations can differ in the last bits,
 since the owner adds the ranks' parts in rank order and an MPI reduction may
 not. The checks on a turbine's points (coverage, the tip's travel, the hub
-axis, a kernel that reaches no face) and on a disk's or a wake line's while
-they are sampled and spread (a point outside the domain, a kernel that reaches
-no face) run on its owner, so on several ranks their abort message comes from
-that rank.
+axis, a kernel that reaches no face) and on a disk's or a wake line's (their
+coverage of the level's grids, and while they are sampled and spread a point
+outside the domain or a kernel that reaches no face) run on its owner. For
+the coverage of the level's grids one integer reduction then finds the first
+failing body, in the order turbines, disks, wake lines, and its owner hands
+its message to every rank, so every rank stops with the same message; the
+other checks stop the run from the owner's rank, whose message is the one to
+read. At start-up the terrain under all the wake lines is found in one
+collective, and each coverage check builds the level's boxes once for all
+the bodies.
 
 OpenFAST keeps a single step counter for all the turbines of a process, so
 the turbines a rank owns are stepped in turn, one OpenFAST time step at a

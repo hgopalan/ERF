@@ -29,6 +29,12 @@ def main():
     ap.add_argument("--rotor-radius", type=float, default=60.0, help="stub rotor radius (m, default 60)")
     ap.add_argument("--blade-points", type=int, default=10, help="num_force_points_blade (default 10)")
     ap.add_argument("--ring-points", type=int, default=8, help="num_points_t, adm only (default 8)")
+    ap.add_argument("--bodies", choices=["turbine", "ct_disk"], default="turbine",
+                    help="stub OpenFAST turbines (default) or prescribed-Ct disks (no OpenFAST, --mode ignored)")
+    ap.add_argument("--wake-lines-xD", type=float, nargs="*", default=[],
+                    help="wake lines this many diameters behind every rotor (default none)")
+    ap.add_argument("--stretched", action="store_true",
+                    help="a stretched mesh (erf.terrain_z_levels, so the bodies see z_phys_nd) instead of uniform dz")
     ap.add_argument("--diagnostics-format", choices=["per_turbine", "per_rank", "farm"], default="farm",
                     help="erf.moving_bodies.diagnostics_format (default farm: a few files however many turbines)")
     a = ap.parse_args()
@@ -49,6 +55,24 @@ def main():
     hub = 2.0 * a.rotor_radius
     nz = int(math.ceil((hub + 3.0 * a.rotor_radius) / a.dx))
     dt = 0.5
+    if a.bodies == "turbine" and a.mode == "alm":
+        # the stub's rotor turns at 10 rpm: its tip may sweep less than one cell per step (alm_max_tip_cells)
+        cells = (10.0 * 2.0 * math.pi / 60.0) * a.rotor_radius * dt / a.dx
+        if cells > 0.9:
+            raise SystemExit(f"make_scaling_farm.py: the line's tip sweeps {cells:.2f} cells per step; use a larger --dx or a smaller --rotor-radius")
+    for xd in a.wake_lines_xD:
+        # the lines behind the last column of rotors must stay in the domain
+        if not xd > 0.0 or a.spacing * side + xd * 2.0 * a.rotor_radius > length:
+            raise SystemExit(f"make_scaling_farm.py: --wake-lines-xD {xd:g} must be positive and leave the lines in the domain "
+                             f"(at most {(length - a.spacing * side) / (2.0 * a.rotor_radius):.2f} diameters here)")
+    # a stretched mesh: cells growing by 10 % upwards from 0.6 dx at the ground, so the bodies see z_phys_nd
+    levels = ""
+    if a.stretched:
+        z, h, zs = 0.0, 0.6 * a.dx, [0.0]
+        while z < nz * a.dx:
+            z += h; h *= 1.1; zs.append(z)
+        nz = len(zs) - 1
+        levels = "erf.terrain_z_levels = " + " ".join(f"{v:.3f}" for v in zs) + "\n"
 
     # the induction model the sampling needs: the disk's default sampling (disk_corrected) feeds OpenFAST the
     # free stream, so its BEM stays on; the line samples at the rotor (sampling = disk), so it is off
@@ -64,7 +88,7 @@ stop_time = {a.steps * dt}
 erf.fixed_dt = {dt}
 
 geometry.prob_lo     = 0. 0. 0.
-geometry.prob_hi     = {length:g} {length:g} {nz * a.dx:g}
+geometry.prob_hi     = {length:g} {length:g} {(float(levels.split()[-1]) if levels else nz * a.dx):g}
 amr.n_cell           = {nx} {nx} {nz}
 amr.max_level        = 0
 amr.max_grid_size    = 32
@@ -90,17 +114,18 @@ erf.sum_interval = -1
 erf.check_int    = -1
 erf.plot_int_1   = -1
 
-erf.moving_bodies.diagnostics_dir    = moving_bodies
+{levels}erf.moving_bodies.diagnostics_dir    = moving_bodies
 erf.moving_bodies.diagnostics_format = {a.diagnostics_format}
 erf.moving_bodies.timing_int         = {a.timing_int}
-"""]
+""" + (f"erf.moving_bodies.wake.lines_xD = {' '.join(f'{x:g}' for x in a.wake_lines_xD)}\nerf.moving_bodies.wake.num_points = 21\n" if a.wake_lines_xD else "")]
     names = []
     for i in range(side):
         for j in range(side):
             name = f"T{len(names) + 1}"
             names.append(name)
-            with open(os.path.join(a.out, f"{name}.fst"), "w") as f:
-                f.write(f"""# stub turbine {name} (Source/MovingBodies/OpenFAST/Stub); the two OpenFAST-format lines name the AeroDyn file
+            if a.bodies == "turbine":
+                with open(os.path.join(a.out, f"{name}.fst"), "w") as f:
+                    f.write(f"""# stub turbine {name} (Source/MovingBodies/OpenFAST/Stub); the two OpenFAST-format lines name the AeroDyn file
 2                CompAero    - aerodynamic loads from AeroDyn
 "aerodyn.dat"    AeroFile    - the AeroDyn file the start-up checks read
 dt = 0.01
@@ -116,6 +141,17 @@ air_density = 1.0
 """)
             x = a.spacing * (i + 1)
             y = a.spacing * (j + 0.5) + 0.5 * (length - a.spacing * side)
+            if a.bodies == "ct_disk":
+                deck.append(f"""erf.moving_bodies.{name}.type         = ct_disk
+erf.moving_bodies.{name}.base_pos     = {x:g} {y:g} 0.
+erf.moving_bodies.{name}.rotor_radius = {a.rotor_radius:g}
+erf.moving_bodies.{name}.hub_height   = {hub:g}
+erf.moving_bodies.{name}.ct           = 0.75
+erf.moving_bodies.{name}.epsilon      = 2.0
+erf.moving_bodies.{name}.air_density  = 1.0
+erf.moving_bodies.{name}.output_root  = turbines/{name}
+""")
+                continue
             deck.append(f"""erf.moving_bodies.{name}.type                   = openfast_turbine
 erf.moving_bodies.{name}.mode                   = {a.mode}
 erf.moving_bodies.{name}.fst_file               = {name}.fst
@@ -129,7 +165,8 @@ erf.moving_bodies.{name}.output_root            = turbines/{name}
     deck.append("erf.moving_bodies.bodies = " + " ".join(names) + "\n")
     with open(os.path.join(a.out, "farm.i"), "w") as f:
         f.write("\n".join(deck))
-    print(f"make_scaling_farm.py: {a.n} turbines ({a.mode}) in {a.out}/farm.i, domain {nx} x {nx} x {nz} cells")
+    kind = f"turbines ({a.mode})" if a.bodies == "turbine" else "Ct disks"
+    print(f"make_scaling_farm.py: {a.n} {kind} in {a.out}/farm.i, domain {nx} x {nx} x {nz} cells")
 
 
 if __name__ == "__main__":

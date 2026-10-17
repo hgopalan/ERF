@@ -1177,28 +1177,30 @@ MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_p
 {
     BL_PROFILE("MovingBodies::build_wake_lines()");
     const auto& w = m_in.wake;
-    // each vertical line stops at the terrain under its own centre (downstream, the ground may rise or fall)
+    // each vertical line stops at the terrain under its own centre (downstream, the ground may rise or fall):
+    // the lines' centres of every rotor first, then the terrain under all of them in one collective
+    struct Rotor { std::string name, root; std::array<Real,3> hub, axis; Real diameter; };
+    std::vector<Rotor> rotors;
+    std::vector<Real> centres;
     auto add = [&](const std::string& name, const std::string& root, const std::array<Real,3>& hub,
                    const std::array<Real,3>& axis, Real diameter) {
+        const std::size_t first = centres.size();
         Real ah[2] = {axis[0], axis[1]};
         const Real la = std::sqrt(ah[0] * ah[0] + ah[1] * ah[1]);
         if (la > Real(1.0e-6)) { ah[0] /= la; ah[1] /= la; }
-        std::vector<Real> centres;
         for (const Real xD : w.lines_xD) {
             centres.insert(centres.end(), {hub[0] + xD * diameter * ah[0], hub[1] + xD * diameter * ah[1], hub[2]});
         }
-        for (std::size_t c = 0; c < centres.size() / 3; ++c) {
+        for (std::size_t c = 0; c < w.lines_xD.size(); ++c) {
             for (int d = 0; d < 2; ++d) {
-                if (!geom.isPeriodic(d) && (centres[3*c+d] < geom.ProbLo(d) || centres[3*c+d] > geom.ProbHi(d))) {
+                const Real x = centres[first + 3*c + d];
+                if (!geom.isPeriodic(d) && (x < geom.ProbLo(d) || x > geom.ProbHi(d))) {
                     Abort("erf.moving_bodies.wake: the line " + std::to_string(w.lines_xD[c]) + " D behind " + name +
                           " lies outside the domain; shorten lines_xD");
                 }
             }
         }
-        std::vector<Real> ground;
-        erf_actuator::terrain_heights(z_phys_nd, geom, centres, ground);
-        m_wakes.push_back(std::make_unique<erf_actuator::WakeLines>(name, root, hub, axis, diameter,
-                                                                    w.lines_xD, w.half_width, w.num_points, ground));
+        rotors.push_back({name, root, hub, axis, diameter});
     };
 #ifdef ERF_USE_OPENFAST
     {
@@ -1227,18 +1229,43 @@ MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_p
     for (const auto& d : m_disks) {
         add(d->name(), d->output_root(), d->center(), d->normal(), Real(2.0) * d->radius());
     }
-    // every sampling point must lie in the domain (periodic directions wrap)
+    {
+        std::vector<Real> ground;
+        erf_actuator::terrain_heights(z_phys_nd, geom, centres, ground);
+        const std::size_t nl = w.lines_xD.size();
+        for (std::size_t r = 0; r < rotors.size(); ++r) {
+            const std::vector<Real> g(ground.begin() + static_cast<std::ptrdiff_t>(r * nl), ground.begin() + static_cast<std::ptrdiff_t>((r + 1) * nl));
+            m_wakes.push_back(std::make_unique<erf_actuator::WakeLines>(rotors[r].name, rotors[r].root, rotors[r].hub, rotors[r].axis,
+                                                                        rotors[r].diameter, w.lines_xD, w.half_width, w.num_points, g));
+        }
+    }
+    // every sampling point must lie on the level's grids, checked by the rotor's owner (the lines behind
+    // rotor b are body b of m_exchange), and in the domain (periodic directions wrap)
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(m_wakes.size()) == m_exchange.num_bodies(),
+                                     "MovingBodies::build_wake_lines: one set of wake lines per turbine and disk");
+    {
+        const erf_actuator::CoverageGrids cover(level_grids, geom);
+        std::string failed;
+        int key = 0;
+        for (int b = 0; b < static_cast<int>(m_wakes.size()) && failed.empty(); ++b) {
+            if (!m_exchange.owns(b)) { continue; }
+            const auto& wl = m_wakes[b];
+            std::string outside;
+            // with z_phys_nd a point's cell is not its height over dz: the sampler finds it in the column itself
+            if (!erf_actuator::points_covered_by(cover, geom, wl->positions(), geom.CellSize(0), outside,
+                                                 (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Footprint)) {
+                failed = "erf.moving_bodies.wake: the sampling point " + outside + " of " + wl->name() + " is not covered by the grids of level " +
+                         std::to_string(m_anchor) + "; shorten lines_xD or half_width, or enlarge the refinement region behind the rotor";
+                key = b;
+            }
+        }
+        const std::string first = erf_actuator::first_failure(failed, key);
+        if (!first.empty()) { Abort(first); }
+    }
     const auto plo = geom.ProbLoArray();
     const auto phi = geom.ProbHiArray();
     for (const auto& wl : m_wakes) {
         const auto& pos = wl->positions();
-        std::string outside;
-        // with z_phys_nd a point's cell is not its height over dz: the sampler finds it in the column itself
-        if (!erf_actuator::points_covered_by(level_grids, geom, pos, geom.CellSize(0), outside,
-                                             (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Footprint)) {
-            Abort("erf.moving_bodies.wake: the sampling point " + outside + " of " + wl->name() + " is not covered by the grids of level " +
-                  std::to_string(m_anchor) + "; shorten lines_xD or half_width, or enlarge the refinement region behind the rotor");
-        }
         for (std::size_t p = 0; p < pos.size() / 3; ++p) {
             for (int d = 0; d < 3; ++d) {
                 if (geom.isPeriodic(d)) { continue; }
@@ -1257,8 +1284,6 @@ MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_p
     }
     // the lines behind a rotor go with it (the turbines' then the disks', as in m_exchange): its owner samples
     // them, keeps their running average and writes their files and checkpoint state
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(m_wakes.size()) == m_exchange.num_bodies(),
-                                     "MovingBodies::build_wake_lines: one set of wake lines per turbine and disk");
     std::vector<int> owners;
     m_wake_exchange_names.clear();
     for (int b = 0; b < m_exchange.num_bodies(); ++b) {
@@ -1805,14 +1830,19 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
     // the spreading takes it
     const erf_actuator::ZBounds* zbp = (fitted && zb.all_ground) ? &zb : nullptr;
     const Real dx0 = static_cast<Real>(geom.CellSize(0));
+    // the level's boxes as the coverage tests take them, built once for every body
+    const erf_actuator::CoverageGrids cover(level_grids, geom);
+    // every body is checked by its owner (a turbine's points are known to it alone; every rank knows a disk's
+    // and a wake line's), each rank stopping at its first failure; one reduction tells every rank
+    std::string failed;
+    int key = 0;   // the failing body: turbine i, disk num_turbines() + k, the lines behind body b after all the bodies
 #ifdef ERF_USE_OPENFAST
     // every node of every turbine, with the kernel's reach, must lie on the anchor level's grids, and the
     // whole swept disk with it (the rings of a disk, the blades of a line as they turn and the rotor as
     // it yaws, while the grids stay as they are): on a refined level those are not the whole domain, and
     // the sampler and spreader read only the level's own cells
     const auto& turbs = m_driver->turbines();
-    for (int i = 0; i < static_cast<int>(turbs.size()); ++i) {
-        // a turbine's points are known to its owner alone, which checks them
+    for (int i = 0; i < static_cast<int>(turbs.size()) && failed.empty(); ++i) {
         if (!m_driver->is_owner(i)) { continue; }
         const auto& t = turbs[i];
         const Real reach = Real(3.0) * m_turbine_in[i].kernel_widths(dx0).rotor + dx0;
@@ -1844,46 +1874,57 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
         for (const auto& g : turbine_point_groups(i, dx0)) {
             if (!covered) { break; }
             missed = Real(3.0) * g.eps + dx0;
-            covered = erf_actuator::points_covered_by(level_grids, geom, g.pos, missed, outside,
+            covered = erf_actuator::points_covered_by(cover, geom, g.pos, missed, outside,
                                                       fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp);
         }
         if (covered) {
             missed = reach;
-            covered = erf_actuator::points_covered_by(level_grids, geom, disk, reach, outside,
+            covered = erf_actuator::points_covered_by(cover, geom, disk, reach, outside,
                                                       fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp);
         }
         if (covered) {
             missed = static_cast<Real>(geom.CellSize(0));
-            covered = erf_actuator::points_covered_by(level_grids, geom, sampling_positions(i), geom.CellSize(0), outside,
+            covered = erf_actuator::points_covered_by(cover, geom, sampling_positions(i), geom.CellSize(0), outside,
                                                       fitted ? erf_actuator::CoverZ::Footprint : erf_actuator::CoverZ::Reach);
         }
         if (!covered) {
-            Abort("erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(missed) +
-                  " m) is not covered by the grids of level " + std::to_string(m_anchor) +
-                  "; enlarge the refinement region around the rotor (the force lives on the anchor level only, so that "
-                  "level must hold the whole kernel)");
+            key = i;
+            failed = "erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(missed) +
+                     " m) is not covered by the grids of level " + std::to_string(m_anchor) +
+                     "; enlarge the refinement region around the rotor (the force lives on the anchor level only, so that "
+                     "level must hold the whole kernel)";
         }
     }
 #endif
-    for (std::size_t k = 0; k < m_disks.size(); ++k) {
+    for (std::size_t k = 0; k < m_disks.size() && failed.empty(); ++k) {
+        if (!m_exchange.owns(num_turbines() + static_cast<int>(k))) { continue; }
         const auto& d = m_disks[k];
         const Real reach = Real(3.0) * (m_disk_epsilon[k] * dx0) + dx0;
         std::string outside;
-        if (!erf_actuator::points_covered_by(level_grids, geom, d->disk_points(), reach, outside,
+        if (!erf_actuator::points_covered_by(cover, geom, d->disk_points(), reach, outside,
                                              fitted ? erf_actuator::CoverZ::Column : erf_actuator::CoverZ::Reach, zbp) ||
-            !erf_actuator::points_covered_by(level_grids, geom, d->sample_points(), geom.CellSize(0), outside,
+            !erf_actuator::points_covered_by(cover, geom, d->sample_points(), geom.CellSize(0), outside,
                                              fitted ? erf_actuator::CoverZ::Footprint : erf_actuator::CoverZ::Reach)) {
-            Abort("erf.moving_bodies." + d->name() + ": point " + outside + " (with the kernel reach) is not covered by the grids of level " +
-                  std::to_string(m_anchor) + "; enlarge the refinement region around the disk");
+            key = num_turbines() + static_cast<int>(k);
+            failed = "erf.moving_bodies." + d->name() + ": point " + outside + " (with the kernel reach) is not covered by the grids of level " +
+                     std::to_string(m_anchor) + "; enlarge the refinement region around the disk";
         }
     }
-    for (const auto& wl : m_wakes) {
+    // the lines behind rotor b are body b of m_exchange
+    for (int b = 0; b < static_cast<int>(m_wakes.size()) && failed.empty(); ++b) {
+        if (!m_exchange.owns(b)) { continue; }
+        const auto& wl = m_wakes[b];
         std::string outside;
-        if (!erf_actuator::points_covered_by(level_grids, geom, wl->positions(), geom.CellSize(0), outside,
+        if (!erf_actuator::points_covered_by(cover, geom, wl->positions(), geom.CellSize(0), outside,
                                              fitted ? erf_actuator::CoverZ::Footprint : erf_actuator::CoverZ::Reach)) {
-            Abort("erf.moving_bodies.wake: the sampling point " + outside + " of " + wl->name() + " is not covered by the grids of level " +
-                  std::to_string(m_anchor) + " after a regrid; enlarge the refinement region behind the rotor");
+            key = m_exchange.num_bodies() + b;
+            failed = "erf.moving_bodies.wake: the sampling point " + outside + " of " + wl->name() + " is not covered by the grids of level " +
+                     std::to_string(m_anchor) + " after a regrid; enlarge the refinement region behind the rotor";
         }
+    }
+    {
+        const std::string first = erf_actuator::first_failure(failed, key);
+        if (!first.empty()) { Abort(first); }
     }
 }
 

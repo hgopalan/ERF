@@ -214,6 +214,22 @@ bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
                         const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,
                         CoverZ z = CoverZ::Reach, const ZBounds* zb = nullptr);
 
+/**
+ * A level's boxes as points_covered_by tests them, built once for every test of a check: the boxes
+ * cell-centred, and flattened onto the domain's bottom layer (for CoverZ::Footprint).
+ */
+struct CoverageGrids
+{
+    CoverageGrids (const amrex::BoxArray& ba, const amrex::Geometry& geom);
+    amrex::BoxArray cells;        //!< the boxes, cell-centred
+    amrex::BoxArray footprints;   //!< each box flattened onto the bottom layer (they may overlap)
+};
+
+/** points_covered_by on boxes built once (CoverageGrids of the same level and geometry). */
+bool points_covered_by (const CoverageGrids& grids, const amrex::Geometry& geom,
+                        const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,
+                        CoverZ z = CoverZ::Reach, const ZBounds* zb = nullptr);
+
 } // namespace erf_actuator
 
 #endif

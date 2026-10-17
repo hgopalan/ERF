@@ -203,6 +203,14 @@ private:
 };
 
 /**
+ * Collective. The first failure of a check made on the bodies' owners, on every rank: failed is this rank's
+ * first failure (empty when none) and key the index of its body in the order every rank checks the bodies
+ * (keys are unique). Returns the message of the smallest failing key, from the rank that found it, as when
+ * every rank checks every body; empty when no rank failed. One reduction when none failed.
+ */
+std::string first_failure (const std::string& failed, int key);
+
+/**
  * Collective. Send send[r] to every rank r it names and receive one buffer from every rank in
  * from; a buffer for this rank itself is moved across without MPI. Every rank must call it, with
  * sends and receives that pair up: a rank that names r in send must be named in r's from. Uses one
