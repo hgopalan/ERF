@@ -1921,6 +1921,57 @@ if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # sampled at the first step reach that rank alone, its kernels reach rank 0's box too, and its wake lines
   # lie on rank 0's boxes alone.
   set(_ct_disk_wake "\"erf.moving_bodies.wake.lines_xD=2 4\" erf.moving_bodies.wake.num_points=21 erf.moving_bodies.wake.int=2 erf.moving_bodies.avg_start=2.0")
+  # The coverage of a disk's and its wake lines' points by the bodies' level is checked by the body's owner
+  # alone, and one reduction stops every rank with the first failure's message (erf_actuator::first_failure,
+  # whose hand-over to every rank is the parallel gtest BodyExchange.TheFirstFailureReachesEveryRank): here D1
+  # is owned by rank 1 on a refined level (16-cell boxes) whose box is too narrow in y for the disk's kernels,
+  # then wide enough for the disk but not for the wake line 2 D behind it, whose half-width reaches past the
+  # box. The message must name the point, as before; a rank that skipped the reduction would leave the other
+  # waiting, so a short timeout makes that a failure
+  set(_cov_level "amr.max_level=1 amr.ref_ratio=2 amr.n_error_buf=0 erf.refinement_indicators=rotor erf.rotor.max_level=1 amr.max_grid_size=16 \"erf.rotor.in_box_hi=1500. 900. 450.\"")
+  add_test_moving_bodies_owners(MovingBodies_DiskCoverageOnOwner Actuator_UniformCtDisk 2
+      "${_cov_level} \"erf.rotor.in_box_lo=400. 400. 0.\""
+      "D1: owned by rank 1 .*erf[.]moving_bodies[.]D1: point [(]750[.]0+, 568[.]8[0-9]*, 170[.]8[0-9]*[)] m [(]with the kernel reach[)] is not covered by the grids of level 1"
+      nonzero)
+  add_test_moving_bodies_owners(MovingBodies_WakeCoverageOnOwner Actuator_UniformCtDisk 2
+      "${_cov_level} \"erf.rotor.in_box_lo=400. 300. 0.\" erf.moving_bodies.wake.lines_xD=2 erf.moving_bodies.wake.num_points=21"
+      "D1: owned by rank 1 .*erf[.]moving_bodies[.]wake: the sampling point [(]1230[.]0+, 240[.]0+, 150[.]0+[)] m of D1 is not covered by the grids of level 1"
+      nonzero)
+  # the same for a turbine (OpenFAST_ADM_TwoLevel, T1 owned by rank 1 with 16-cell boxes), whose points only its owner knows
+  add_test_moving_bodies_owners(MovingBodies_TurbineCoverageOnOwner OpenFAST_ADM_TwoLevel 2
+      "amr.max_grid_size=16 \"erf.rotor.in_box_lo=500. 400. 0.\""
+      "T1: owned by rank 1 .*erf[.]moving_bodies[.]T1: node [(]750[.]0+, 574[.]5[0-9]*, 194[.]1[0-9]*[)] m [(]with the kernel reach 175[.]0+ m[)] is not covered by the grids of level 1"
+      nonzero)
+  set_tests_properties(MovingBodies_DiskCoverageOnOwner MovingBodies_WakeCoverageOnOwner MovingBodies_TurbineCoverageOnOwner PROPERTIES TIMEOUT 180)
+  # The terrain under every rotor's wake lines is found in one collective at start-up: each line must still
+  # start on the ground under its own centre. On the ridge of OpenFAST_ADM_Terrain two Ct disks stand 1 D
+  # apart (D1 at x = 1060 m, owned by rank 0; D2 at 1300 m, on rank 1), so D1's line 1 D behind it is centred
+  # on D2's base, whose ground (80 m) ground.csv records and which differs from D1's (45.3 m) and from the
+  # ground under D2's own line (Tests/RunWakeGround.cmake, Tests/check_wake_ground.py)
+  set(_wg_dir ${CMAKE_CURRENT_BINARY_DIR}/test_files/MovingBodies_WakeLinesOnTheGround)
+  file(MAKE_DIRECTORY ${_wg_dir})
+  file(COPY ${TEST_SOURCE_ROOT}/OpenFAST_ADM_Terrain/OpenFAST_ADM_Terrain.i DESTINATION ${_wg_dir}/)
+  resolve_test_exe("" "erf_exec" TEST_EXE)
+  set(_wg_disk "type=ct_disk;rotor_radius=120.;hub_height=150.;ct=0.75;epsilon=2.0;air_density=1.0")
+  set(_wg_opts "max_step=1;erf.plot_int_1=-1;erf.check_int=-1;erf.moving_bodies.bodies=D1 D2;erf.moving_bodies.wake.lines_xD=1;erf.moving_bodies.wake.num_points=11")
+  foreach(_b D1 D2)
+      foreach(_kv ${_wg_disk})
+          list(APPEND _wg_opts "erf.moving_bodies.${_b}.${_kv}")
+      endforeach()
+      list(APPEND _wg_opts "erf.moving_bodies.${_b}.output_root=${_b}")
+  endforeach()
+  list(APPEND _wg_opts "erf.moving_bodies.D1.base_pos=1060. 600. 0." "erf.moving_bodies.D2.base_pos=1300. 600. 0.")
+  string(REPLACE ";" "|" _wg_opts_arg "${_wg_opts}")
+  add_test(NAME MovingBodies_WakeLinesOnTheGround
+      COMMAND ${CMAKE_COMMAND}
+          "-DMPIEXEC=${MPIEXEC_EXECUTABLE}" "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}" "-DNRANKS=2"
+          "-DTEST_EXE=${TEST_EXE}" "-DINPUT=${_wg_dir}/OpenFAST_ADM_Terrain.i" "-DOPTIONS=${_wg_opts_arg}"
+          "-DPYTHON_EXE=${ERF_TEST_PYTHON}" "-DCHECKER=${PROJECT_SOURCE_DIR}/Tests/check_wake_ground.py"
+          "-DCHECKS=D1:D2:1" "-DWORKING_DIRECTORY=${_wg_dir}"
+          -P ${PROJECT_SOURCE_DIR}/Tests/RunWakeGround.cmake)
+  set_tests_properties(MovingBodies_WakeLinesOnTheGround PROPERTIES
+      LABELS "regression;moving-bodies" TIMEOUT 600 PROCESSORS 2 WORKING_DIRECTORY "${_wg_dir}/"
+      ATTACHED_FILES_ON_FAIL "${_wg_dir}/simulation.log")
   add_test_moving_bodies_owners(MovingBodies_Owners_CtDisk Actuator_UniformCtDisk 2 "amr.max_grid_size_x=24 ${_ct_disk_wake}"
       "D1: owned by rank 1 [(]footprint radius 120 m[)].*D1: owner rank 1 exchanges its points with 1 of 2 ranks [(]1[)].*D1: owner rank 1 exchanges its points with 2 of 2 ranks [(]0 1[)].*D1 wake lines: owner rank 1 exchanges its points with 1 of 2 ranks [(]0[)].*STEP 1 ends")
   # The disk with wake lines in one box (owned by rank 0, the I/O rank) and in three 20-cell boxes in x (owned

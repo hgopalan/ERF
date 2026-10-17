@@ -605,3 +605,18 @@ TEST(BodyExchange, PointsLeavingTheirEnvelopeBetweenChecksAbort)
     EXPECT_NE(msg.find("left its envelope between two envelope checks"), std::string::npos) << msg;
     EXPECT_NE(msg.find("envelope_check_interval"), std::string::npos) << msg;
 }
+
+// A check made on the bodies' owners stops every rank with the message of the first failing body (the smallest
+// key), whichever rank found it, and passes when none failed; a message keeps its spaces and new lines
+TEST(BodyExchange, TheFirstFailureReachesEveryRank)
+{
+    const int np = amrex::ParallelDescriptor::NProcs();
+    const int me = amrex::ParallelDescriptor::MyProc();
+    EXPECT_TRUE(erf_actuator::first_failure("", 0).empty());
+    // every rank fails, the last one with the smallest key
+    const std::string mine = "body " + std::to_string(100 - me) + " on rank " + std::to_string(me) + ":\n  not covered";
+    EXPECT_EQ(erf_actuator::first_failure(mine, 100 - me), "body " + std::to_string(100 - np + 1) + " on rank " + std::to_string(np - 1) + ":\n  not covered");
+    // only the last rank fails: the others, which found nothing, stop with its message
+    const std::string last = (me == np - 1) ? std::string("erf.moving_bodies.D7: point (1, 2, 3) m is not covered") : std::string();
+    EXPECT_EQ(erf_actuator::first_failure(last, 7), "erf.moving_bodies.D7: point (1, 2, 3) m is not covered");
+}

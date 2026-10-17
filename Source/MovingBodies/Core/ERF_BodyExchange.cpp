@@ -237,6 +237,25 @@ choose_owners (const std::vector<Box>& footprints, const std::vector<Real>& dt, 
     return owners;
 }
 
+std::string
+first_failure (const std::string& failed, int key)
+{
+    const int none = std::numeric_limits<int>::max();
+    int first = failed.empty() ? none : key;
+    ParallelDescriptor::ReduceIntMin(first);
+    if (first == none) { return std::string(); }
+    // the rank whose failure it is (keys are unique, so one), then its message to every rank
+    int from = (!failed.empty() && key == first) ? ParallelDescriptor::MyProc() : ParallelDescriptor::NProcs();
+    ParallelDescriptor::ReduceIntMin(from);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(from < ParallelDescriptor::NProcs(), "first_failure: no rank holds the first failure");
+    int len = (ParallelDescriptor::MyProc() == from) ? static_cast<int>(failed.size()) : 0;
+    ParallelDescriptor::Bcast(&len, 1, from);
+    std::vector<char> chars(static_cast<std::size_t>(len) + 1, '\0');
+    if (ParallelDescriptor::MyProc() == from) { std::copy(failed.begin(), failed.end(), chars.begin()); }
+    ParallelDescriptor::Bcast(chars.data(), static_cast<std::size_t>(len), from);
+    return std::string(chars.data(), static_cast<std::size_t>(len));
+}
+
 void
 exchange_buffers (std::map<int, std::vector<Real>>& send, const std::vector<int>& from, std::map<int, std::vector<Real>>& recv,
                   const std::map<int, std::size_t>* sizes)

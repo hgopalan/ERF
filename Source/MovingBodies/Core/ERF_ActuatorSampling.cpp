@@ -739,30 +739,43 @@ tip_cell_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::ve
     cell_heights(z_phys_nd, geom, rows, true, dz);
 }
 
+CoverageGrids::CoverageGrids (const BoxArray& ba, const Geometry& geom)
+    : cells(amrex::convert(ba, IntVect::TheZeroVector()))
+{
+    BL_PROFILE("erf_actuator::CoverageGrids()");
+    const Box& domain = geom.Domain();
+    BoxList flat;
+    for (int b = 0; b < static_cast<int>(cells.size()); ++b) {
+        Box f = cells[b];
+        f.setSmall(2, domain.smallEnd(2));
+        f.setBig(2, domain.smallEnd(2));
+        flat.push_back(f);
+    }
+    footprints = BoxArray(flat);
+}
+
 bool
 points_covered_by (const BoxArray& ba, const Geometry& geom, const std::vector<Real>& pos, Real reach, std::string& first_outside,
                    CoverZ z, const ZBounds* zb)
+{
+    const CoverageGrids grids(ba, geom);
+    return points_covered_by(grids, geom, pos, reach, first_outside, z, zb);
+}
+
+bool
+points_covered_by (const CoverageGrids& grids, const Geometry& geom, const std::vector<Real>& pos, Real reach,
+                   std::string& first_outside, CoverZ z, const ZBounds* zb)
 {
     BL_PROFILE("erf_actuator::points_covered_by()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!geom.isPeriodic(2), "points_covered_by: z must not be periodic");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(zb == nullptr || !zb->has_ground() || zb->dz_hi >= zb->dz_lo,
                                      "points_covered_by: the levels' spacing must be positive");
     first_outside.clear();
-    const BoxArray cc = amrex::convert(ba, IntVect::TheZeroVector());
+    const BoxArray& cc = grids.cells;
+    const BoxArray& footprints = grids.footprints;
     const auto plo = geom.ProbLoArray();
     const auto dxi = geom.InvCellSizeArray();
     const Box& domain = geom.Domain();
-    // for Footprint, each box flattened onto the bottom layer (they may overlap)
-    BoxList flat;
-    if (z == CoverZ::Footprint) {
-        for (int b = 0; b < static_cast<int>(cc.size()); ++b) {
-            Box f = cc[b];
-            f.setSmall(2, domain.smallEnd(2));
-            f.setBig(2, domain.smallEnd(2));
-            flat.push_back(f);
-        }
-    }
-    const BoxArray footprints(flat);
     for (std::size_t p = 0; p < pos.size() / 3; ++p) {
         // per direction, the index ranges of the cells needed: one range, or two in a periodic
         // direction whose range crosses the seam (the part beyond it wrapped to the other side)
