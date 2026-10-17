@@ -497,9 +497,10 @@ OpenFASTDriver::step ()
             // call and treat "Simulation completed" as the end it is (the loads would stay frozen)
             err_stat = ErrID_None;
             err_msg[0] = '\0';
-            const double t_start = ParallelDescriptor::second();
+            // a nanosecond clock: a call can take less than MPI_Wtime's tick (a microsecond on some MPIs)
+            const auto t_start = std::chrono::steady_clock::now();
             FAST_CFD_Step(&t.tid_local, &err_stat, err_msg);
-            t.step_seconds += ParallelDescriptor::second() - t_start;
+            t.step_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
             if (err_stat == ErrID_Info && std::string(err_msg).find("completed") != std::string::npos) {
                 Abort("OpenFAST reports \"" + std::string(err_msg) + "\" for " + t.name + " at its time index " +
                       std::to_string(t.time_index) + ": it has reached the stop time it was started with and no longer steps");
