@@ -864,6 +864,22 @@ TEST(ActuatorSampling, TheUpperFaceIsTheLastCellAndPeriodicPointsTheirImage)
         mu.max_grid = {{5, 4, 4}};
         Fields fu(mu, true);
         fu.check(top, tol);
+        // and a cell-centred scalar (sample_cell_scalar) linear in z, with the column in one box and split in z
+        for (const Fields* fc : {&f, &fu}) {
+            amrex::MultiFab c(fc->ba, fc->dm, 1, 1);
+            const Real dz = m.H / m.nz;
+            for (amrex::MFIter mfi(c, false); mfi.isValid(); ++mfi) {
+                auto ca = c.array(mfi);
+                amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+                    amrex::ignore_unused(i, j);
+                    ca(i,j,k) = Real(2.5) + Real(0.0125) * (k + Real(0.5)) * dz;
+                });
+            }
+            std::vector<Real> val;
+            erf_actuator::sample_cell_scalar(c, 0, nullptr, fc->geom, top, val);
+            ASSERT_EQ(val.size(), top.size() / 3);
+            for (const Real x : val) { EXPECT_NEAR(x, Real(2.5) + Real(0.0125) * m.H, tol * Real(10.0)); }
+        }
     }
     {
         // 1000 m on 88 cells: prob_hi / dx rounds one ulp above 88 in double, as 5000 m on 96 cells does in float

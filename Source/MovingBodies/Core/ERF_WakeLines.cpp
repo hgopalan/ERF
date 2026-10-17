@@ -173,13 +173,15 @@ WakeLines::read_state (const std::string& dir, std::string* error)
 {
     const std::string fname = dir + "/" + m_name + "_wake_avg.dat";
     // read on this rank alone: the rotor's owner, which alone samples the lines and keeps their average
-    std::ifstream in(fname);
-    if (!in) { return false; }
     auto fail = [error] (const std::string& msg) {
         if (error == nullptr) { Abort(msg); }
         *error = msg;
         return false;
     };
+    if (!FileExists(fname)) { return false; }
+    std::ifstream in(fname);
+    if (!in) { return fail("cannot read the wake-average checkpoint '" + fname + "' on rank " +
+                           std::to_string(ParallelDescriptor::MyProc()) + ", the rotor's owner"); }
     std::string key, eq;
     std::size_t size = 0;
     int count = 0;
@@ -207,6 +209,11 @@ WakeLines::read_state (const std::string& dir, std::string* error)
     if (std::isalpha(in.peek())) {
         std::size_t nxd = 0;
         if (!(in >> key >> eq >> nxd) || key != "lines_xD") { return fail("malformed wake-average checkpoint '" + fname + "'"); }
+        // another number of lines than the inputs': refused before its values are read (a corrupt count allocates nothing)
+        if (nxd != m_xD.size()) {
+            return fail("erf.moving_bodies.wake: the checkpoint '" + fname + "' holds the running averages of other lines "
+                        "(lines_xD, half_width or num_points differ from the inputs); restart with the same wake inputs");
+        }
         std::vector<Real> xd(nxd);
         for (auto& x : xd) { if (!(in >> x)) { return fail("malformed wake-average checkpoint '" + fname + "'"); } }
         Real hw = 0.0;

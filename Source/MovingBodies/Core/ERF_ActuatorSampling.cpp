@@ -172,7 +172,8 @@ sample_velocity_local (const MultiFab& U, const MultiFab& V, const MultiFab& W,
             int kc = -1;
             if (!has_znd) {
                 int k = static_cast<int>(std::floor((z - plo[2]) * dxi[2]));
-                // a point on the domain's top face belongs to the top cell, as on the upper x and y faces
+                // a point on the domain's top face belongs to the top cell (the cell, as on the upper x and y faces;
+                // there the value is extrapolated from the top cells, as everywhere in z, not read from a ghost cell)
                 if (k > khi && z <= phi[2]) { k = khi; }
                 if (k >= klo && k <= kt) { kc = k; }
             } else {
@@ -311,7 +312,8 @@ sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, con
             int kc = -1;
             if (!has_znd) {
                 int k = static_cast<int>(std::floor((z - plo[2]) * dxi[2]));
-                // a point on the domain's top face belongs to the top cell, as on the upper x and y faces
+                // a point on the domain's top face belongs to the top cell (the cell, as on the upper x and y faces;
+                // there the value is extrapolated from the top cells, as everywhere in z, not read from a ghost cell)
                 if (k > khi && z <= phi[2]) { k = khi; }
                 if (k >= klo && k <= kt) { kc = k; }
             } else {

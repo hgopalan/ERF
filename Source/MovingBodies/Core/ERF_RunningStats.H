@@ -146,13 +146,15 @@ public:
     {
         const std::string fname = dir + "/" + m_name + "_stats.dat";
         // read on this rank alone: its writer's (the body's owner), which alone keeps the statistics
-        std::ifstream in(fname);
-        if (!in) { return false; }
         auto fail = [error] (const std::string& msg) {
             if (error == nullptr) { amrex::Abort(msg); }
             *error = msg;
             return false;
         };
+        if (!amrex::FileExists(fname)) { return false; }
+        std::ifstream in(fname);
+        if (!in) { return fail("cannot read the statistics checkpoint '" + fname + "' on rank " +
+                               std::to_string(amrex::ParallelDescriptor::MyProc()) + ", the body's owner"); }
         std::string key, eq, qname;
         std::size_t size = 0;
         int count = 0;
