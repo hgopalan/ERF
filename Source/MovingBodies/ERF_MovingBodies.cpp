@@ -715,14 +715,32 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
 #ifdef ERF_USE_OPENFAST
     m_fllc_state_dir = dir;
 #endif
-    for (auto& st : m_turbine_stats) { st.read_state(dir); }
-    for (auto& st : m_disk_stats) { st.read_state(dir); }
-    // rewritten every stats_int steps: the files the restored statistics stand for (a run that went on
-    // past the checkpoint left later ones), even when no sample follows before the end; every rank read
-    // the same counts
-    if (m_in.stats_int > 0) {
-        for (const auto& st : m_turbine_stats) { if (st.num_samples() > 0) { m_stats_unwritten = true; } }
-        for (const auto& st : m_disk_stats) { if (st.num_samples() > 0) { m_stats_unwritten = true; } }
+    // each body's statistics, read by its owner alone (which alone keeps them); a malformed file stops every
+    // rank with its owner's message, the first in body order as when every rank read every file
+    {
+        const int nturb = num_turbines();
+        const int nbody = nturb + static_cast<int>(m_disks.size());
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_exchange.num_bodies() == nbody, "MovingBodies::read_checkpoint: the owners are chosen first");
+        std::string failed;
+        int key = -1;
+        bool restored = false;
+        for (int b = 0; b < nbody && failed.empty(); ++b) {
+            if (!m_exchange.owns(b)) { continue; }
+            auto& st = (b < nturb) ? m_turbine_stats[b] : m_disk_stats[b - nturb];
+            std::string err;
+            st.read_state(dir, &err);
+            if (!err.empty()) { failed = err; key = b; }
+            if (st.num_samples() > 0) { restored = true; }
+        }
+        const std::string first = erf_actuator::first_failure(failed, key);
+        if (!first.empty()) { Abort(first); }
+        // rewritten every stats_int steps: the files the restored statistics stand for (a run that went on
+        // past the checkpoint left later ones), even when no sample follows before the end; decided alike
+        // on every rank, as the farm format's rewrite is collective
+        if (m_in.stats_int > 0) {
+            ParallelDescriptor::ReduceBoolOr(restored);
+            m_stats_unwritten = restored;
+        }
     }
     // the state file: the step count, and the OpenFAST time index each turbine must report
     std::map<std::string,int> time_index;
@@ -1344,13 +1362,29 @@ MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_p
                 }
             }
         }
-        if (!m_wake_state_dir.empty() && wl->read_state(m_wake_state_dir)) {
-            Print() << "  " << wl->name() << ": wake running average restored (" << wl->num_samples() << " samples)\n";
-            // as the statistics on a restart (read_checkpoint)
-            if (m_in.stats_int > 0) { m_wake_avg_unwritten = true; }
-        }
+
         Print() << "  " << wl->name() << ": wake lines at " << w.lines_xD.size() << " downstream distances, "
                 << wl->num_points() << " points, diameter " << wl->diameter() << " m\n";
+    }
+    // after a restart, each rotor's running average, read by its owner alone (which alone samples the lines);
+    // a malformed file stops every rank with its owner's message, the first in rotor order
+    if (!m_wake_state_dir.empty()) {
+        std::string failed;
+        int key = -1;
+        for (int b = 0; b < static_cast<int>(m_wakes.size()) && failed.empty(); ++b) {
+            if (!m_exchange.owns(b)) { continue; }
+            const auto& wl = m_wakes[b];
+            std::string err;
+            if (wl->read_state(m_wake_state_dir, &err)) {
+                AllPrint() << "  " << wl->name() << ": wake running average restored (" << wl->num_samples() << " samples) on rank "
+                           << ParallelDescriptor::MyProc() << "\n";
+                // as the statistics on a restart (read_checkpoint); the wake averages' rewrite is the owner's alone
+                if (m_in.stats_int > 0) { m_wake_avg_unwritten = true; }
+            }
+            if (!err.empty()) { failed = err; key = b; }
+        }
+        const std::string first = erf_actuator::first_failure(failed, key);
+        if (!first.empty()) { Abort(first); }
     }
     // the lines behind a rotor go with it (the turbines' then the disks', as in m_exchange): its owner samples
     // them, keeps their running average and writes their files and checkpoint state

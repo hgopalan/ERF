@@ -10,6 +10,10 @@
 # amrex.call_addr2line = 0 for the same reason as add_test_abort: the abort is the point of
 # the test, and resolving every stack frame costs far longer than the run.
 #
+# CORRUPT_FILE, when given, is a file of the checkpoint (relative to it) that is overwritten with
+# CORRUPT_TEXT, its lines separated by '|', before the restart: for the guards on what a
+# checkpoint file holds.
+#
 # -DX= defines X as empty, so test for a value, not for DEFINED
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ResolveExecutable.cmake")
@@ -76,6 +80,14 @@ if(NOT chk_result EQUAL 0)
 endif()
 if(NOT EXISTS "${RUN_DIR}/${CHKFILE}/Header")
     message(FATAL_ERROR "RunRestartAbort.cmake: no ${CHKFILE} written by the checkpoint run")
+endif()
+
+if(NOT "${CORRUPT_FILE}" STREQUAL "")
+    if(NOT EXISTS "${RUN_DIR}/${CHKFILE}/${CORRUPT_FILE}")
+        message(FATAL_ERROR "RunRestartAbort.cmake: the checkpoint has no ${CORRUPT_FILE} to corrupt")
+    endif()
+    string(REPLACE "|" "\n" _corrupt "${CORRUPT_TEXT}")
+    file(WRITE "${RUN_DIR}/${CHKFILE}/${CORRUPT_FILE}" "${_corrupt}\n")
 endif()
 
 # restart, and require it to stop

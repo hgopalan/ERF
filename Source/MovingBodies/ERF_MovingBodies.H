@@ -247,7 +247,8 @@ private:
     void write_statistics ();
     /**
      * With stats_int > 0, rewrite the statistics and the wake averages that gained samples since
-     * their last rewrite (collective in the farm format; every rank shares the flags, set alike).
+     * their last rewrite (collective in the farm format: m_stats_unwritten is set alike on every rank;
+     * m_wake_avg_unwritten may differ, as only the owners write the wake averages).
      */
     void rewrite_summaries ();
     bool m_stats_unwritten{false};      //!< statistics accumulated since write_statistics()

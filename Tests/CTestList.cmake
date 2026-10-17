@@ -772,7 +772,7 @@ endfunction(add_test_restart_parity)
 # RESTART_NRANKS are separate so a test can reproduce a restart on more ranks than the
 # checkpoint was written with, which is its own code path.
 function(add_test_restart_abort TEST_NAME TEST_FILES_DIR STEP_CHK EXPECTED_MESSAGE)
-    set(oneValueArgs "COMMON_OPTIONS" "RESTART_OPTIONS" "CHK_NRANKS" "RESTART_NRANKS" "RUN_TIMEOUT")
+    set(oneValueArgs "COMMON_OPTIONS" "RESTART_OPTIONS" "CHK_NRANKS" "RESTART_NRANKS" "RUN_TIMEOUT" "CORRUPT_FILE" "CORRUPT_TEXT")
     cmake_parse_arguments(ADD_TEST_RA "" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -812,6 +812,8 @@ function(add_test_restart_abort TEST_NAME TEST_FILES_DIR STEP_CHK EXPECTED_MESSA
         "-DRUN_TIMEOUT=${_run_timeout}"
         "-DCOMMON_OPTIONS=${ADD_TEST_RA_COMMON_OPTIONS}"
         "-DRESTART_OPTIONS=${ADD_TEST_RA_RESTART_OPTIONS}"
+        "-DCORRUPT_FILE=${ADD_TEST_RA_CORRUPT_FILE}"
+        "-DCORRUPT_TEXT=${ADD_TEST_RA_CORRUPT_TEXT}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunRestartAbort.cmake)
     set_tests_properties(${TEST_NAME}
         PROPERTIES
@@ -1964,6 +1966,26 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
 
   # A restart continues the same bodies with the same inputs, step and OpenFAST stop time: each
   # change below must stop the restart with a message naming it, before OpenFAST is restarted.
+  # A malformed statistics or wake-average file of a turbine owned by rank 1 (three 20-cell boxes in x): its
+  # owner alone reads it, and every rank must stop with the owner's message (a rank that skipped the
+  # reduction would hang until the timeout)
+  # the statistics restored on rank 1 alone (rank 0 owns no body), rewritten through the farm file at the end of a
+  # restart with no step left: every rank must agree that they are to be rewritten, as the farm format's
+  # rewrite is collective, and the farm file must be the straight 5-step run's
+  add_test_restart_parity(MovingBodies_StatsInt_Farm_RestartAtTheEnd_OwnerRank1 OpenFAST_ADM_Restart 5 5
+      COMMON_OPTIONS "amr.max_grid_size_x=24 erf.moving_bodies.diagnostics_format=farm erf.moving_bodies.stats_int=3"
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      CHK_NRANKS 2 RESTART_NRANKS 2 CHK_LEG_END 10 RUN_TIMEOUT 180
+      DATALOG "moving_bodies/farm_stats.csv"
+      DATALOG_SIGDIGITS 10)
+  add_test_restart_abort(MovingBodies_Restart_MalformedStatsOnRank1 OpenFAST_ADM_Restart 5
+      "malformed statistics checkpoint '[^']*T1_stats.dat': the count must be >= 0"
+      COMMON_OPTIONS "amr.max_grid_size_x=24" CHK_NRANKS 2 RESTART_NRANKS 2 RUN_TIMEOUT 180
+      CORRUPT_FILE "moving_bodies/T1_stats.dat" CORRUPT_TEXT "count = -3|size = 9|t_first = 0|t_last = 1")
+  add_test_restart_abort(MovingBodies_Restart_MalformedWakeOnRank1 OpenFAST_ADM_Restart 5
+      "the wake-average checkpoint '[^']*T1_wake_avg.dat' holds 7 values but the lines of T1"
+      COMMON_OPTIONS "amr.max_grid_size_x=24" CHK_NRANKS 2 RESTART_NRANKS 2 RUN_TIMEOUT 180
+      CORRUPT_FILE "moving_bodies/T1_wake_avg.dat" CORRUPT_TEXT "count = 1|size = 7|hub = 0 0 100|axis = 1 0 0|diameter = 100")
   add_test_restart_abort(MovingBodies_Restart_ChangedBodyKey OpenFAST_ADM_Restart 5
       "T1[.]num_points_t changed on restart"
       RESTART_OPTIONS "erf.moving_bodies.T1.num_points_t=24")

@@ -136,57 +136,63 @@ public:
         }
     }
     /**
-     * Restore the state written by write_state(); false when there is none. Aborts, changing
-     * nothing, when the file is malformed: a negative count, t_last before t_first, a non-finite
-     * value, or quantities other than this object's (but those accepted by renamed_from).
+     * Restore the state written by write_state(), read on this rank alone (not collective: the
+     * body's owner calls it); false when there is none. When the file is malformed (a negative
+     * count, t_last before t_first, a non-finite value, or quantities other than this object's but
+     * those accepted by renamed_from) it changes nothing and aborts, or, given error, returns false
+     * with the message there, for the caller to stop every rank with it (first_failure()).
      */
-    bool read_state (const std::string& dir)
+    bool read_state (const std::string& dir, std::string* error = nullptr)
     {
         const std::string fname = dir + "/" + m_name + "_stats.dat";
-        if (!file_exists_everywhere(fname)) { return false; }
-        amrex::Vector<char> chars;
-        amrex::ParallelDescriptor::ReadAndBcastFile(fname, chars);
-        std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+        // read on this rank alone: its writer's (the body's owner), which alone keeps the statistics
+        std::ifstream in(fname);
+        if (!in) { return false; }
+        auto fail = [error] (const std::string& msg) {
+            if (error == nullptr) { amrex::Abort(msg); }
+            *error = msg;
+            return false;
+        };
         std::string key, eq, qname;
         std::size_t size = 0;
         int count = 0;
         double t0 = 0.0, t1 = 0.0;
         if (!(in >> key >> eq >> count) || key != "count" || !(in >> key >> eq >> size) || key != "size" ||
             !(in >> key >> eq >> t0) || key != "t_first" || !(in >> key >> eq >> t1) || key != "t_last") {
-            amrex::Abort("malformed statistics checkpoint '" + fname + "'");
+            return fail("malformed statistics checkpoint '" + fname + "'");
         }
         if (size != m_names.size()) {
-            amrex::Abort("the statistics checkpoint '" + fname + "' holds " + std::to_string(size) + " quantities but " +
+            return fail("the statistics checkpoint '" + fname + "' holds " + std::to_string(size) + " quantities but " +
                          m_name + " has " + std::to_string(m_names.size()));
         }
         if (count < 0 || !std::isfinite(t0) || !std::isfinite(t1) || (count > 0 && t1 < t0)) {
-            amrex::Abort("malformed statistics checkpoint '" + fname + "': the count must be >= 0 and t_first <= t_last, both finite");
+            return fail("malformed statistics checkpoint '" + fname + "': the count must be >= 0 and t_first <= t_last, both finite");
         }
         std::vector<double> sum(size), sum2(size);
         std::vector<amrex::Real> mn(size), mx(size);
         std::string afresh;
         for (std::size_t i = 0; i < size; ++i) {
             if (!(in >> qname >> sum[i] >> sum2[i] >> mn[i] >> mx[i])) {
-                amrex::Abort("the statistics checkpoint '" + fname + "' does not list " + m_names[i] + " where expected");
+                return fail("the statistics checkpoint '" + fname + "' does not list " + m_names[i] + " where expected");
             }
             if (qname != m_names[i]) {
                 const auto r = m_renamed.find(qname);
                 if (r == m_renamed.end() || r->second.first != m_names[i]) {
-                    amrex::Abort("the statistics checkpoint '" + fname + "' does not list " + m_names[i] + " where expected");
+                    return fail("the statistics checkpoint '" + fname + "' does not list " + m_names[i] + " where expected");
                 }
                 if (r->second.second) {
-                    amrex::Print() << "RunningStats " << m_name << ": the checkpoint's " << qname << " statistics continue as "
+                    amrex::AllPrint() << "RunningStats " << m_name << ": the checkpoint's " << qname << " statistics continue as "
                                    << m_names[i] << "\n";
                 } else if (afresh.empty()) {
                     afresh = qname;
                 }
             }
             if (!std::isfinite(sum[i]) || !std::isfinite(sum2[i]) || !std::isfinite(mn[i]) || !std::isfinite(mx[i])) {
-                amrex::Abort("malformed statistics checkpoint '" + fname + "': a value of " + m_names[i] + " is not finite");
+                return fail("malformed statistics checkpoint '" + fname + "': a value of " + m_names[i] + " is not finite");
             }
         }
         if (!afresh.empty()) {
-            amrex::Print() << "RunningStats " << m_name << ": the checkpoint lists " << afresh << ", another quantity than "
+            amrex::AllPrint() << "RunningStats " << m_name << ": the checkpoint lists " << afresh << ", another quantity than "
                            << m_renamed[afresh].first << " here; these statistics start afresh at the restart\n";
             return true;
         }
