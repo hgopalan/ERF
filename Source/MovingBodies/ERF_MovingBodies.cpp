@@ -151,6 +151,15 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
     BL_PROFILE("MovingBodies::MovingBodies()");
     m_timers.enable(m_in.timing_int > 0);
     erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Startup);
+    if (m_in.max_open_logs > 0) {
+        m_logs = erf_actuator::LogStreams(static_cast<std::size_t>(m_in.max_open_logs));
+        Print() << "Moving bodies: at most " << m_logs.max_open() << " diagnostics file(s) open per rank\n";
+        const double limit = erf_actuator::open_file_limit();
+        if (limit > 0.0 && static_cast<double>(m_in.max_open_logs) >= limit) {
+            Print() << "WARNING: erf.moving_bodies.max_open_logs = " << m_in.max_open_logs << " is not below this process's limit of "
+                    << limit << " open files; a rank that opens that many logs stops with 'cannot open'\n";
+        }
+    }
     Print() << "Moving bodies: " << m_in.bodies.size() << " body(ies) on level " << m_anchor << ", ERF dt there " << m_dt
             << ", run stop time " << t_max << " s, velocities "
             << (m_in.has_prescribed_velocity ? "prescribed" : "sampled from the flow") << "\n";
@@ -235,11 +244,16 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
 }
 
 void
-MovingBodies::write_checkpoint (const std::string& chkdir) const
+MovingBodies::write_checkpoint (const std::string& chkdir)
 {
     BL_PROFILE("MovingBodies::write_checkpoint()");
     erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Checkpoint);
     const std::string dir = chkdir + "/moving_bodies";
+    // the statistics and wake averages written only every stats_int steps are brought up to date
+    if (m_in.stats_int > 0) {
+        rewrite_summaries();
+        flush_logs();
+    }
     // every row written so far reaches its file: a restart from this checkpoint trims the logs to it
     m_logs.flush();
 #ifdef ERF_USE_OPENFAST
@@ -703,6 +717,13 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
 #endif
     for (auto& st : m_turbine_stats) { st.read_state(dir); }
     for (auto& st : m_disk_stats) { st.read_state(dir); }
+    // rewritten every stats_int steps: the files the restored statistics stand for (a run that went on
+    // past the checkpoint left later ones), even when no sample follows before the end; every rank read
+    // the same counts
+    if (m_in.stats_int > 0) {
+        for (const auto& st : m_turbine_stats) { if (st.num_samples() > 0) { m_stats_unwritten = true; } }
+        for (const auto& st : m_disk_stats) { if (st.num_samples() > 0) { m_stats_unwritten = true; } }
+    }
     // the state file: the step count, and the OpenFAST time index each turbine must report
     std::map<std::string,int> time_index;
     std::map<std::string,Real> corr_uinf;
@@ -1076,6 +1097,10 @@ MovingBodies::advance_step (double time, double dt, const MultiFab& cons,
         erf_actuator::ScopedPhase timed(m_timers, P::Wake);
         write_wake_diagnostics(time, U, V, W, z_phys_nd, geom);
     }
+    if (m_in.stats_int > 0 && m_step % m_in.stats_int == 0) {
+        erf_actuator::ScopedPhase timed(m_timers, P::Statistics);
+        rewrite_summaries();
+    }
     // the step's rows that go through the I/O rank (the farm totals, and every log in the farm format), in one reduction
     erf_actuator::ScopedPhase timed(m_timers, P::Diagnostics);
     flush_logs();
@@ -1105,13 +1130,39 @@ MovingBodies::accumulate_statistics (double time)
         const auto& d = m_disks[k];
         m_disk_stats[k].accumulate(time, {d->free_stream_speed(), d->disk_speed(), d->thrust(), d->power()});
     }
-    if (m_step % m_in.diagnostics_int == 0) { write_statistics(); }
+    m_stats_unwritten = true;
+    if (m_in.stats_int == 0 && m_step % m_in.diagnostics_int == 0) { write_statistics(); }
+}
+
+void
+MovingBodies::rewrite_summaries ()
+{
+    BL_PROFILE("MovingBodies::rewrite_summaries()");
+    if (m_stats_unwritten) { write_statistics(); }
+    if (m_wake_avg_unwritten) {
+        for (int b = 0; b < static_cast<int>(m_wakes.size()); ++b) {
+            if (m_wake_exchange.owns(b)) { m_wakes[b]->write_average(); }
+        }
+        m_wake_avg_unwritten = false;
+    }
+}
+
+void
+MovingBodies::finalize ()
+{
+    BL_PROFILE("MovingBodies::finalize()");
+    if (m_in.stats_int > 0) {
+        rewrite_summaries();
+        flush_logs();
+    }
+    m_logs.flush();
 }
 
 void
 MovingBodies::write_statistics ()
 {
     BL_PROFILE("MovingBodies::write_statistics()");
+    m_stats_unwritten = false;
     // body b of m_exchange: its statistics (a turbine's, then a disk's)
     const int nturb = num_turbines();
     const int nbody = nturb + static_cast<int>(m_disks.size());
@@ -1278,6 +1329,8 @@ MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_p
         }
         if (!m_wake_state_dir.empty() && wl->read_state(m_wake_state_dir)) {
             Print() << "  " << wl->name() << ": wake running average restored (" << wl->num_samples() << " samples)\n";
+            // as the statistics on a restart (read_checkpoint)
+            if (m_in.stats_int > 0) { m_wake_avg_unwritten = true; }
         }
         Print() << "  " << wl->name() << ": wake lines at " << w.lines_xD.size() << " downstream distances, "
                 << wl->num_points() << " points, diameter " << wl->diameter() << " m\n";
@@ -1320,9 +1373,10 @@ MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const Mult
         auto& wl = m_wakes[b];
         if (time >= m_in.avg_start) { wl->accumulate(vel[b]); }
         wl->write_instantaneous(m_logs, time, vel[b], !m_resumed && !m_wake_written);
-        wl->write_average();
+        if (m_in.stats_int == 0) { wl->write_average(); }
     }
     m_wake_written = true;
+    m_wake_avg_unwritten = (m_in.stats_int > 0);
 }
 
 bool

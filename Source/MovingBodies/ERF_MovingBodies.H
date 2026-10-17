@@ -68,7 +68,13 @@ public:
      * solution was taken, the anchor level and step, and one record of every body's placing and
      * forcing inputs) and each OpenFAST turbine's own checkpoint <chkdir>/moving_bodies/<name>.chkp.
      */
-    void write_checkpoint (const std::string& chkdir) const;
+    void write_checkpoint (const std::string& chkdir);
+
+    /**
+     * At the end of the run (collective): rewrite the statistics and the wake averages sampled since
+     * their last rewrite (erf.moving_bodies.stats_int > 0), and flush every log.
+     */
+    void finalize ();
 
     /**
      * Restore the state written by write_checkpoint() from <chkdir>; called once, on a restart,
@@ -153,7 +159,7 @@ private:
      * mean and slowest turbine, then start counting again.
      */
     void report_timing ();
-    mutable erf_actuator::PhaseTimers m_timers;   // also timed by the const write_checkpoint(), check_levels(), add_momentum_sources()
+    mutable erf_actuator::PhaseTimers m_timers;   // also timed by the const check_levels() and add_momentum_sources()
     int m_timing_from{-1};                        //!< the first step of the next timing summary (-1: before the first step)
 
     /**
@@ -208,7 +214,7 @@ private:
      * their owners, the wake lines' rows on the rotors' owners, and in the farm format and for the
      * run's own files (total_load.csv, momentum_source.csv) on the I/O rank.
      */
-    mutable erf_actuator::LogStreams m_logs;   // flushed by the const write_checkpoint()
+    erf_actuator::LogStreams m_logs;
     /**
      * Write the rows of one time-series log (erf, flow, correction, fllc, disk) for the bodies
      * listed (indices of m_exchange: the turbines, then the disks), in the format
@@ -239,6 +245,13 @@ private:
     std::string farm_log_file (const std::string& log) const;
     /** Write the statistics of every body this step, in the format asked for (collective in the farm format). */
     void write_statistics ();
+    /**
+     * With stats_int > 0, rewrite the statistics and the wake averages that gained samples since
+     * their last rewrite (collective in the farm format; every rank shares the flags, set alike).
+     */
+    void rewrite_summaries ();
+    bool m_stats_unwritten{false};      //!< statistics accumulated since write_statistics()
+    bool m_wake_avg_unwritten{false};   //!< wake lines sampled since their averages were written (stats_int > 0)
     /** Append time and the integrated source vector to <diagnostics_dir>/momentum_source.csv. */
     void write_source_diagnostics (double time, const amrex::MultiFab* detJ_cc,
                                    const amrex::Geometry& geom, bool first);

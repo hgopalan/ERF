@@ -540,8 +540,10 @@ point must lie in the domain otherwise. Every ``wake.int`` steps the velocity is
 points with the actuator sampler, written to ``<output_root>_wake.csv``
 (``time, xD, line, s, x, y, z, u, v, w`` with ``s`` in diameters) and, from
 ``erf.moving_bodies.avg_start`` on, accumulated into a running time average that
-``<output_root>_wake_avg.csv`` always holds (``samples`` is the number of
-samples in it). The running sums are part of the checkpoint, so the average
+``<output_root>_wake_avg.csv`` holds (``samples`` is the number of
+samples in it). The file is rewritten at every sample, or with
+``erf.moving_bodies.stats_int`` every that many steps, at every checkpoint and
+at the end of the run. The running sums are part of the checkpoint, so the average
 continues across a restart. Nothing is sampled when a prescribed velocity
 replaces the flow.
 
@@ -549,7 +551,8 @@ Body statistics
 ---------------
 
 From ``erf.moving_bodies.avg_start`` on, every step adds the state of each
-body to its running statistics, and ``<output_root>_stats.csv`` always holds
+body to its running statistics, and ``<output_root>_stats.csv``, rewritten
+every ``diagnostics_int`` steps (or as the wake averages with ``stats_int``), holds
 the current sample count, the first and last sample times and, per quantity,
 the mean, the root mean square, the minimum and the maximum. For an OpenFAST
 turbine the quantities are the thrust along the shaft and along x, the torque,

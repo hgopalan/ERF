@@ -237,6 +237,11 @@ ERF::Evolve ()
 
     WriteAtFinalTime();
 
+#ifdef ERF_USE_MOVING_BODIES
+    // the moving bodies' summary files rewritten every stats_int steps, and every log, complete
+    if (moving_bodies) { moving_bodies->finalize(); }
+#endif
+
     flush_stations();
 
     BL_PROFILE_VAR_STOP(evolve);

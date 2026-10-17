@@ -836,6 +836,20 @@ where balance alone would have put it with the second; the run proceeds. On
 one rank (``MovingBodies_MixedTimeSteps_OneRank``) two time steps cannot be
 kept apart and the run stops, naming the two substep counts.
 
+How the logs are written must not change what they hold. ``MovingBodies_Logs_OneOpenFile``
+runs the two-turbine farm on one rank with ``erf.moving_bodies.max_open_logs = 1``, so every
+row closes another file and opens its own again to append, and requires every log, statistics
+file and farm total to hold the bytes of the run with no limit; ``_PerRank`` does the same with
+the rank files on two ranks. ``MovingBodies_StatsInt_EndOfRun`` (and ``_Farm``) rewrites the
+statistics every 4 steps of the 10-step run (``stats_int``), so the last rewrite is the one at
+the end of the run, and requires the files of the run that rewrites them at every step;
+``MovingBodies_StatsInt_Wake`` does the same for the wake averages.
+``MovingBodies_StatsInt_OneOpenFile_Restart`` restarts that farm from step 5 with
+``stats_int = 3`` and one open file, after a first run that went on past the checkpoint, and
+requires the straight run's logs and statistics. ``MovingBodies_StatsInt_RestartAtTheEnd``
+restarts from step 5 with no step left, after a first run that went on to step 10: the
+statistics files must be rewritten from the checkpoint's state.
+
 ``OpenFAST_ADM_TwoWidths`` is that farm with a kernel width per turbine (T1
 2 cells, T2 1 cell, which also sets T2's filtered-disk correction): the same
 checks against its own golds and a box-parity twin.

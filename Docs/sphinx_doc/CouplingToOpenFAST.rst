@@ -177,7 +177,8 @@ Per turbine, under ``output_root``, every ``diagnostics_int`` steps:
   instantaneous and running-averaged velocity along lateral and vertical lines
   downstream.
 - ``<root>_stats.csv``: running statistics from ``avg_start`` on, rewritten
-  whole at each write.
+  whole at each write (every ``stats_int`` steps, at checkpoints and at the
+  end, when ``stats_int`` is set).
 - ``<diagnostics_dir>/total_load.csv``, ``momentum_source.csv``,
   ``ground.csv``: farm totals, the integrated source (equal to minus the
   loads; for an actuator disk on a tilted shaft, minus the thrust's shaft
@@ -235,8 +236,8 @@ For large farms (hundreds of turbines and more):
 - Write the diagnostics less often than every step: ``diagnostics_int`` of 10
   to 100 steps (a few seconds of simulated time) resolves the rotor dynamics
   the logs are used for, and OpenFAST's own ``.out`` files keep the full rate.
-  Set ``avg_start`` so the statistics, rewritten at each write, start after the
-  spin-up.
+  Set ``avg_start`` so the statistics, rewritten at each write (or every
+  ``stats_int`` steps), start after the spin-up.
 - Sample wake lines rarely: their exchange costs a collective every
   ``wake.int`` steps. Use a multiple of ``diagnostics_int``, 50 to 200 steps
   for averaged wake profiles, and only behind the turbines whose wakes are
@@ -244,6 +245,17 @@ For large farms (hundreds of turbines and more):
 - Use ``diagnostics_format = farm`` (or ``per_rank`` when the farm file's
   gather to one rank is too large): a few files in place of several per
   turbine.
+- Rewrite the summary files rarely: each statistics file (``_stats``) and
+  each wake-average file (``_wake_avg``) is written afresh in full, by
+  default at every diagnostics step and every wake sample. ``stats_int`` of
+  a few hundred steps rewrites them that often, and also at every checkpoint
+  and at the end of the run, so they hold every sample at those points.
+- Each rank keeps its logs open from one row to the next, at most
+  ``max_open_logs`` of them (by default a quarter of the process's limit on
+  open files). An owner of more logs than that finds about
+  ``max_open_logs - 1`` of them still open at their next row and closes and
+  opens the others again, which is slower but writes the same files; raise the limit
+  (``ulimit -n``) or use ``per_rank`` or ``farm`` for many bodies per rank.
 - Measure before tuning: ``timing_int`` prints the time of each phase (the
   sampling, OpenFAST, the spreading, the diagnostics, the wake lines) over
   the ranks every few steps, and a build with

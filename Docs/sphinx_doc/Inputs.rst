@@ -2799,6 +2799,18 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | farm (one file per log, gathered to the I/O rank); the   |                          |                          |
 |                                                        | last two carry the body's name in a body column          |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.stats_int**                        | rewrite the statistics (_stats) and the wake averages    | Int >= 0                 | 0                        |
+|                                                        | (_wake_avg) every this many steps, at every checkpoint   |                          |                          |
+|                                                        | and at the end of the run; 0 rewrites the statistics at  |                          |                          |
+|                                                        | every diagnostics step and the wake averages at every    |                          |                          |
+|                                                        | wake sample                                              |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.max_open_logs**                    | the most diagnostics files one rank keeps open at once;  | Int >= 0                 | 0                        |
+|                                                        | opening one more closes the file written to most         |                          |                          |
+|                                                        | recently, which is opened again to append; 0 takes a     |                          |                          |
+|                                                        | quarter of the process's open-file limit (between 16     |                          |                          |
+|                                                        | and 4096)                                                |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (velocities sampled |
 |                                                        | node instead of the flow velocity; the sampling          |                          | from the flow)           |
 |                                                        | correction and the FLLC still apply to it, so with       |                          |                          |
@@ -2880,7 +2892,7 @@ at the start of the step whose forcing they describe.
 - ``<output_root>_wake.csv`` and ``<output_root>_wake_avg.csv`` (wake lines): the instantaneous
   and running-averaged velocity along the lines.
 - ``<output_root>_stats.csv``: running statistics from ``avg_start`` on, rewritten whole at each
-  write.
+  write (every ``stats_int`` steps, at checkpoints and at the end, when ``stats_int`` is set).
 - ``<diagnostics_dir>/momentum_source.csv`` (the integrated momentum source, equal to minus the
   bodies' loads),
   ``total_load.csv`` (in a build with OpenFAST: the bodies' total load) and ``ground.csv`` (the terrain
