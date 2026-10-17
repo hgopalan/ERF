@@ -9,6 +9,7 @@
 
 #include "ERF_MovingBodiesInputs.H"
 #include "ERF_OpenFASTDriver.H"
+#include "ERF_OpenFASTModelFiles.H"
 
 namespace erf_openfast {
 
@@ -17,18 +18,24 @@ namespace erf_openfast {
  * or an empty string when the file has no such line. Quotes around the value are removed.
  */
 std::string openfast_value (const std::string& fname, const std::string& key);
+/** As above, with the file's lines from files (each file read once there). */
+std::string openfast_value (ModelFiles& files, const std::string& fname, const std::string& key);
 
 /** The path of the module file the primary file names under key (AeroFile, EDFile, ...), resolved against the primary file's directory. */
 std::string openfast_module_path (const std::string& fst_file, const std::string& key);
+std::string openfast_module_path (ModelFiles& files, const std::string& fst_file, const std::string& key);
 
 /** Whether the file is an OpenFAST primary input file (it names CompAero or AirDens); the bundled stub's deck is not. */
 bool is_openfast_model (const std::string& fst_file);
+bool is_openfast_model (ModelFiles& files, const std::string& fst_file);
 
 /** The model's air density: AirDens of the primary file, or of the AeroDyn file when the primary says "default". False when neither gives a number. */
 bool openfast_air_density (const std::string& fst_file, amrex::Real& rho);
+bool openfast_air_density (ModelFiles& files, const std::string& fst_file, amrex::Real& rho);
 
 /** The model's gravity (Gravity of the primary file). False when it is not there. */
 bool openfast_gravity (const std::string& fst_file, amrex::Real& g);
+bool openfast_gravity (ModelFiles& files, const std::string& fst_file, amrex::Real& g);
 
 /**
  * One finding of the start-up audit: fatal ones abort the run once every finding has been
@@ -48,6 +55,8 @@ struct AuditFinding
  * one non-fatal note and no file checks.
  */
 std::vector<AuditFinding> audit_model (const MovingBodyInputs& b, amrex::Real erf_gravity);
+/** As above, reading each model file once in files (an owner auditing several turbines of one model reads it once). */
+std::vector<AuditFinding> audit_model (ModelFiles& files, const MovingBodyInputs& b, amrex::Real erf_gravity);
 
 /**
  * The rotor against the domain and the mesh: the swept disc must clear the ground, the top
@@ -102,6 +111,7 @@ std::string format_audit (const std::string& name, const std::vector<AuditFindin
  * one. MovingBodies widens a turbine's footprint by it when choosing the turbine's owner rank.
  */
 amrex::Real model_rotor_radius (const std::string& fst_file);
+amrex::Real model_rotor_radius (ModelFiles& files, const std::string& fst_file);
 
 /**
  * The time step (s) the model's primary file gives before OpenFAST starts: its DT, or the bundled
@@ -109,6 +119,7 @@ amrex::Real model_rotor_radius (const std::string& fst_file);
  * different ranks where it can, since a rank steps the turbines it owns together.
  */
 amrex::Real model_time_step (const std::string& fst_file);
+amrex::Real model_time_step (ModelFiles& files, const std::string& fst_file);
 
 } // namespace erf_openfast
 

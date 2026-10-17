@@ -1277,9 +1277,14 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT)
 endif()
 
 # Run a moving-bodies deck in test_files/<CASE> for one step on NRANKS ranks with OPTIONS and require it to end
-# normally (exit code 0) with output matching REGEX (Tests/RunExpectExit.cmake): the owner ranks of the turbines
-# and disks, and the ranks their points reach, that other tests rely on.
+# with the expected exit code (an optional sixth argument: default 0, a normal end; nonzero for any failure, an
+# abort) and output matching REGEX (Tests/RunExpectExit.cmake): the owner ranks of the turbines and disks, and
+# the ranks their points reach, that other tests rely on.
 function(add_test_moving_bodies_owners TEST_NAME CASE NRANKS OPTIONS REGEX)
+    set(_result 0)
+    if(ARGC GREATER 5)
+        set(_result ${ARGV5})
+    endif()
     set(_dir ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
     file(MAKE_DIRECTORY ${_dir})
     file(GLOB _files "${TEST_SOURCE_ROOT}/${CASE}/*")
@@ -1292,7 +1297,7 @@ function(add_test_moving_bodies_owners TEST_NAME CASE NRANKS OPTIONS REGEX)
     add_test(NAME ${TEST_NAME}
         COMMAND ${CMAKE_COMMAND}
             "-DCHECK_COMMAND=${_cmd}"
-            "-DEXPECTED_RESULT=0"
+            "-DEXPECTED_RESULT=${_result}"
             "-DEXPECTED_REGEX=${REGEX}"
             -P ${PROJECT_SOURCE_DIR}/Tests/RunExpectExit.cmake)
     set_tests_properties(${TEST_NAME} PROPERTIES
@@ -1655,6 +1660,21 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       "T1: owned by rank 1 .*STEP 1 ends")
   add_test_moving_bodies_owners(MovingBodies_Owners_Balanced OpenFAST_ADM_TwoTurbines 2 ""
       "T1: owned by rank 0 .*T2: owned by rank 1 .*STEP 1 ends")
+  # Each distinct model file is read on one rank at start-up (model p on rank p mod nprocs) and its checks
+  # handed to every rank. T2's deck names an AeroDyn file with BEM induction and tower shadow on, and is
+  # the second model, so rank 1 alone reads it (T2 is also owned by rank 1). With T2's tower forced, the
+  # run must warn about the tower shadow and go on: the warning is printed by rank 0, which does not read
+  # the file, so it proves the check reached rank 0. With sampling = disk the run must stop on the
+  # induction check, naming T2 and the file (that every rank holds the result is the parallel gtest
+  # ModelFacts.EveryRankHoldsWhatReadingEachModelGives; here either rank's abort ends the run)
+  set(_aerodyn "erf.moving_bodies.T2.fst_file=stub_turbine_aerodyn.fst")
+  add_test_moving_bodies_owners(MovingBodies_TowerShadowReadOnRank1 OpenFAST_ADM_TwoTurbines 2
+      "${_aerodyn} erf.moving_bodies.T2.num_force_points_tower=10"
+      "WARNING: erf[.]moving_bodies[.]T2: the AeroDyn file 'aerodyn_bem_shadow[.]dat' sets TwrShadow = 1.*T2: owned by rank 1 .*STEP 1 ends")
+  add_test_moving_bodies_owners(MovingBodies_InductionReadOnRank1 OpenFAST_ADM_TwoTurbines 2
+      "${_aerodyn} erf.moving_bodies.T2.sampling=disk"
+      "erf[.]moving_bodies[.]T2: the AeroDyn file 'aerodyn_bem_shadow[.]dat' sets Wake_Mod = 1; set it to 0"
+      nonzero)
   # The timing summary (erf.moving_bodies.timing_int = 2) on two ranks, one turbine on each: every second step
   # it must print each phase's minimum, mean and maximum over both ranks, the start-up in the first summary
   # only (the second's first row is advance: the timers start again after each summary), and the OpenFAST

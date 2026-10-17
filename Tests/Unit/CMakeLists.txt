@@ -407,6 +407,9 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTAudit.cpp
   )
+  # the moving-bodies cases, whose model files (the IEA 15 MW models, the stub's decks) the readers are tested on
+  target_compile_definitions(${erf_exe_name} PRIVATE
+    ERF_GTEST_MOVING_BODIES_CASES="${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies")
   # Motivation: the actuator-disk sampling mode must default to the corrected disk for
   # mode = adm and to plain disk sampling for an actuator line, keep an explicit choice, the
   # turbine's upstream sampling distance must default to two diameters, and the lifting-line
@@ -786,6 +789,15 @@ if(ERF_ENABLE_MPI)
       ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSpreading.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestBodyExchange.cpp
     )
+  endif()
+  if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
+    # Motivation: each turbine model is read on one rank at start-up and its checks and sizes handed to
+    # every rank; every rank must hold what reading the model itself gives, whichever rank read it.
+    target_sources(${erf_parallel_exe_name} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestModelFacts.cpp
+    )
+    target_compile_definitions(${erf_parallel_exe_name} PRIVATE
+      ERF_GTEST_MOVING_BODIES_CASES="${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies")
   endif()
   build_erf_exe(${erf_parallel_exe_name} NO_ERF_MAIN)
   target_link_libraries(${erf_parallel_exe_name}

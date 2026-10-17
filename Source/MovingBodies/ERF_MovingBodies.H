@@ -2,6 +2,7 @@
 #define ERF_MOVING_BODIES_H
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -294,6 +295,10 @@ private:
     std::vector<amrex::Real> disk_table (int k, const std::function<void(int, amrex::Real*)>& fill) const;
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
+    //! per distinct .fst path: what start-up takes from the model's files (erf_openfast::gather_model_facts)
+    std::map<std::string, erf_openfast::ModelFacts> m_model_facts;
+    //! the model files the owner's two start-up audits read, each once for both (emptied after the second)
+    erf_openfast::ModelFiles m_audit_files;
     /**
      * Collective. A table of k values per turbine, filled by each turbine's owner (fill(i, row) for the
      * turbines this rank owns) and summed over the ranks, so that every rank (or only the I/O rank, with

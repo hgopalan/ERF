@@ -208,17 +208,23 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
     // initialised by set_ground(), once the bases sit on the terrain, or restored by
     // read_checkpoint(); its first solution waits for the first step, when the flow exists to be
     // sampled
-    m_driver = std::make_unique<erf_openfast::OpenFASTDriver>(turbines);
-    std::map<std::string, std::string> shadow;   // per distinct model file: a farm shares a few
+    // what start-up takes from each distinct model file (a farm shares a few, or gives every turbine its
+    // own): each read on one rank, file p on rank p mod nprocs, and handed to every rank in one gather
+    {
+        std::vector<std::string> paths;   // in the order the turbines first name them
+        std::set<std::string> seen;
+        for (const MovingBodyInputs& b : turbines) {
+            if (seen.insert(b.fst_file).second) { paths.push_back(b.fst_file); }
+        }
+        const std::vector<erf_openfast::ModelFacts> facts = erf_openfast::gather_model_facts(paths);
+        for (std::size_t p = 0; p < paths.size(); ++p) { m_model_facts.emplace(paths[p], facts[p]); }
+    }
+    m_driver = std::make_unique<erf_openfast::OpenFASTDriver>(turbines, &m_model_facts);
     for (std::size_t i = 0; i < turbines.size(); ++i) {
         // the tower's wake now reaches the blades through the flow: AeroDyn's own tower-shadow
         // correction would count it twice
         if (turbines[i].mode != "none" && turbines[i].num_force_points_tower > 0) {
-            auto it = shadow.find(turbines[i].fst_file);
-            if (it == shadow.end()) {
-                it = shadow.emplace(turbines[i].fst_file, erf_openfast::check_tower_shadow_off(turbines[i].fst_file)).first;
-            }
-            const std::string& w = it->second;
+            const std::string& w = m_model_facts.at(turbines[i].fst_file).tower_shadow;
             if (!w.empty()) { Print() << "WARNING: erf.moving_bodies." << turbines[i].name << ": " << w << "\n"; }
         }
     }
@@ -389,32 +395,15 @@ MovingBodies::choose_owners (const Geometry& geom, const BoxArray& grids, const 
     const int n = static_cast<int>(turbs.size());
     if (n > 0) {
         // the rotor radius (zero when unknown: the base column alone) and the time step each model's files
-        // give. A farm shares a few models: each distinct .fst is read once, the distinct files spread over
-        // the ranks (file p on rank p mod nprocs), and one reduction gives every rank all of them
-        std::vector<std::string> paths;
-        std::vector<int> path_of(n, 0);
-        {
-            std::map<std::string, int> index;
-            for (int i = 0; i < n; ++i) {
-                const auto it = index.emplace(turbs[i].fst_file, static_cast<int>(paths.size()));
-                if (it.second) { paths.push_back(turbs[i].fst_file); }
-                path_of[i] = it.first->second;
-            }
-        }
-        const int npath = static_cast<int>(paths.size());
-        std::vector<Real> model(2 * static_cast<std::size_t>(npath), Real(0.0));
-        for (int p = 0; p < npath; ++p) {
-            if (p % ParallelDescriptor::NProcs() != ParallelDescriptor::MyProc()) { continue; }
-            model[2*p] = std::max(erf_openfast::model_rotor_radius(paths[p]), Real(0.0));
-            model[2*p+1] = erf_openfast::model_time_step(paths[p]);
-        }
-        ParallelDescriptor::ReduceRealSum(model.data(), 2 * npath);
+        // give, read at start-up (gather_model_facts: each distinct .fst once, on one rank)
         std::vector<Real> radius(n), dt(n);
         for (int i = 0; i < n; ++i) {
-            radius[i] = model[2*path_of[i]];
-            dt[i] = model[2*path_of[i]+1];
+            const auto f = m_model_facts.find(turbs[i].fst_file);
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(f != m_model_facts.end(), "MovingBodies::choose_owners: no model facts for " + turbs[i].fst_file);
+            radius[i] = std::max(f->second.rotor_radius, Real(0.0));
+            dt[i] = f->second.time_step;
         }
-        Print() << "Moving bodies: " << n << " turbine(s) share " << npath << " distinct OpenFAST model file(s)\n";
+        Print() << "Moving bodies: " << n << " turbine(s) share " << m_model_facts.size() << " distinct OpenFAST model file(s)\n";
         std::vector<Box> footprints;
         for (int i = 0; i < n; ++i) { footprints.push_back(footprint(turbs[i].base_pos, radius[i])); }
         owners = erf_actuator::choose_owners(footprints, dt, ba, dmap, geom, ParallelDescriptor::NProcs());
@@ -2002,7 +1991,9 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
         }
         erf_actuator::terrain_heights(z_phys_nd, geom, pos, ground);
     }
-    // each owner audits its turbines; the I/O rank prints the reports in turbine order
+    // each owner audits its turbines, each model file read once for both audits (m_audit_files); the I/O rank
+    // prints the reports in turbine order
+    erf_openfast::ModelFiles& files = m_audit_files;
     std::vector<std::string> text(nturb);
     std::vector<int> fatal(nturb, 0);
     for (int i = 0; i < nturb; ++i) {
@@ -2022,7 +2013,7 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
                         " rotor radii; the filtered-disk correction was derived for widths up to about 1.25 radii");
             }
         }
-        std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(b, CONST_GRAV);
+        std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(files, b, CONST_GRAV);
         const auto fg = erf_openfast::audit_geometry(turbs[i], b, w, plo, phi, dx, per, ground[i]);
         f.insert(f.end(), fg.begin(), fg.end());
         bool bad = false;
@@ -2065,6 +2056,7 @@ MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_
     });
     std::vector<Real> rho_hub;
     erf_actuator::sample_cell_scalar(cons, Rho_comp, z_phys_nd, geom, hubs, rho_hub);
+    erf_openfast::ModelFiles& files = m_audit_files;   // the files the setup audit read, kept for this one
     std::vector<std::string> text(nturb);
     std::vector<int> fatal(nturb, 0);
     for (int i = 0; i < nturb; ++i) {
@@ -2072,7 +2064,7 @@ MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_
         const MovingBodyInputs& b = m_turbine_in[i];
         std::vector<erf_openfast::AuditFinding> f;
         Real rho_model = 0.0;
-        if (erf_openfast::openfast_air_density(b.fst_file, rho_model)) {
+        if (erf_openfast::openfast_air_density(files, b.fst_file, rho_model)) {
             f = erf_openfast::audit_density(turbs[i].name, rho_model, rho_hub[i], m_in.density_tolerance);
             if (f.empty()) {
                 f.push_back({false, "ERF's density at the hub is " + std::to_string(rho_hub[i]) + " kg/m^3, the model's " +
@@ -2091,6 +2083,7 @@ MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_
         text[i] = erf_openfast::format_audit(turbs[i].name + " (density and wind)", f, bad);
         fatal[i] = bad ? 1 : 0;
     }
+    m_audit_files = erf_openfast::ModelFiles();   // the start-up audits are done: let the lines go
     if (print_turbine_texts(text, fatal)) {
         Abort("erf.moving_bodies: the OpenFAST input audit found errors (listed above); fix them (mode = none clears only "
               "the CompAero finding: a turbine whose loads are not wanted in the flow)");

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <sstream>
 
 #include <AMReX.H>
@@ -15,11 +14,9 @@ using namespace amrex;
 namespace erf_openfast {
 
 std::string
-openfast_value (const std::string& fname, const std::string& key)
+openfast_value (ModelFiles& files, const std::string& fname, const std::string& key)
 {
-    std::ifstream in(fname);
-    std::string line;
-    while (std::getline(in, line)) {
+    for (const std::string& line : files.lines(fname)) {
         std::istringstream ls(line);
         std::string value, name;
         if (!(ls >> value >> name)) { continue; }
@@ -34,19 +31,40 @@ openfast_value (const std::string& fname, const std::string& key)
 }
 
 std::string
-openfast_module_path (const std::string& fst_file, const std::string& key)
+openfast_value (const std::string& fname, const std::string& key)
 {
-    const std::string f = openfast_value(fst_file, key);
+    ModelFiles files;
+    return openfast_value(files, fname, key);
+}
+
+std::string
+openfast_module_path (ModelFiles& files, const std::string& fst_file, const std::string& key)
+{
+    const std::string f = openfast_value(files, fst_file, key);
     if (f.empty()) { return {}; }
     const auto slash = fst_file.find_last_of('/');
     if (slash != std::string::npos && f.front() != '/') { return fst_file.substr(0, slash + 1) + f; }
     return f;
 }
 
+std::string
+openfast_module_path (const std::string& fst_file, const std::string& key)
+{
+    ModelFiles files;
+    return openfast_module_path(files, fst_file, key);
+}
+
+bool
+is_openfast_model (ModelFiles& files, const std::string& fst_file)
+{
+    return !openfast_value(files, fst_file, "CompAero").empty() || !openfast_value(files, fst_file, "AirDens").empty();
+}
+
 bool
 is_openfast_model (const std::string& fst_file)
 {
-    return !openfast_value(fst_file, "CompAero").empty() || !openfast_value(fst_file, "AirDens").empty();
+    ModelFiles files;
+    return is_openfast_model(files, fst_file);
 }
 
 namespace {
@@ -69,30 +87,51 @@ std::string fmt (Real v)
 } // namespace
 
 bool
+openfast_air_density (ModelFiles& files, const std::string& fst_file, Real& rho)
+{
+    if (to_real(openfast_value(files, fst_file, "AirDens"), rho)) { return true; }
+    const std::string aero = openfast_module_path(files, fst_file, "AeroFile");
+    if (aero.empty()) { return false; }
+    return to_real(openfast_value(files, aero, "AirDens"), rho);
+}
+
+bool
 openfast_air_density (const std::string& fst_file, Real& rho)
 {
-    if (to_real(openfast_value(fst_file, "AirDens"), rho)) { return true; }
-    const std::string aero = openfast_module_path(fst_file, "AeroFile");
-    if (aero.empty()) { return false; }
-    return to_real(openfast_value(aero, "AirDens"), rho);
+    ModelFiles files;
+    return openfast_air_density(files, fst_file, rho);
+}
+
+bool
+openfast_gravity (ModelFiles& files, const std::string& fst_file, Real& g)
+{
+    return to_real(openfast_value(files, fst_file, "Gravity"), g);
 }
 
 bool
 openfast_gravity (const std::string& fst_file, Real& g)
 {
-    return to_real(openfast_value(fst_file, "Gravity"), g);
+    ModelFiles files;
+    return openfast_gravity(files, fst_file, g);
 }
 
 std::vector<AuditFinding>
 audit_model (const MovingBodyInputs& b, Real erf_gravity)
 {
+    ModelFiles files;
+    return audit_model(files, b, erf_gravity);
+}
+
+std::vector<AuditFinding>
+audit_model (ModelFiles& files, const MovingBodyInputs& b, Real erf_gravity)
+{
     std::vector<AuditFinding> f;
-    if (!is_openfast_model(b.fst_file)) {
+    if (!is_openfast_model(files, b.fst_file)) {
         f.push_back({false, "'" + b.fst_file + "' is not an OpenFAST primary input file (a stub deck): the model-file checks are skipped"});
         return f;
     }
     Real rho = 0.0;
-    if (openfast_air_density(b.fst_file, rho)) {
+    if (openfast_air_density(files, b.fst_file, rho)) {
         if (std::abs(rho - b.air_density) > Real(1.0e-4) * rho) {
             f.push_back({true, "the model's AirDens is " + fmt(rho) + " kg/m^3 but erf.moving_bodies." + b.name + ".air_density is " +
                                fmt(b.air_density) + "; set air_density to the model's value (it scales the nacelle drag and the lifting-line correction)"});
@@ -100,18 +139,18 @@ audit_model (const MovingBodyInputs& b, Real erf_gravity)
     } else {
         f.push_back({false, "the model gives no numeric AirDens in '" + b.fst_file + "' or its AeroDyn file; the density checks are skipped"});
     }
-    const std::string comp_aero = openfast_value(b.fst_file, "CompAero");
+    const std::string comp_aero = openfast_value(files, b.fst_file, "CompAero");
     if (b.mode != "none" && comp_aero == "0") {
         f.push_back({true, "CompAero = 0 in '" + b.fst_file + "': the model computes no aerodynamic loads, yet mode = " + b.mode +
                            " puts its loads into the flow; set CompAero = 2 (AeroDyn) or mode = none"});
     }
     Real g = 0.0;
-    if (openfast_gravity(b.fst_file, g) && std::abs(g - erf_gravity) > Real(0.01) * erf_gravity) {
+    if (openfast_gravity(files, b.fst_file, g) && std::abs(g - erf_gravity) > Real(0.01) * erf_gravity) {
         f.push_back({false, "the model's Gravity is " + fmt(g) + " m/s^2 but ERF uses " + fmt(erf_gravity)});
     }
     if (b.num_force_points_tower > 0 && b.mode != "none") {
-        const std::string aero = openfast_module_path(b.fst_file, "AeroFile");
-        const std::string twr = aero.empty() ? std::string() : openfast_value(aero, "TwrAero");
+        const std::string aero = openfast_module_path(files, b.fst_file, "AeroFile");
+        const std::string twr = aero.empty() ? std::string() : openfast_value(files, aero, "TwrAero");
         if (!twr.empty() && (twr == "False" || twr == "FALSE" || twr == "false" || twr == "F")) {
             f.push_back({false, "num_force_points_tower = " + std::to_string(b.num_force_points_tower) + " but the AeroDyn file sets TwrAero = " + twr +
                                 ": the tower force nodes will carry no load"});
@@ -321,15 +360,13 @@ report_audit (const std::string& name, const std::vector<AuditFinding>& findings
 }
 
 Real
-model_rotor_radius (const std::string& fst_file)
+model_rotor_radius (ModelFiles& files, const std::string& fst_file)
 {
     Real r = -1.0;
-    const std::string ed = openfast_module_path(fst_file, "EDFile");
-    if (!ed.empty() && to_real(openfast_value(ed, "TipRad"), r) && r > Real(0.0)) { return r; }
+    const std::string ed = openfast_module_path(files, fst_file, "EDFile");
+    if (!ed.empty() && to_real(openfast_value(files, ed, "TipRad"), r) && r > Real(0.0)) { return r; }
     // the bundled stub's deck: "rotor_radius = R"
-    std::ifstream in(fst_file);
-    std::string line;
-    while (std::getline(in, line)) {
+    for (const std::string& line : files.lines(fst_file)) {
         std::istringstream ls(line);
         std::string key, eq, value;
         if ((ls >> key >> eq >> value) && key == "rotor_radius" && eq == "=" && to_real(value, r) && r > Real(0.0)) { return r; }
@@ -338,19 +375,31 @@ model_rotor_radius (const std::string& fst_file)
 }
 
 Real
-model_time_step (const std::string& fst_file)
+model_rotor_radius (const std::string& fst_file)
+{
+    ModelFiles files;
+    return model_rotor_radius(files, fst_file);
+}
+
+Real
+model_time_step (ModelFiles& files, const std::string& fst_file)
 {
     Real dt = -1.0;
-    if (to_real(openfast_value(fst_file, "DT"), dt) && dt > Real(0.0)) { return dt; }
+    if (to_real(openfast_value(files, fst_file, "DT"), dt) && dt > Real(0.0)) { return dt; }
     // the bundled stub's deck: "dt = DT"
-    std::ifstream in(fst_file);
-    std::string line;
-    while (std::getline(in, line)) {
+    for (const std::string& line : files.lines(fst_file)) {
         std::istringstream ls(line);
         std::string key, eq, value;
         if ((ls >> key >> eq >> value) && key == "dt" && eq == "=" && to_real(value, dt) && dt > Real(0.0)) { return dt; }
     }
     return Real(-1.0);
+}
+
+Real
+model_time_step (const std::string& fst_file)
+{
+    ModelFiles files;
+    return model_time_step(files, fst_file);
 }
 
 } // namespace erf_openfast

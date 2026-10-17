@@ -3,12 +3,14 @@
 #include "ERF_DiagnosticsLog.H"
 #include "ERF_OpenFASTAudit.H"
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <iomanip>
+#include <limits>
 
 #include <AMReX.H>
 #include <AMReX_BLProfiler.H>
@@ -48,12 +50,19 @@ substep_count (double dt_cfd, double dt_fast, std::string& err)
 std::string
 check_induction (const std::string& fst_file, bool want_off)
 {
-    const std::string path = openfast_module_path(fst_file, "AeroFile");
+    ModelFiles files;
+    return check_induction(files, fst_file, want_off);
+}
+
+std::string
+check_induction (ModelFiles& files, const std::string& fst_file, bool want_off)
+{
+    const std::string path = openfast_module_path(files, fst_file, "AeroFile");
     if (path.empty()) { return {}; }
-    const std::string comp = openfast_value(fst_file, "CompAero");
+    const std::string comp = openfast_value(files, fst_file, "CompAero");
     if (comp == "0") { return {}; }
-    std::string wake = openfast_value(path, "Wake_Mod");
-    if (wake.empty()) { wake = openfast_value(path, "WakeMod"); }
+    std::string wake = openfast_value(files, path, "Wake_Mod");
+    if (wake.empty()) { wake = openfast_value(files, path, "WakeMod"); }
     if (wake.empty()) {
         return "the AeroDyn file '" + path + "' named by '" + fst_file + "' has no Wake_Mod (or WakeMod) line";
     }
@@ -75,21 +84,121 @@ check_induction_off (const std::string& fst_file) { return check_induction(fst_f
 std::string
 check_tower_shadow_off (const std::string& fst_file)
 {
-    const std::string path = openfast_module_path(fst_file, "AeroFile");
+    ModelFiles files;
+    return check_tower_shadow_off(files, fst_file);
+}
+
+std::string
+check_tower_shadow_off (ModelFiles& files, const std::string& fst_file)
+{
+    const std::string path = openfast_module_path(files, fst_file, "AeroFile");
     if (path.empty()) { return {}; }
-    const std::string comp = openfast_value(fst_file, "CompAero");
+    const std::string comp = openfast_value(files, fst_file, "CompAero");
     if (comp == "0") { return {}; }
-    const std::string shadow = openfast_value(path, "TwrShadow");
+    const std::string shadow = openfast_value(files, path, "TwrShadow");
     if (shadow.empty() || shadow == "0") { return {}; }
     return "the AeroDyn file '" + path + "' sets TwrShadow = " + shadow +
            "; with the tower's loads in the flow its wake reaches the blades through the sampled "
            "velocities, so AeroDyn's tower-shadow correction counts it twice: set TwrShadow = 0";
 }
 
-OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
+namespace {
+
+// every rank's text, on every rank, in rank order (one exchange of the lengths, one of the characters)
+std::vector<std::string>
+all_gather_texts (const std::string& mine)
+{
+    const int np = ParallelDescriptor::NProcs();
+    std::vector<std::string> all(np);
+#ifdef AMREX_USE_MPI
+    if (np > 1) {
+        MPI_Comm comm = ParallelDescriptor::Communicator();
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(mine.size() < static_cast<std::size_t>(std::numeric_limits<int>::max() / np),
+                                         "gather_model_facts: the model texts are too long to gather");
+        int len = static_cast<int>(mine.size());
+        std::vector<int> lens(np, 0), offsets(np, 0);
+        MPI_Allgather(&len, 1, MPI_INT, lens.data(), 1, MPI_INT, comm);
+        for (int r = 1; r < np; ++r) { offsets[r] = offsets[r-1] + lens[r-1]; }
+        std::vector<char> chars(static_cast<std::size_t>(offsets[np-1] + lens[np-1]) + 1);
+        MPI_Allgatherv(mine.data(), len, MPI_CHAR, chars.data(), lens.data(), offsets.data(), MPI_CHAR, comm);
+        for (int r = 0; r < np; ++r) { all[r].assign(chars.data() + offsets[r], static_cast<std::size_t>(lens[r])); }
+        return all;
+    }
+#endif
+    all[0] = mine;
+    return all;
+}
+
+// one text as its length, a space and its characters, so that any text (spaces, new lines) reads back whole
+void put_text (std::ostringstream& out, const std::string& t) { out << t.size() << ' ' << t; }
+
+std::string get_text (std::istringstream& in)
+{
+    std::size_t n = 0;
+    in >> n;
+    in.get();   // the space after the length
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(in.good() && n < (std::size_t(1) << 24), "gather_model_facts: a malformed text length");
+    std::string t(n, '\0');
+    in.read(&t[0], static_cast<std::streamsize>(n));
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<std::size_t>(in.gcount()) == n, "gather_model_facts: a truncated text");
+    return t;
+}
+
+} // namespace
+
+std::vector<ModelFacts>
+gather_model_facts (const std::vector<std::string>& paths)
+{
+    BL_PROFILE("erf_openfast::gather_model_facts()");
+    const int npath = static_cast<int>(paths.size());
+    std::vector<ModelFacts> facts(npath);
+    if (npath == 0) { return facts; }
+    const int np = ParallelDescriptor::NProcs();
+    const int me = ParallelDescriptor::MyProc();
+    // this rank's models, each of its files read once, their texts packed as: index, then three texts
+    ModelFiles files;
+    std::vector<Real> numbers(2 * static_cast<std::size_t>(npath), Real(0.0));
+    std::ostringstream mine;
+    for (int p = me; p < npath; p += np) {
+        ModelFacts& f = facts[p];
+        f.induction_off = check_induction(files, paths[p], true);
+        f.induction_on = check_induction(files, paths[p], false);
+        f.tower_shadow = check_tower_shadow_off(files, paths[p]);
+        numbers[2*p] = model_rotor_radius(files, paths[p]);
+        numbers[2*p+1] = model_time_step(files, paths[p]);
+        mine << p << ' ';
+        put_text(mine, f.induction_off);
+        put_text(mine, f.induction_on);
+        put_text(mine, f.tower_shadow);
+        mine << ' ';
+    }
+    // each number comes from its model's rank alone, zeros from the others: the sum is that number exactly
+    ParallelDescriptor::ReduceRealSum(numbers.data(), 2 * npath);
+    const std::vector<std::string> all = all_gather_texts(mine.str());
+    for (int r = 0; r < np; ++r) {
+        if (r == me) { continue; }
+        std::istringstream in(all[r]);
+        int p = -1;
+        while (in >> p) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(p >= 0 && p < npath && p % np == r, "gather_model_facts: a model from the wrong rank");
+            in.get();
+            facts[p].induction_off = get_text(in);
+            facts[p].induction_on = get_text(in);
+            facts[p].tower_shadow = get_text(in);
+        }
+    }
+    for (int p = 0; p < npath; ++p) {
+        facts[p].rotor_radius = numbers[2*p];
+        facts[p].time_step = numbers[2*p+1];
+    }
+    return facts;
+}
+
+OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies, const std::map<std::string, ModelFacts>* facts)
 {
     BL_PROFILE("OpenFASTDriver::OpenFASTDriver()");
     // a farm shares a few models: each distinct model file (and check) is read once
+    ModelFiles files;
     std::map<std::pair<std::string,bool>, std::string> induction;
     for (const MovingBodyInputs& b : bodies) {
         TurbineState t;
@@ -102,7 +211,17 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
         if (b.mode != "none") {
             const auto key = std::make_pair(b.fst_file, b.sampling == "disk");
             auto it = induction.find(key);
-            if (it == induction.end()) { it = induction.emplace(key, check_induction(key.first, key.second)).first; }
+            if (it == induction.end()) {
+                std::string err;
+                if (facts != nullptr) {
+                    const auto f = facts->find(key.first);
+                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(f != facts->end(), "OpenFASTDriver: no model facts for " + key.first);
+                    err = key.second ? f->second.induction_off : f->second.induction_on;
+                } else {
+                    err = check_induction(files, key.first, key.second);
+                }
+                it = induction.emplace(key, err).first;
+            }
             const std::string& err = it->second;
             if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
         }
@@ -378,9 +497,10 @@ OpenFASTDriver::step ()
             // call and treat "Simulation completed" as the end it is (the loads would stay frozen)
             err_stat = ErrID_None;
             err_msg[0] = '\0';
-            const double t_start = ParallelDescriptor::second();
+            // a nanosecond clock: a call can take less than MPI_Wtime's tick (a microsecond on some MPIs)
+            const auto t_start = std::chrono::steady_clock::now();
             FAST_CFD_Step(&t.tid_local, &err_stat, err_msg);
-            t.step_seconds += ParallelDescriptor::second() - t_start;
+            t.step_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
             if (err_stat == ErrID_Info && std::string(err_msg).find("completed") != std::string::npos) {
                 Abort("OpenFAST reports \"" + std::string(err_msg) + "\" for " + t.name + " at its time index " +
                       std::to_string(t.time_index) + ": it has reached the stop time it was started with and no longer steps");

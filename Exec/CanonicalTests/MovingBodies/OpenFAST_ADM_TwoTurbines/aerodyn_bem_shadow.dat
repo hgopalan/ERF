@@ -1,0 +1,3 @@
+------- AERODYN INPUT FILE (the two lines ERF's start-up checks read) -------
+1                      Wake_Mod    - Wake/induction model (switch) {0=none, 1=BEMT}
+1                      TwrShadow   - Calculate tower influence on wind based on downstream tower shadow (switch) {0=none, 1=Powles model}
