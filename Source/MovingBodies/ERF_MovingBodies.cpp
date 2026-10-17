@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include <AMReX.H>
+#include <AMReX_BLProfiler.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_Print.H>
@@ -147,6 +148,9 @@ MovingBodies::create (const SolverChoice& sc, int max_level, const Vector<double
 MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double t_max, bool restarting)
     : m_in(std::move(in)), m_anchor(anchor), m_dt(dt), m_t_max(t_max), m_restarting(restarting)
 {
+    BL_PROFILE("MovingBodies::MovingBodies()");
+    m_timers.enable(m_in.timing_int > 0);
+    erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Startup);
     Print() << "Moving bodies: " << m_in.bodies.size() << " body(ies) on level " << m_anchor << ", ERF dt there " << m_dt
             << ", run stop time " << t_max << " s, velocities "
             << (m_in.has_prescribed_velocity ? "prescribed" : "sampled from the flow") << "\n";
@@ -227,6 +231,8 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
 void
 MovingBodies::write_checkpoint (const std::string& chkdir) const
 {
+    BL_PROFILE("MovingBodies::write_checkpoint()");
+    erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Checkpoint);
     const std::string dir = chkdir + "/moving_bodies";
     // every row written so far reaches its file: a restart from this checkpoint trims the logs to it
     m_logs.flush();
@@ -303,6 +309,8 @@ void
 MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const BoxArray& grids, const DistributionMapping& dmap,
                           double time, int finest_level)
 {
+    BL_PROFILE("MovingBodies::set_ground()");
+    erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Startup);
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_ground_set, "MovingBodies::set_ground: called twice");
     if (m_anchor > finest_level) {
         Abort("erf.moving_bodies: the bodies live on level " + std::to_string(m_anchor) + " (erf.moving_bodies.anchor_level, "
@@ -366,6 +374,7 @@ MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const
 void
 MovingBodies::choose_owners (const Geometry& geom, const BoxArray& grids, const DistributionMapping& dmap)
 {
+    BL_PROFILE("MovingBodies::choose_owners()");
     const BoxArray ba = amrex::convert(grids, IntVect::TheZeroVector());
     const Real dxy = static_cast<Real>(std::max(geom.CellSize(0), geom.CellSize(1)));
     // a body's footprint: the column of cells under its base, widened by its radius and two cells
@@ -513,6 +522,7 @@ MovingBodies::tip_cells_tolerance (const Geometry& geom)
 void
 MovingBodies::update_tip_cells (const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::update_tip_cells()");
     const auto& turbs = m_driver->turbines();
     const int nturb = static_cast<int>(turbs.size());
     // the region turbine i's tips sweep, as one row of erf_actuator::tip_cell_heights; on its owner
@@ -679,6 +689,8 @@ MovingBodies::check_whole_steps (double time) const
 void
 MovingBodies::read_checkpoint (const std::string& chkdir, double time)
 {
+    BL_PROFILE("MovingBodies::read_checkpoint()");
+    erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Startup);
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_restarting && !m_restored,
                                      "MovingBodies::read_checkpoint: only once, and only on a restart");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_ground_set,
@@ -850,6 +862,7 @@ MovingBodies::read_checkpoint (const std::string& chkdir, double time)
         for (const auto& b : m_in.bodies) { start_stamped.push_back(b.output_root + "_wake.csv"); }
         // the I/O rank trims every body's files (the output directory is shared); the owner rank of a turbine
         // or disk appends to its own files (and its wake lines') only after this barrier
+        BL_PROFILE("MovingBodies::read_checkpoint: trim the logs");
         for (const auto& f : end_stamped) { erf_actuator::trim_log_after(f, time, keep_end_rows, tol); }
         for (const auto& f : start_stamped) { erf_actuator::trim_log_after(f, time, false, tol); }
         ParallelDescriptor::Barrier();
@@ -914,6 +927,55 @@ MovingBodies::advance (int lev, double time, double dt,
                        const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom)
 {
     if (lev != anchor_level()) { return; }
+    BL_PROFILE("MovingBodies::advance()");
+    if (m_timing_from < 0) { m_timing_from = m_step + 1; }
+    {
+        erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::Advance);
+        advance_step(time, dt, cons, U, V, W, z_phys_nd, detJ_cc, geom);
+    }
+    // every rank counts the same steps, so every rank takes part in the summary's reductions
+    if (m_in.timing_int > 0 && m_step % m_in.timing_int == 0) { report_timing(); }
+}
+
+void
+MovingBodies::report_timing ()
+{
+    BL_PROFILE("MovingBodies::report_timing()");
+    using P = erf_actuator::PhaseTimers;
+    const int io = ParallelDescriptor::IOProcessorNumber();
+    std::array<double, P::NumPhases> mn = m_timers.seconds(), sum = m_timers.seconds(), mx = m_timers.seconds();
+    ParallelDescriptor::ReduceRealMin(mn.data(), P::NumPhases, io);
+    ParallelDescriptor::ReduceRealSum(sum.data(), P::NumPhases, io);
+    ParallelDescriptor::ReduceRealMax(mx.data(), P::NumPhases, io);
+    std::string text;
+    if (ParallelDescriptor::IOProcessor()) {
+        text = P::summary(m_timing_from, m_step, ParallelDescriptor::NProcs(), mn.data(), sum.data(), mx.data());
+    }
+#ifdef ERF_USE_OPENFAST
+    if (num_turbines() > 0) {
+        // each turbine's seconds from its owner, onto the I/O rank
+        const std::vector<Real> sec = turbine_table(1, true, [this] (int i, Real* row) {
+            row[0] = static_cast<Real>(m_driver->turbines()[i].step_seconds);
+        });
+        if (ParallelDescriptor::IOProcessor()) {
+            std::vector<std::string> names;
+            for (const auto& t : m_driver->turbines()) { names.push_back(t.name); }
+            text += P::turbine_summary(names, std::vector<double>(sec.begin(), sec.end()));
+        }
+        m_driver->reset_step_seconds();
+    }
+#endif
+    Print() << text;
+    m_timers.reset();
+    m_timing_from = m_step + 1;
+}
+
+void
+MovingBodies::advance_step (double time, double dt, const MultiFab& cons,
+                            const MultiFab& U, const MultiFab& V, const MultiFab& W,
+                            const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom)
+{
+    using P = erf_actuator::PhaseTimers;
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_ground_set && (!m_restarting || m_restored),
                                      "MovingBodies::advance: ERF calls set_ground() (and read_checkpoint() on a restart) first");
     // The OpenFAST substep count was fixed at init from the anchor level's step. ERF's clock is a
@@ -945,51 +1007,59 @@ MovingBodies::advance (int lev, double time, double dt,
 #endif
     ++m_step;
     const bool first = (m_step == 1);
-    // the bodies' points on the anchor level's grids: at the first step, and again after a regrid
-    if (first || m_audited_grids.empty() || U.boxArray() != m_audited_grids) {
-        check_coverage(U.boxArray(), z_phys_nd, geom);
-    }
-    // a disk's thrust is 1/2 air_density Ct U^2 A: the density must be ERF's at the disk, as for the turbines
-    // (checked at the first step of every run, a restarted one included)
-    if (!m_disk_density_checked && !m_disks.empty()) {
-        m_disk_density_checked = true;
-        std::vector<Real> centres, rho;
-        for (const auto& d : m_disks) { const auto c = d->center(); centres.insert(centres.end(), {c[0], c[1], c[2]}); }
-        erf_actuator::sample_cell_scalar(cons, Rho_comp, z_phys_nd, geom, centres, rho);
-        for (std::size_t k = 0; k < m_disks.size(); ++k) {
-            Real rho_in = 0.0;
-            for (const auto& b : m_in.bodies) { if (b.name == m_disks[k]->name()) { rho_in = b.air_density; } }
-            const Real rel = std::abs(rho_in - rho[k]) / rho[k];
-            if (rel > m_in.density_tolerance) {
-                Abort("erf.moving_bodies." + m_disks[k]->name() + ".air_density = " + std::to_string(rho_in) + " kg/m^3, but ERF's "
-                      "density at the disk centre is " + std::to_string(rho[k]) + " (" + std::to_string(100.0 * rel) + " % off, more "
-                      "than erf.moving_bodies.density_tolerance); the thrust put into the flow would not be the one asked for");
-            }
-            Print() << "  " << m_disks[k]->name() << ": ERF's density at the disk centre is " << rho[k] << " kg/m^3, air_density "
-                    << rho_in << "\n";
+    {
+        // the start-up and regrid checks: the coverage, the disks' density, the wake lines of a restart, the audits
+        erf_actuator::ScopedPhase timed(m_timers, P::Checks);
+        // the bodies' points on the anchor level's grids: at the first step, and again after a regrid
+        if (first || m_audited_grids.empty() || U.boxArray() != m_audited_grids) {
+            check_coverage(U.boxArray(), z_phys_nd, geom);
         }
-    }
-    // after a restart, the wake lines at once: a checkpoint written before their first sample would
-    // otherwise lose the running averages they took over
-    if (m_resumed && !m_wakes_built && m_in.wake.active() && !m_in.has_prescribed_velocity) {
-        build_wake_lines(U.boxArray(), z_phys_nd, geom);
+        // a disk's thrust is 1/2 air_density Ct U^2 A: the density must be ERF's at the disk, as for the turbines
+        // (checked at the first step of every run, a restarted one included)
+        if (!m_disk_density_checked && !m_disks.empty()) {
+            m_disk_density_checked = true;
+            std::vector<Real> centres, rho;
+            for (const auto& d : m_disks) { const auto c = d->center(); centres.insert(centres.end(), {c[0], c[1], c[2]}); }
+            erf_actuator::sample_cell_scalar(cons, Rho_comp, z_phys_nd, geom, centres, rho);
+            for (std::size_t k = 0; k < m_disks.size(); ++k) {
+                Real rho_in = 0.0;
+                for (const auto& b : m_in.bodies) { if (b.name == m_disks[k]->name()) { rho_in = b.air_density; } }
+                const Real rel = std::abs(rho_in - rho[k]) / rho[k];
+                if (rel > m_in.density_tolerance) {
+                    Abort("erf.moving_bodies." + m_disks[k]->name() + ".air_density = " + std::to_string(rho_in) + " kg/m^3, but ERF's "
+                          "density at the disk centre is " + std::to_string(rho[k]) + " (" + std::to_string(100.0 * rel) + " % off, more "
+                          "than erf.moving_bodies.density_tolerance); the thrust put into the flow would not be the one asked for");
+                }
+                Print() << "  " << m_disks[k]->name() << ": ERF's density at the disk centre is " << rho[k] << " kg/m^3, air_density "
+                        << rho_in << "\n";
+            }
+        }
+        // after a restart, the wake lines at once: a checkpoint written before their first sample would
+        // otherwise lose the running averages they took over
+        if (m_resumed && !m_wakes_built && m_in.wake.active() && !m_in.has_prescribed_velocity) {
+            build_wake_lines(U.boxArray(), z_phys_nd, geom);
+        }
+#ifdef ERF_USE_OPENFAST
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_driver->initialized(), "MovingBodies::advance: OpenFAST is not initialised (set_ground() initialises it on a fresh start)");
+        if (!m_audited_setup) { audit_turbines_setup(z_phys_nd, geom); }
+#endif
     }
 #ifdef ERF_USE_OPENFAST
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_driver->initialized(), "MovingBodies::advance: OpenFAST is not initialised (set_ground() initialises it on a fresh start)");
-    if (!m_audited_setup) { audit_turbines_setup(z_phys_nd, geom); }
     if (first && !m_driver->solved0()) {
         // first step: OpenFAST's first solution sees the initial flow at its nodes
-        supply_velocities(time, U, V, W, z_phys_nd, geom);
-        m_driver->solution0();
+        { erf_actuator::ScopedPhase timed(m_timers, P::Sample); supply_velocities(time, U, V, W, z_phys_nd, geom); }
+        { erf_actuator::ScopedPhase timed(m_timers, P::OpenFAST); m_driver->solution0(); }
+        erf_actuator::ScopedPhase timed(m_timers, P::Diagnostics);
         write_turbine_logs(time, true);
         write_total_load(time, true);
     }
 #endif
-    supply_velocities(time, U, V, W, z_phys_nd, geom);
+    { erf_actuator::ScopedPhase timed(m_timers, P::Sample); supply_velocities(time, U, V, W, z_phys_nd, geom); }
 #ifdef ERF_USE_OPENFAST
-    if (!m_audited_flow) { audit_turbines_flow(cons, z_phys_nd, geom); }
-    m_driver->step();
+    if (!m_audited_flow) { erf_actuator::ScopedPhase timed(m_timers, P::Checks); audit_turbines_flow(cons, z_phys_nd, geom); }
+    { erf_actuator::ScopedPhase timed(m_timers, P::OpenFAST); m_driver->step(); }
     if (first || m_step % m_in.diagnostics_int == 0) {
+        erf_actuator::ScopedPhase timed(m_timers, P::Diagnostics);
         write_turbine_logs(time + dt, false);
         write_fllc_diagnostics(time, first);
         write_correction_diagnostics(time, first);
@@ -1000,25 +1070,32 @@ MovingBodies::advance (int lev, double time, double dt,
     // OpenFAST step just taken (the turbines), so the source is fixed over the step ERF is
     // about to take
     if (any_forcing()) {
-        spread_sources(U, z_phys_nd, detJ_cc, geom);
+        { erf_actuator::ScopedPhase timed(m_timers, P::Spread); spread_sources(U, z_phys_nd, detJ_cc, geom); }
         if (first || m_step % m_in.diagnostics_int == 0) {
+            erf_actuator::ScopedPhase timed(m_timers, P::Diagnostics);
             write_source_diagnostics(time, detJ_cc, geom, first);
         }
     }
 #ifndef ERF_USE_OPENFAST
     amrex::ignore_unused(cons);
 #endif
-    if (time + dt >= m_in.avg_start) { accumulate_statistics(time + dt); }
+    if (time + dt >= m_in.avg_start) {
+        erf_actuator::ScopedPhase timed(m_timers, P::Statistics);
+        accumulate_statistics(time + dt);
+    }
     if (m_in.wake.active() && !m_in.has_prescribed_velocity && (first || m_step % m_in.wake.interval == 0)) {
+        erf_actuator::ScopedPhase timed(m_timers, P::Wake);
         write_wake_diagnostics(time, U, V, W, z_phys_nd, geom);
     }
     // the step's rows that go through the I/O rank (the farm totals, and every log in the farm format), in one reduction
+    erf_actuator::ScopedPhase timed(m_timers, P::Diagnostics);
     flush_logs();
 }
 
 void
 MovingBodies::accumulate_statistics (double time)
 {
+    BL_PROFILE("MovingBodies::accumulate_statistics()");
 #ifdef ERF_USE_OPENFAST
     const auto& turbs = m_driver->turbines();
     for (std::size_t i = 0; i < turbs.size(); ++i) {
@@ -1045,6 +1122,7 @@ MovingBodies::accumulate_statistics (double time)
 void
 MovingBodies::write_statistics ()
 {
+    BL_PROFILE("MovingBodies::write_statistics()");
     // body b of m_exchange: its statistics (a turbine's, then a disk's)
     const int nturb = num_turbines();
     const int nbody = nturb + static_cast<int>(m_disks.size());
@@ -1108,6 +1186,7 @@ MovingBodies::write_statistics ()
 void
 MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::build_wake_lines()");
     const auto& w = m_in.wake;
     // each vertical line stops at the terrain under its own centre (downstream, the ground may rise or fall)
     auto add = [&](const std::string& name, const std::string& root, const std::array<Real,3>& hub,
@@ -1207,6 +1286,7 @@ void
 MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                       const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::write_wake_diagnostics()");
     if (!m_wakes_built) { build_wake_lines(U.boxArray(), z_phys_nd, geom); }
     // each rotor's owner sends its lines' points to the ranks whose boxes hold them; the lines stand
     // still, so the envelope reaches two cells beyond them
@@ -1305,6 +1385,7 @@ MovingBodies::write_series (const std::string& log, const std::string& columns, 
 void
 MovingBodies::flush_logs ()
 {
+    BL_PROFILE("MovingBodies::flush_logs()");
     // the same parts, of the same sizes, on every rank: they were added under conditions every rank shares
     if (m_pending_logs.empty()) { return; }
     std::size_t total = 0;
@@ -1329,6 +1410,7 @@ MovingBodies::flush_logs ()
 void
 MovingBodies::write_total_load (double time, bool first)
 {
+    BL_PROFILE("MovingBodies::write_total_load()");
     const int nturb = num_turbines();
     const int ndisk = static_cast<int>(m_disks.size());
     // every turbine's load, torque and rotor speed (the torque and the rotor speed apart, so that the power
@@ -1377,6 +1459,7 @@ MovingBodies::write_total_load (double time, bool first)
 void
 MovingBodies::write_source_diagnostics (double time, const MultiFab* detJ_cc, const Geometry& geom, bool first)
 {
+    BL_PROFILE("MovingBodies::write_source_diagnostics()");
     const Real fx = erf_actuator::integrate_source(0, m_src_x, detJ_cc, geom);
     const Real fy = erf_actuator::integrate_source(1, m_src_y, detJ_cc, geom);
     const Real fz = erf_actuator::integrate_source(2, m_src_z, detJ_cc, geom);
@@ -1404,6 +1487,7 @@ void
 MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                               const MultiFab* detJ_cc, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::spread_sources()");
     const BoxArray ba = amrex::convert(U.boxArray(), IntVect(0,0,0));
     if (!m_src_defined || m_src_x.boxArray() != amrex::convert(ba, IntVect(1,0,0)) || m_src_x.DistributionMap() != U.DistributionMap()) {
         const DistributionMapping& dm = U.DistributionMap();
@@ -1412,9 +1496,12 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         m_src_z.define(amrex::convert(ba, IntVect(0,0,1)), dm, 1, 0);
         m_src_defined = true;
     }
-    m_src_x.setVal(0.0);
-    m_src_y.setVal(0.0);
-    m_src_z.setVal(0.0);
+    {
+        BL_PROFILE("MovingBodies::spread_sources: zero the source");
+        m_src_x.setVal(0.0);
+        m_src_y.setVal(0.0);
+        m_src_z.setVal(0.0);
+    }
     const Real dx0 = static_cast<Real>(geom.CellSize(0));
     // every body's points, forces and widths on its owner: the turbines', then the disks'
     const int nbody = m_exchange.num_bodies();
@@ -1508,7 +1595,9 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
 void
 MovingBodies::add_momentum_sources (int lev, MultiFab& xmom_src, MultiFab& ymom_src, MultiFab& zmom_src) const
 {
+    BL_PROFILE("MovingBodies::add_momentum_sources()");
     if (lev != anchor_level() || !m_src_defined) { return; }
+    erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::AddSources);
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(xmom_src.boxArray() == m_src_x.boxArray(),
                                      "MovingBodies: the momentum sources were built on a different grid than ERF's");
     MultiFab::Add(xmom_src, m_src_x, 0, 0, 1, 0);
@@ -1550,6 +1639,7 @@ void
 MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                  const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::supply_velocities()");
     amrex::ignore_unused(time);
     // every body's points on its owner, sampled on the ranks whose boxes hold them: a turbine's velocity
     // nodes (where its sampling mode puts them), a disk's upstream sampling points followed by its disk points
@@ -1641,6 +1731,8 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
 void
 MovingBodies::check_levels (int finest_level, const Vector<BoxArray>& grids, const Vector<Geometry>& geoms) const
 {
+    BL_PROFILE("MovingBodies::check_levels()");
+    erf_actuator::ScopedPhase timed(m_timers, erf_actuator::PhaseTimers::CheckLevels);
     if (m_anchor > finest_level) {
         Abort("erf.moving_bodies: the bodies live on level " + std::to_string(m_anchor) + ", but the run has levels 0 to " +
               std::to_string(finest_level) + " only now (did a regrid remove it?); the bodies would not be stepped");
@@ -1709,6 +1801,7 @@ MovingBodies::check_levels (int finest_level, const Vector<BoxArray>& grids, con
 void
 MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::check_coverage()");
     m_audited_grids = level_grids;
 #ifdef ERF_USE_OPENFAST
     // the cells under the rotors may have changed with the grids: the tip cell heights are searched again
@@ -1850,6 +1943,7 @@ MovingBodies::apply_disk_correction (int i, std::vector<Real>& uvw, const Geomet
 void
 MovingBodies::write_turbine_logs (double time, bool solution0)
 {
+    BL_PROFILE("MovingBodies::write_turbine_logs()");
     // every turbine's ERF-side and flow logs from its owner; the solution-0 row starts the files
     std::vector<int> all(num_turbines());
     for (int i = 0; i < num_turbines(); ++i) { all[i] = i; }
@@ -1862,6 +1956,7 @@ MovingBodies::write_turbine_logs (double time, bool solution0)
 void
 MovingBodies::write_correction_diagnostics (double time, bool first)
 {
+    BL_PROFILE("MovingBodies::write_correction_diagnostics()");
     std::vector<int> bodies;
     for (int i = 0; i < num_turbines(); ++i) {
         if (m_turbine_in[i].sampling == "disk_corrected") { bodies.push_back(i); }
@@ -1881,6 +1976,7 @@ MovingBodies::write_correction_diagnostics (double time, bool first)
 void
 MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::audit_turbines_setup()");
     m_audited_setup = true;
     const auto& turbs = m_driver->turbines();
     const int nturb = static_cast<int>(turbs.size());
@@ -1958,6 +2054,7 @@ MovingBodies::audit_turbines_setup (const MultiFab* z_phys_nd, const Geometry& g
 void
 MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::audit_turbines_flow()");
     m_audited_flow = true;
     const auto& turbs = m_driver->turbines();
     const int nturb = static_cast<int>(turbs.size());
@@ -2013,6 +2110,7 @@ Real span_of (const std::vector<Real>& pos, int nd, const std::array<Real,3>& hu
 void
 MovingBodies::build_fllc (const Geometry& geom)
 {
+    BL_PROFILE("MovingBodies::build_fllc()");
     const auto& turbs = m_driver->turbines();
     m_fllc.clear();
     m_fllc.resize(turbs.size());
@@ -2103,6 +2201,7 @@ MovingBodies::apply_fllc (int i, double time, std::vector<Real>& uvw)
 void
 MovingBodies::write_fllc_diagnostics (double time, bool first)
 {
+    BL_PROFILE("MovingBodies::write_fllc_diagnostics()");
     std::vector<int> bodies;
     for (int i = 0; i < num_turbines(); ++i) {
         if (m_turbine_in[i].fllc) { bodies.push_back(i); }

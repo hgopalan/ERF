@@ -2834,9 +2834,9 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | run aborts if they leave their envelope. For a turbine,  |                          |                          |
 |                                                        | the margin is tip radius + 2 dx. Hub drift below the     |                          |                          |
 |                                                        | margin minus the kernel reach (3 epsilon, using the      |                          |                          |
-|                                                        | largest epsilon) between envelope builds guarantees     |                          |                          |
-|                                                        | coverage. At a check, drift exceeding half the margin   |                          |                          |
-|                                                        | since the last build triggers a rebuild.                |                          |                          |
+|                                                        | largest epsilon) between envelope builds guarantees      |                          |                          |
+|                                                        | coverage. At a check, drift exceeding half the margin    |                          |                          |
+|                                                        | since the last build triggers a rebuild.                 |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
 |                                                        | one step (rotor speed times tip radius times the bodies' |                          |                          |
@@ -2852,6 +2852,13 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | after a regrid or when a rotor's box moves) against a    |                          |                          |
 |                                                        | fresh search of each rotor's box; the run aborts if they |                          |                          |
 |                                                        | differ                                                   |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.timing_int**                       | print, every this many steps of the anchor level, the    | Int >= 0                 | 0 (off)                  |
+|                                                        | wall-clock seconds each phase of the bodies took over    |                          |                          |
+|                                                        | those steps (minimum, mean and maximum over the ranks)   |                          |                          |
+|                                                        | and the OpenFAST step of the fastest and slowest         |                          |                          |
+|                                                        | turbine; 0 prints nothing. Any build; with it on, each   |                          |                          |
+|                                                        | timed phase waits for the GPU at its start and its end   |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 The diagnostics files are listed below; they are written every ``diagnostics_int`` steps. The

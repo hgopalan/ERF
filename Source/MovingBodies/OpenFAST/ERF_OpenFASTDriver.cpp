@@ -11,6 +11,7 @@
 #include <iomanip>
 
 #include <AMReX.H>
+#include <AMReX_BLProfiler.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 #include <AMReX_Utility.H>
@@ -87,6 +88,7 @@ check_tower_shadow_off (const std::string& fst_file)
 
 OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 {
+    BL_PROFILE("OpenFASTDriver::OpenFASTDriver()");
     // a farm shares a few models: each distinct model file (and check) is read once
     std::map<std::pair<std::string,bool>, std::string> induction;
     for (const MovingBodyInputs& b : bodies) {
@@ -203,6 +205,7 @@ OpenFASTDriver::finish_setup (TurbineState& t, double dt_cfd)
 void
 OpenFASTDriver::init (double dt_cfd, double t_max)
 {
+    BL_PROFILE("OpenFASTDriver::init()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::init called twice");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_owners_set, "OpenFASTDriver::init: set_owners() first");
     int err_stat = ErrID_None;
@@ -251,6 +254,7 @@ OpenFASTDriver::init (double dt_cfd, double t_max)
 void
 OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
 {
+    BL_PROFILE("OpenFASTDriver::restart()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::restart after init or restart");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_owners_set, "OpenFASTDriver::restart: set_owners() first");
     int err_stat = ErrID_None;
@@ -289,6 +293,7 @@ OpenFASTDriver::restart (const std::string& prefix, double dt_cfd, bool solved0)
 void
 OpenFASTDriver::create_checkpoint (const std::string& prefix) const
 {
+    BL_PROFILE("OpenFASTDriver::create_checkpoint()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_initialized, "OpenFASTDriver::create_checkpoint needs init() or restart() first");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
@@ -305,6 +310,7 @@ OpenFASTDriver::create_checkpoint (const std::string& prefix) const
 void
 OpenFASTDriver::solution0 ()
 {
+    BL_PROFILE("OpenFASTDriver::solution0()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_initialized && !m_solved0, "OpenFASTDriver::solution0 needs init() first and runs once");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
@@ -353,6 +359,7 @@ OpenFASTDriver::set_node_velocities (int i, const std::vector<Real>& uvw)
 void
 OpenFASTDriver::step ()
 {
+    BL_PROFILE("OpenFASTDriver::step()");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_solved0, "OpenFASTDriver::step before solution0");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
@@ -371,7 +378,9 @@ OpenFASTDriver::step ()
             // call and treat "Simulation completed" as the end it is (the loads would stay frozen)
             err_stat = ErrID_None;
             err_msg[0] = '\0';
+            const double t_start = ParallelDescriptor::second();
             FAST_CFD_Step(&t.tid_local, &err_stat, err_msg);
+            t.step_seconds += ParallelDescriptor::second() - t_start;
             if (err_stat == ErrID_Info && std::string(err_msg).find("completed") != std::string::npos) {
                 Abort("OpenFAST reports \"" + std::string(err_msg) + "\" for " + t.name + " at its time index " +
                       std::to_string(t.time_index) + ": it has reached the stop time it was started with and no longer steps");
@@ -383,6 +392,12 @@ OpenFASTDriver::step ()
     for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
         if (is_owner(i)) { pull_from_fast(m_turb[i]); }
     }
+}
+
+void
+OpenFASTDriver::reset_step_seconds ()
+{
+    for (auto& t : m_turb) { t.step_seconds = 0.0; }
 }
 
 // The turbines owned by this rank share OpenFAST's step counter, so they must run the same OpenFAST

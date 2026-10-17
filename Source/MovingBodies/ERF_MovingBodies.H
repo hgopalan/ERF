@@ -16,6 +16,7 @@
 #include "ERF_BodyMotion.H"
 #include "ERF_DiagnosticsLog.H"
 #include "ERF_MovingBodiesInputs.H"
+#include "ERF_PhaseTimers.H"
 #include "ERF_PrescribedCtDisk.H"
 #include "ERF_RunningStats.H"
 #include "ERF_WakeLines.H"
@@ -140,6 +141,19 @@ private:
     void start_bodies (double time);
     /** Abort unless the span from time to the stop time is a whole number of erf.fixed_dt steps. */
     void check_whole_steps (double time) const;
+
+    /** One step of advance() on the anchor level: sample, step the bodies, write the logs, spread the forces. */
+    void advance_step (double time, double dt, const amrex::MultiFab& cons,
+                       const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
+                       const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
+    /**
+     * Collective, every erf.moving_bodies.timing_int steps: print the seconds each phase took on the ranks
+     * since the last summary (minimum, mean and maximum over the ranks) and the OpenFAST step of the fastest,
+     * mean and slowest turbine, then start counting again.
+     */
+    void report_timing ();
+    mutable erf_actuator::PhaseTimers m_timers;   // also timed by the const write_checkpoint(), check_levels(), add_momentum_sources()
+    int m_timing_from{-1};                        //!< the first step of the next timing summary (-1: before the first step)
 
     /**
      * Sample (or prescribe) the flow at every body's velocity nodes and hand it to the bodies;

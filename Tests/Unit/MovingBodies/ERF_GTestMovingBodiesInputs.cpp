@@ -335,6 +335,19 @@ TEST(MovingBodiesInputs, TheEnvelopeCheckIntervalDefaultsToEveryStepAndMustBePos
     pp.add("envelope_check_interval", 1);
 }
 
+TEST(MovingBodiesInputs, TheTimingSummaryIsOffByDefaultAndItsIntervalMustNotBeNegative)
+{
+    set_turbine("Ttim", "adm", "");
+    EXPECT_EQ(MovingBodiesInputs::read().timing_int, 0);
+    amrex::ParmParse pp("erf.moving_bodies");
+    pp.add("timing_int", 10);
+    EXPECT_EQ(MovingBodiesInputs::read().timing_int, 10);
+    pp.add("timing_int", -1);
+    EXPECT_NE(erf_gtest::abort_message([] { MovingBodiesInputs::read(); }).find("erf.moving_bodies.timing_int must be >= 0"),
+              std::string::npos);
+    pp.add("timing_int", 0);
+}
+
 TEST(MovingBodiesInputs, TheDiagnosticsFormatDefaultsToPerTurbineAndMustBeKnown)
 {
     set_turbine("Tfmt", "adm", "");

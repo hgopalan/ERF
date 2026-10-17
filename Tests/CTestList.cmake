@@ -1655,6 +1655,12 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       "T1: owned by rank 1 .*STEP 1 ends")
   add_test_moving_bodies_owners(MovingBodies_Owners_Balanced OpenFAST_ADM_TwoTurbines 2 ""
       "T1: owned by rank 0 .*T2: owned by rank 1 .*STEP 1 ends")
+  # The timing summary (erf.moving_bodies.timing_int = 2) on two ranks, one turbine on each: every second step
+  # it must print each phase's minimum, mean and maximum over both ranks, the start-up in the first summary
+  # only (the second's first row is advance: the timers start again after each summary), and the OpenFAST
+  # step of the fastest and slowest of the two turbines (recorded: not zero), and the run must end normally
+  add_test_moving_bodies_owners(MovingBodies_TimingSummary OpenFAST_ADM_TwoTurbines 2 "max_step=4 erf.moving_bodies.timing_int=2"
+      "steps 1 to 2 [(]2 steps[)]: wall-clock seconds, min / mean / max over 2 ranks.*  startup .*  advance .*  openfast .*  spread .*OpenFAST step per turbine [(]2 turbines[)]: min [1-9][.][0-9]+e-[0-9]+ [(]T[12][)], mean [0-9.e+-]+, max [0-9.e+-]+ [(]T[12][)].*steps 3 to 4 [(]2 steps[)]: wall-clock seconds, min / mean / max over 2 ranks.  advance .*OpenFAST step per turbine [(]2 turbines[)]: min [1-9][.][0-9]+e-[0-9]+ .*STEP 4 ends")
   # three turbines (dt 0.01, 0.02, 0.01) on two ranks: balance alone would put the third on rank 1 with the
   # second; the time steps keep it on rank 0 with the first
   add_test_moving_bodies_owners(MovingBodies_MixedTimeSteps_TwoRanks OpenFAST_ADM_TwoTurbines 2
@@ -2697,6 +2703,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       "level 1, finer than the bodies' level 0" "erf.moving_bodies.anchor_level=0")
   add_test_abort(MovingBodies_FPETrapsRefused ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
       "OpenFAST is not floating-point-exception clean" "amrex.fpe_trap_invalid=1")
+  add_test_abort(MovingBodies_TimingIntNegative ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "erf[.]moving_bodies[.]timing_int must be >= 0" "erf.moving_bodies.timing_int=-1")
+  # without erf.moving_bodies.timing_int the run prints no timing summary in four steps (not an abort: the
+  # helper's pass and fail patterns serve a run that must end normally too)
+  add_test_abort(MovingBodies_NoTimingByDefault ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "STEP 4 ends" "max_step=4")
+  set_tests_properties(MovingBodies_NoTimingByDefault PROPERTIES FAIL_REGULAR_EXPRESSION "Moving bodies timing")
   add_test_abort(MovingBodies_CorrectionRelaxOutOfRange ${_mb_cases}/OpenFAST_ADM_DiskCorrected OpenFAST_ADM_DiskCorrected.i
       "T1[.]correction_relax must be -1" "erf.moving_bodies.T1.correction_relax=1.5")
   # the actuator-line cases pass the tip-travel limit; this one must not, and must name the step that would

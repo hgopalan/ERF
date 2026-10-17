@@ -782,4 +782,50 @@ plus the prescribed-Ct disks' ``-T n``), and
 ``<diagnostics_dir>/total_load.csv``, in a build with OpenFAST, the
 bodies' total load and power (see Farms).
 
+Timing
+------
+
+Every phase of the bodies' work is a ``BL_PROFILE`` region, so a build with
+``-DERF_ENABLE_TINY_PROFILE=ON`` lists its time at the end of the run, with
+the minimum, mean and maximum over the ranks; in other builds the regions cost
+nothing. Inside ``MovingBodies::advance()`` they cover the start-up and regrid
+checks (the coverage check, the audits, the disks' density check), the
+sampling (``MovingBodies::supply_velocities()``), the OpenFAST step
+(``OpenFASTDriver::step()``, every turbine's ``FAST_CFD_Step`` calls on its
+owner), the spreading (``MovingBodies::spread_sources()``, the zeroing of the
+source and the actuator lines' tip cells included), each diagnostics writer,
+the statistics and the wake lines (their set-up included). Inside the
+exchanges they cover the routing of the points to ranks, the envelope check,
+each message round (``BodyExchange::sample_velocity``: the points and the
+replies; ``BodyExchange::spread_forces``: the points, the partial norms and
+the scales) and the sampling and spreading kernels. Outside ``advance()`` they
+cover ``add_momentum_sources()``, ``check_levels()``, the checkpoint write
+and read (the trimming of the logs on a restart included) and the start-up:
+the constructor, ``set_ground()`` and the owner choice. A region that holds
+a collective (a message round, the gather of the logs, a reduction) includes
+the wait for the slowest rank, so a rank that finishes its own work early is
+charged for the others' in the next collective it joins.
+
+``erf.moving_bodies.timing_int`` = K (0, off, by default) also prints, in any
+build, at every anchor-level step that is a multiple of K (counted from the
+start of the first run, so across restarts too), the wall-clock seconds each
+phase took since the last summary, as the minimum, mean and maximum over the
+ranks (a rank that spent no time in a phase counts as zero in the mean), and
+the time of the fastest turbine's ``FAST_CFD_Step`` calls, the mean over the
+turbines and the slowest turbine's, by name (OpenFAST's first solution is in
+the ``openfast`` phase only). The phases are ``startup`` (the constructor,
+``set_ground()`` and ``read_checkpoint()``), ``advance`` and its parts
+(``checks``, ``sample``, ``openfast``, ``diagnostics``, ``spread``,
+``statistics``, ``wake``), then ``add_sources`` (every RK stage),
+``check_levels`` and ``checkpoint``. A phase no rank spent time in is left
+out. The start-up is counted in the first summary of a run, which after a
+restart at a step that is not a multiple of K covers fewer than K steps; the
+sources added in the RK stages of a summary's last step, and a checkpoint
+written after it, are counted in the next one, and what comes after the last
+summary of a run is not printed. Each summary costs three reductions of 12
+numbers and, with turbines, a reduction of one number per turbine to the I/O
+rank. With the summary on, every timed phase waits for the GPU when it starts
+and when it ends, so that it is charged for its own kernels only. The answers
+do not change either way.
+
 Inputs are listed in :ref:`sec:MovingBodiesInputs`.

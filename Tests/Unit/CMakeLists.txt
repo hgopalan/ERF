@@ -365,6 +365,11 @@ if(ERF_ENABLE_MOVING_BODIES)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestRunningStats.cpp
   )
+  # Motivation: the timing summary (erf.moving_bodies.timing_int) must charge a phase's time to that
+  # phase alone and only when it is on, and give each phase's minimum, mean and maximum over the ranks.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestPhaseTimers.cpp
+  )
 endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the

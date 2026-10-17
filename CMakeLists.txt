@@ -645,6 +645,17 @@ if(ERF_ENABLE_OPENFAST)
     set(CMAKE_PREFIX_PATH ${OPENFAST_DIR} ${CMAKE_PREFIX_PATH})
     find_package(OpenFAST REQUIRED COMPONENTS openfastlib)
     message(STATUS "Found OpenFAST: ${OpenFAST_INCLUDE_DIRS}")
+    # OpenFAST's modules are Fortran, some of them static libraries (libifwlib.a, ...): on Linux ERF's C++
+    # link must add the Fortran run-time (libgfortran, ...) itself, which the linker does not take from the
+    # shared libraries that need it ("DSO missing from command line"). BuildERFExe.cmake links it. The macOS
+    # linker takes it from libopenfastlib, and warns about every library named twice, so it is left out there.
+    if(NOT APPLE)
+      enable_language(Fortran)
+      set(ERF_OPENFAST_FORTRAN_LIBS ${CMAKE_Fortran_IMPLICIT_LINK_LIBRARIES})
+      list(REMOVE_DUPLICATES ERF_OPENFAST_FORTRAN_LIBS)
+      set(ERF_OPENFAST_FORTRAN_DIRS ${CMAKE_Fortran_IMPLICIT_LINK_DIRECTORIES})
+      message(STATUS "OpenFAST Fortran run-time: ${ERF_OPENFAST_FORTRAN_LIBS}")
+    endif()
     # ERF uses the OpenFAST 5 external-inflow API only (FAST_ExtInfw_*, unchanged since 4.0); version 3 named it
     # FAST_OpFM_* and is not supported
     # Look again on every configure, so a changed OpenFAST_DIR never keeps the old header
