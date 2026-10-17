@@ -158,8 +158,12 @@ struct ZBounds {
         if (has_table()) {
             kb = khi + 1;
             kt = klo - 1;
+            // a relative 1e-5 more each way: the caller's zl and zh are rounded sums (a point's height and
+            // its reach), and a face at a node level's own height h just past them still has weight
+            const amrex::Real slack = amrex::Real(1.0e-5) * std::max(std::abs(zl), std::max(std::abs(zh), zh - zl));
+            const amrex::Real lo = zl - slack, hi = zh + slack;
             for (std::size_t n = 0; n < has_cell.size(); ++n) {
-                if (has_cell[n] == 0 || node_lo[n] > zh || node_hi[n+1] < zl) { continue; }
+                if (has_cell[n] == 0 || node_lo[n] > hi || node_hi[n+1] < lo) { continue; }
                 const int k = k0 + static_cast<int>(n);
                 kb = std::min(kb, k);
                 kt = std::max(kt, k);
@@ -179,6 +183,9 @@ struct ZBounds {
  * component): a height Z lies in a cell k with floor((Z - ground_hi) / dz_hi) <= k <= floor((Z -
  * ground_lo) / dz_lo). Over every rank's boxes, the same on every rank (a collective), or with
  * over_all_ranks false over this rank's boxes only, which bounds the cells of those boxes alone.
+ * With over_all_ranks false and a box of this rank that does not reach the ground (a column split
+ * in z, a level aloft), where that formula does not hold, also the table of the boxes' node heights
+ * (ZBounds::has_table). The table is this rank's: points_covered_by takes the global bounds only.
  */
 ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& geom, bool over_all_ranks = true);
 

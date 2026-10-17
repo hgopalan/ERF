@@ -719,3 +719,53 @@ TEST(ActuatorSpreading, AColumnSplitInZGivesTheFullColumnsAnswerBitForBit)
     EXPECT_GT(nonzero, 0);
     EXPECT_LT(nonzero, faces);
 }
+
+// A rank that holds only boxes aloft (the upper half of every column here): the table has none of the lower
+// cells, so a kernel near the ground reaches none of its faces (an empty range, a zero partial norm) and one
+// aloft gives the partial norm of the full layout's upper cells, as without the table
+TEST(ActuatorSpreading, ARankHoldingOnlyBoxesAloftSkipsTheKernelsBelowThem)
+{
+    Mesh m;
+    m.hill = 60.0;
+    m.nz = 40;
+    m.H = 2000.0;
+    const amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(m.nx-1, m.ny-1, m.nz-1));
+    const amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)}, {AMREX_D_DECL(m.Lx, m.Ly, m.H)});
+    const amrex::Geometry geom(domain, &rb, 0, m.periodic.data());
+    const amrex::BoxArray ba(amrex::Box(amrex::IntVect(0, 0, m.nz / 2), amrex::IntVect(m.nx-1, m.ny-1, m.nz-1)));
+    const amrex::DistributionMapping dm(ba);
+    amrex::MultiFab znd(amrex::convert(ba, amrex::IntVect(1,1,1)), dm, 1, 1);
+    amrex::MultiFab detj(ba, dm, 1, 1);
+    amrex::MultiFab sx(amrex::convert(ba, amrex::IntVect(1,0,0)), dm, 1, 0);
+    for (amrex::MFIter mfi(detj, false); mfi.isValid(); ++mfi) {
+        auto za = znd.array(mfi);
+        auto ja = detj.array(mfi);
+        const amrex::Box gbx = amrex::grow(mfi.validbox(), 1);
+        amrex::LoopOnCpu(amrex::surroundingNodes(gbx), [&](int i, int j, int k) { za(i,j,k) = m.z_node(i, j, k); });
+        amrex::LoopOnCpu(gbx, [&](int i, int j, int k) { ja(i,j,k) = m.detj(i, j); (void) k; });
+    }
+    // the rank that holds the box (the others hold none: no table, and nothing to spread); every call
+    // below is this rank's alone (no collective)
+    if (dm[0] != amrex::ParallelDescriptor::MyProc()) { return; }
+    const erf_actuator::ZBounds zb = erf_actuator::mesh_z_bounds(znd, geom, false);
+    ASSERT_TRUE(zb.has_table());
+    for (int k = 0; k < m.nz; ++k) { EXPECT_EQ(zb.has_cell[k] != 0, k >= m.nz / 2) << "cell " << k; }
+    const Real eps = 1.5 * m.dx();
+    const Real x = 9.3 * m.dx(), y = 5.6 * m.dy();
+    int kb = 0, kt = 0;
+    zb.k_range(Real(150.0) - Real(3.0) * eps, Real(150.0) + Real(3.0) * eps, 0, m.nz - 1, kb, kt);
+    EXPECT_GT(kb, kt);
+    // the partial norms on this rank: none for the low point; for the high one, as without the table
+    const std::vector<Real> pos{x, y, Real(150.0), x, y, Real(1500.0)};
+    const std::vector<Real> epsv{eps, eps};
+    std::vector<Real> with, without;
+    erf_actuator::spread_partial_norms(pos, epsv, &znd, &detj, geom, sx, with, &zb);
+    const erf_actuator::ZBounds none{};
+    erf_actuator::spread_partial_norms(pos, epsv, &znd, &detj, geom, sx, without, &none);
+    for (int d = 0; d < 3; ++d) {
+        EXPECT_EQ(with[d], Real(0.0)) << "low point, dir " << d;
+        EXPECT_EQ(without[d], Real(0.0)) << "low point, dir " << d;
+        EXPECT_GT(with[3+d], Real(0.0)) << "high point, dir " << d;
+        EXPECT_EQ(with[3+d], without[3+d]) << "high point, dir " << d;
+    }
+}

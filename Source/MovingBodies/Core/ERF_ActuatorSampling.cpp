@@ -462,45 +462,35 @@ mesh_z_bounds (const MultiFab& z_phys_nd, const Geometry& geom, bool over_all_ra
         ParallelDescriptor::ReduceIntMin(all);
     }
     b.all_ground = (all != 0);
-    if (!over_all_ranks) {
-        // the table of this rank's boxes: each node level's lowest and highest height, and the cells they hold
+    if (!over_all_ranks && !b.all_ground) {
+        // the table of this rank's boxes, where some do not reach the ground: each node level's lowest and
+        // highest height (one pass over the boxes' nodes, a min and a max per level), and the cells they hold
         const Box& dom = geom.Domain();
         b.k0 = dom.smallEnd(2);
         const int nnode = dom.length(2) + 1;
-        b.node_lo.assign(nnode, big);
-        b.node_hi.assign(nnode, -big);
+        const Box dom_nodes = amrex::surroundingNodes(dom);
+        Gpu::DeviceVector<Real> lo(nnode, big), hi(nnode, -big);
+        Real* plo = lo.data();
+        Real* phi = hi.data();
+        const int k0 = b.k0;
         b.has_cell.assign(nnode - 1, 0);
         for (MFIter mfi(z_phys_nd, false); mfi.isValid(); ++mfi) {
             const Box nbx = mfi.validbox();
-            const int kb = nbx.smallEnd(2), nk = nbx.length(2);
-            const int ilo = nbx.smallEnd(0), ihi = nbx.bigEnd(0), jlo = nbx.smallEnd(1), jhi = nbx.bigEnd(1);
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dom_nodes.contains(nbx), "mesh_z_bounds: z_phys_nd's boxes must lie in geom's domain");
             Array4<Real const> const& znd = z_phys_nd.const_array(mfi);
-            Gpu::DeviceVector<Real> lo(nk), hi(nk);
-            Real* plo = lo.data();
-            Real* phi = hi.data();
-            // one thread per node level, over its nodes in a fixed order
-            ParallelFor(nk, [=] AMREX_GPU_DEVICE (int n) noexcept
+            ParallelFor(nbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
             {
-                const int k = kb + n;
-                Real l = big, h = -big;
-                for (int j = jlo; j <= jhi; ++j) {
-                    for (int i = ilo; i <= ihi; ++i) { l = amrex::min(l, znd(i,j,k)); h = amrex::max(h, znd(i,j,k)); }
-                }
-                plo[n] = l;
-                phi[n] = h;
+                Gpu::Atomic::Min(plo + (k - k0), znd(i,j,k));
+                Gpu::Atomic::Max(phi + (k - k0), znd(i,j,k));
             });
-            std::vector<Real> hlo(nk), hhi(nk);
-            Gpu::copyAsync(Gpu::deviceToHost, lo.begin(), lo.end(), hlo.begin());
-            Gpu::copyAsync(Gpu::deviceToHost, hi.begin(), hi.end(), hhi.begin());
-            Gpu::streamSynchronize();
-            for (int n = 0; n < nk; ++n) {
-                const int at = kb + n - b.k0;
-                b.node_lo[at] = std::min(b.node_lo[at], hlo[n]);
-                b.node_hi[at] = std::max(b.node_hi[at], hhi[n]);
-            }
             // the box's cells: between its lowest and highest node levels
-            for (int k = kb; k < kb + nk - 1; ++k) { b.has_cell[k - b.k0] = 1; }
+            for (int k = nbx.smallEnd(2); k < nbx.bigEnd(2); ++k) { b.has_cell[k - b.k0] = 1; }
         }
+        b.node_lo.resize(nnode);
+        b.node_hi.resize(nnode);
+        Gpu::copyAsync(Gpu::deviceToHost, lo.begin(), lo.end(), b.node_lo.begin());
+        Gpu::copyAsync(Gpu::deviceToHost, hi.begin(), hi.end(), b.node_hi.begin());
+        Gpu::streamSynchronize();
     }
     return b;
 }
@@ -851,7 +841,9 @@ points_covered_by (const CoverageGrids& grids, const Geometry& geom, const std::
                 if (zb == nullptr) {
                     ranges[d].push_back({{dlo, dhi}});
                 } else {
-                    // every cell a height within reach may lie in, whatever column it is in
+                    // every cell a height within reach may lie in, whatever column it is in (the global
+                    // bounds: a rank's own table would make the answer depend on the rank)
+                    AMREX_ASSERT(!zb->has_table());
                     int kb = dlo, kt = dhi;
                     zb->k_range(pos[3*p+2] - reach, pos[3*p+2] + reach, dlo, dhi, kb, kt);
                     ranges[d].push_back({{std::max(kb, dlo), std::min(kt, dhi)}});

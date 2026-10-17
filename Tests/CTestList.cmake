@@ -1576,6 +1576,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # ridge top is a mesh node, so the height is exactly 100); the plotfile gold and fx == -thrust_x
   # exercise the sampler and the spreader on the fitted mesh. Box parity splits the ridge.
   add_test_openfast_adm(OpenFAST_ADM_Terrain OpenFAST_ADM_Terrain "plt00010" "moving_bodies/ground.csv")
+  # The ridge case with every column split in z (amr.no_box_split_dir = -1, three boxes up each column, the
+  # implicit vertical diffusion off, which ERF requires for that and this deck does not use) on two ranks: the
+  # spreading bounds its kernels by each rank's table of node heights; the run must end normally. (A plotfile
+  # twin of the unsplit run is not possible: ERF's flow itself differs between the two layouts.)
+  add_test_moving_bodies_owners(MovingBodies_Terrain_ColumnsSplitInZ OpenFAST_ADM_Terrain 2
+      "amr.no_box_split_dir=-1 amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=4 erf.implicit_thermal_diffusion=0 erf.implicit_momentum_diffusion=0 max_step=4"
+      "STEP 4 ends")
   add_test_box_parity(OpenFASTADM_Terrain_BoxParity OpenFAST_ADM_Terrain "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"

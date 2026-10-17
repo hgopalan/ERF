@@ -1931,8 +1931,8 @@ MovingBodies::check_coverage (const BoxArray& level_grids, const MultiFab* z_phy
     erf_actuator::ZBounds zb;
     if (z_phys_nd != nullptr) { zb = erf_actuator::mesh_z_bounds(*z_phys_nd, geom); }
     const bool fitted = (z_phys_nd != nullptr);
-    // a level with a box that does not reach the ground has no height bounds: the whole column, as
-    // the spreading takes it
+    // a level with a box that does not reach the ground has no global height bounds: the whole column
+    // (the spreading bounds each rank's own boxes by their table instead)
     const erf_actuator::ZBounds* zbp = (fitted && zb.all_ground) ? &zb : nullptr;
     const Real dx0 = static_cast<Real>(geom.CellSize(0));
     // the level's boxes as the coverage tests take them, built once for every body
