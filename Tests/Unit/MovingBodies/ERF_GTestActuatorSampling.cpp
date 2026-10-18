@@ -976,3 +976,50 @@ TEST(ActuatorSampling, APointJustAboveSlopingGroundIsSampled)
     EXPECT_GT(below_face, 50) << "the slope must put points below their cell's bottom face";
     f.check(pos, tol);
 }
+
+// The table of one rank's node heights (mesh_z_bounds over this rank's boxes): the cells it gives for a
+// range of heights hold every cell of those boxes whose corners reach into the range, over terrain on a
+// stretched mesh with each column split in z, and none outside the boxes' cells; above the mesh, none.
+TEST(ActuatorSampling, TheHeightTableHoldsEveryCellAHeightMayLieIn)
+{
+    MeshSpec m;
+    m.stretch = 1.15;
+    m.hill = 100.0;
+    m.max_grid = {{4, 5, 3}};
+    Fields f(m, false);
+    const erf_actuator::ZBounds zb = erf_actuator::mesh_z_bounds(*f.znd, f.geom, false);
+    ASSERT_TRUE(zb.has_table());
+    const int klo = 0, khi = m.nz - 1;
+    int checked = 0;
+    for (int a = 0; a < 40; ++a) {
+        const Real zl = m.H * Real(a) / Real(41);
+        for (const Real span : {Real(1.0), Real(20.0), Real(90.0)}) {
+            const Real zh = zl + span;
+            int kb = 0, kt = 0;
+            zb.k_range(zl, zh, klo, khi, kb, kt);
+            // every cell of this rank's boxes with a corner height in [zl, zh] or spanning it
+            for (amrex::MFIter mfi(*f.znd, false); mfi.isValid(); ++mfi) {
+                const amrex::Box cells = amrex::enclosedCells(mfi.validbox());
+                const auto z = f.znd->const_array(mfi);
+                amrex::LoopOnCpu(cells, [&](int i, int j, int k) {
+                    Real lo = std::numeric_limits<Real>::max(), hi = std::numeric_limits<Real>::lowest();
+                    for (int c = 0; c < 8; ++c) {
+                        const Real zc = z(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1));
+                        lo = std::min(lo, zc); hi = std::max(hi, zc);
+                    }
+                    if (lo <= zh && hi >= zl) {
+                        ++checked;
+                        EXPECT_TRUE(k >= kb && k <= kt) << "cell k " << k << " for heights " << zl << " .. " << zh
+                                                        << " outside [" << kb << ", " << kt << "]";
+                    }
+                });
+            }
+            if (kb <= kt) { EXPECT_TRUE(kb >= klo && kt <= khi); }
+        }
+    }
+    EXPECT_GT(checked, 100);
+    // above the mesh's top: no cell
+    int kb = 0, kt = 0;
+    zb.k_range(m.H + Real(10.0), m.H + Real(50.0), klo, khi, kb, kt);
+    EXPECT_GT(kb, kt);
+}

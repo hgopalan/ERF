@@ -127,22 +127,49 @@ void terrain_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& g
  */
 enum class CoverZ { Reach, Footprint, Column };
 
-/** The lowest and highest ground and the smallest and largest spacing of the levels (m) of a mesh. */
+/**
+ * The lowest and highest ground and the smallest and largest spacing of the levels (m) of a mesh,
+ * and, over one rank's boxes (mesh_z_bounds with over_all_ranks false), a table of each node level's
+ * lowest and highest height and of the cells those boxes hold, which bounds the cells a height may
+ * lie in whether or not the boxes reach the ground (a column split in z, a level aloft).
+ */
 struct ZBounds {
     amrex::Real ground_lo{0.0}, ground_hi{0.0}, dz_lo{0.0}, dz_hi{0.0};
     bool all_ground{true};   //!< every box of the level reaches the ground (else the bounds hold for those that do)
+    int k0{0};                                  //!< the node level of node_lo[0] and the cell of has_cell[0]
+    std::vector<amrex::Real> node_lo, node_hi;  //!< node level k0 + n: the lowest and highest height (empty: no table)
+    std::vector<char> has_cell;                 //!< cell k0 + n is in one of the boxes
 
     /** Whether the level's grids reach the ground (a refined level aloft does not, and has no bounds). */
     bool has_ground () const { return ground_lo <= ground_hi && dz_lo > amrex::Real(0.0); }
+    /** Whether the bounds come with the table of node heights (the bounds of one rank's boxes). */
+    bool has_table () const { return !has_cell.empty(); }
 
     /**
      * The cells k that heights from zl to zh may lie in, whatever the column: [kb, kt], clamped to
      * [klo - 1, khi + 1] (so a range outside the domain stays outside it); [klo, khi] without bounds.
+     * With the table: exactly the boxes' cells k whose lowest bottom node is not above zh and whose
+     * highest top node is not below zl, or kb > kt when there is none.
      */
     void k_range (amrex::Real zl, amrex::Real zh, int klo, int khi, int& kb, int& kt) const
     {
         kb = klo;
         kt = khi;
+        if (has_table()) {
+            kb = khi + 1;
+            kt = klo - 1;
+            // a relative 1e-5 more each way: the caller's zl and zh are rounded sums (a point's height and
+            // its reach), and a face at a node level's own height h just past them still has weight
+            const amrex::Real slack = amrex::Real(1.0e-5) * std::max(std::abs(zl), std::max(std::abs(zh), zh - zl));
+            const amrex::Real lo = zl - slack, hi = zh + slack;
+            for (std::size_t n = 0; n < has_cell.size(); ++n) {
+                if (has_cell[n] == 0 || node_lo[n] > hi || node_hi[n+1] < lo) { continue; }
+                const int k = k0 + static_cast<int>(n);
+                kb = std::min(kb, k);
+                kt = std::max(kt, k);
+            }
+            return;
+        }
         if (!has_ground()) { return; }
         const double b = std::floor((static_cast<double>(zl) - ground_hi) / dz_hi);
         const double t = std::floor((static_cast<double>(zh) - ground_lo) / dz_lo);
@@ -156,6 +183,9 @@ struct ZBounds {
  * component): a height Z lies in a cell k with floor((Z - ground_hi) / dz_hi) <= k <= floor((Z -
  * ground_lo) / dz_lo). Over every rank's boxes, the same on every rank (a collective), or with
  * over_all_ranks false over this rank's boxes only, which bounds the cells of those boxes alone.
+ * With over_all_ranks false and a box of this rank that does not reach the ground (a column split
+ * in z, a level aloft), where that formula does not hold, also the table of the boxes' node heights
+ * (ZBounds::has_table). The table is this rank's: points_covered_by takes the global bounds only.
  */
 ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& geom, bool over_all_ranks = true);
 

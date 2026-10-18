@@ -142,17 +142,34 @@ struct KernelFaces
         }
         has_znd = (z_phys_nd != nullptr);
         has_detj = (detJ_cc != nullptr);
-        // over this rank's boxes only: the faces this rank visits are in them, so their bounds hold
-        // (bounds from the boxes that reach the ground do not hold for a box aloft over higher ground)
+        // over this rank's boxes only: the faces this rank visits are in them, so their bounds hold. With the
+        // table of its node heights they hold for any box (one aloft, a column split in z); without it the
+        // bounds from the boxes that reach the ground do not hold for a box aloft over higher ground
         if (has_znd) { zb = (zb_local != nullptr) ? *zb_local : mesh_z_bounds(*z_phys_nd, geom, false); }
-        if (!zb.all_ground) { zb = ZBounds{}; }
+        if (!zb.all_ground && !zb.has_table()) { zb = ZBounds{}; }
     }
 
     // The index box of the faces of grid dir within reach of a point at (px,py,pz); with z_phys_nd
     // (terrain-following or stretched) a face's height is not its index times dz, so the box takes
-    // every k a height within reach may lie in, from the mesh's bounds (all of them for a level
-    // aloft), and kernel_weight's cut-off at 3 eps, measured in physical heights, picks the faces
+    // every k a height within reach may lie in, from the mesh's bounds (with the table of the rank's node
+    // heights where its boxes do not all reach the ground), and kernel_weight's cut-off at 3 eps, measured
+    // in physical heights, picks the faces
     Box reach_box (int dir, Real px, Real py, Real pz, Real eps) const
+    {
+        int kb = dlo[2], kt = dhi[2];
+        if (has_znd) { zb.k_range(pz - Real(3.0) * eps, pz + Real(3.0) * eps, dlo[2], dhi[2], kb, kt); }
+        return reach_box_k(dir, px, py, pz, eps, kb, kt);
+    }
+    // The same for the three face grids, the cells in z found once
+    std::array<Box,3> reach_boxes (Real px, Real py, Real pz, Real eps) const
+    {
+        int kb = dlo[2], kt = dhi[2];
+        if (has_znd) { zb.k_range(pz - Real(3.0) * eps, pz + Real(3.0) * eps, dlo[2], dhi[2], kb, kt); }
+        return {{reach_box_k(0, px, py, pz, eps, kb, kt), reach_box_k(1, px, py, pz, eps, kb, kt),
+                 reach_box_k(2, px, py, pz, eps, kb, kt)}};
+    }
+    // reach_box with the cells [kb, kt] a height within reach may lie in (used with z_phys_nd only)
+    Box reach_box_k (int dir, Real px, Real py, Real pz, Real eps, int kb, int kt) const
     {
         const Real pc[3] = {px, py, pz};
         IntVect lo, hi;
@@ -163,8 +180,12 @@ struct KernelFaces
             hi[d] = static_cast<int>(std::floor(fi)) + reach_cells + 1;
         }
         if (has_znd) {
-            int kb = dlo[2], kt = dhi[2];
-            zb.k_range(pz - Real(3.0) * eps, pz + Real(3.0) * eps, dlo[2], dhi[2], kb, kt);
+            if (kb > kt) {
+                // none of this rank's cells holds a height within reach: no face of its boxes is
+                lo[2] = dhi[2] + 2;
+                hi[2] = dhi[2] + 1;
+                return Box(lo, hi, IntVect::TheDimensionVector(dir));
+            }
             // the faces bounding those cells, one more each way for the faces of a cell's neighbours
             lo[2] = std::max(kb - 1, dlo[2]);
             hi[2] = std::min(kt + 2, dhi[2] + 1);
@@ -211,9 +232,7 @@ struct KernelImages
             kf.point_images(ppos[3*p], ppos[3*p+1], ppos[3*p+2], epsilon[p], pos);
             point.resize(pos.size(), p);
             for (std::size_t m = first; m < pos.size(); ++m) {
-                reach.push_back({{kf.reach_box(0, pos[m][0], pos[m][1], pos[m][2], epsilon[p]),
-                                  kf.reach_box(1, pos[m][0], pos[m][1], pos[m][2], epsilon[p]),
-                                  kf.reach_box(2, pos[m][0], pos[m][1], pos[m][2], epsilon[p])}});
+                reach.push_back(kf.reach_boxes(pos[m][0], pos[m][1], pos[m][2], epsilon[p]));
             }
         }
         buf.image_pos.host.clear();
