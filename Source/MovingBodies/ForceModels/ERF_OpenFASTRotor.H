@@ -169,13 +169,24 @@ amrex::Real tip_cells_per_step (const erf_openfast::TurbineState& t, amrex::Real
  * The forces produced are the forces ON THE FLUID: the negative of OpenFAST's, which are on
  * the structure.
  *
+ * With merged (erf.moving_bodies.<name>.adm_spreading = merged_rings) the blades' nodes at the
+ * same radial station share one ring instead of one ring each: at the blades' mean radius and
+ * mean distance along the shaft, carrying the sum of their axial, radial and tangential forces
+ * (added in blade order). The blades' rings are at the same angles and, on a rigid rotor, at the
+ * same radii, so the shared ring spreads the same source to rounding (spreading is linear in the
+ * forces) with a third of the points of a three-bladed rotor; deflected blades' rings differ by
+ * their deflections, which the mean takes over (a change of the source of about (da / eps)^2 near
+ * the tip for blades whose deflections differ by da). The force along the shaft is kept exactly,
+ * and the torque exactly when the blades' radii agree.
+ *
  * @param[in] t the turbine after a step (positions, forces, hub position and axis)
  * @param[in] num_points_t points per ring
  * @param[out] pos 3*n ring point positions (m), appended
  * @param[out] force 3*n forces on the fluid (N), appended
+ * @param[in] merged one ring per radial station for all the blades (else one per blade node)
  */
 void adm_rings (const erf_openfast::TurbineState& t, int num_points_t,
-                std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force);
+                std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force, bool merged = false);
 
 /**
  * Every point a forcing turbine puts into the flow, appended with the kernel width each is spread
@@ -186,10 +197,12 @@ void adm_rings (const erf_openfast::TurbineState& t, int num_points_t,
  * @param[in] mode adm or alm
  * @param[out] pos,force 3*n positions (m) and forces on the fluid (N), appended
  * @param[out] eps n kernel widths (m), appended
+ * @param[in] merged_rings mode adm: the blades' rings merged (adm_rings)
+ * @return the number of the rotor's points appended (rings or line, with the hub point)
  */
-void turbine_points (const erf_openfast::TurbineState& t, const std::string& mode, int num_points_t, bool nacelle,
+int turbine_points (const erf_openfast::TurbineState& t, const std::string& mode, int num_points_t, bool nacelle,
                      const KernelWidths& w, std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force,
-                     std::vector<amrex::Real>& eps);
+                     std::vector<amrex::Real>& eps, bool merged_rings = false);
 
 /**
  * Check that the blade force nodes lie close to the rotor plane of the hub axis: the largest

@@ -492,8 +492,11 @@ endfunction(add_test_box_parity)
 # "turning this output on does not change the answer": OFF_OPTIONS and ON_OPTIONS are the
 # two option sets, COMMON_OPTIONS go to both, and REQUIRE_ON_FILE names a file the on leg
 # must write and the off leg must not, so a misspelled option cannot pass as agreement.
+# ON_LOG_REGEX does the same through the legs' simulation.log (and OFF_LOG_REGEX must match the off
+# leg's only), and FCOMPARE_RTOL and FCOMPARE_ATOL replace the zero tolerances for an option that
+# changes only the order of a sum.
 function(add_test_option_parity TEST_NAME TEST_FILES_DIR PLTFILE)
-    set(oneValueArgs "COMMON_OPTIONS" "OFF_OPTIONS" "ON_OPTIONS" "REQUIRE_ON_FILE" "RUN_TIMEOUT")
+    set(oneValueArgs "COMMON_OPTIONS" "OFF_OPTIONS" "ON_OPTIONS" "REQUIRE_ON_FILE" "RUN_TIMEOUT" "ON_LOG_REGEX" "OFF_LOG_REGEX" "FCOMPARE_RTOL" "FCOMPARE_ATOL")
     cmake_parse_arguments(ADD_TEST_OP "" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -521,6 +524,10 @@ function(add_test_option_parity TEST_NAME TEST_FILES_DIR PLTFILE)
         "-DOFF_OPTIONS=${ADD_TEST_OP_OFF_OPTIONS}"
         "-DON_OPTIONS=${ADD_TEST_OP_ON_OPTIONS}"
         "-DREQUIRE_ON_FILE=${ADD_TEST_OP_REQUIRE_ON_FILE}"
+        "-DON_LOG_REGEX=${ADD_TEST_OP_ON_LOG_REGEX}"
+        "-DOFF_LOG_REGEX=${ADD_TEST_OP_OFF_LOG_REGEX}"
+        "-DRTOL=${ADD_TEST_OP_FCOMPARE_RTOL}"
+        "-DATOL=${ADD_TEST_OP_FCOMPARE_ATOL}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunOptionParity.cmake)
     set_tests_properties(${TEST_NAME}
         PROPERTIES
@@ -1519,6 +1526,18 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 
+  # The same disk with adm_spreading = merged_rings: one ring per radial station for the three blades instead
+  # of one per blade node. The stub rotor is rigid, so the blades' rings coincide and the merged ring carries
+  # their summed force: the plotfile must match the per-blade rings' to rounding (the sum is taken in another
+  # order), and the start-up line must count the 20 rings it built, against 60 for the per-blade rings.
+  add_test_option_parity(OpenFAST_ADM_MergedRings OpenFAST_ADM_Uniform "plt00010"
+      COMMON_OPTIONS "erf.moving_bodies.T1.fst_file=../stub_turbine.fst"
+      ON_OPTIONS "erf.moving_bodies.T1.adm_spreading=merged_rings"
+      ON_LOG_REGEX "T1: hub axis .*, 20 rings of 16 points, one per radial station for all the blades"
+      OFF_LOG_REGEX "T1: hub axis .*, 60 rings of 16 points"
+      FCOMPARE_RTOL "1.0e-12" FCOMPARE_ATOL "1.0e-12")
+  set_property(TEST OpenFAST_ADM_MergedRings APPEND PROPERTY LABELS "moving-bodies")
+
   # The same disk with sampling = upstream: the node velocities come from one diameter ahead of the
   # hub (the free stream, where OpenFAST's own induction model applies) instead of from the disk.
   # The shifted sampling points must be covered like the nodes, and the rings and spreading are
@@ -1994,6 +2013,9 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   add_test_restart_abort(MovingBodies_Restart_ChangedBodyKey OpenFAST_ADM_Restart 5
       "T1[.]num_points_t changed on restart"
       RESTART_OPTIONS "erf.moving_bodies.T1.num_points_t=24")
+  add_test_restart_abort(MovingBodies_Restart_ChangedAdmSpreading OpenFAST_ADM_Restart 5
+      "T1[.]adm_spreading changed on restart [(]rings in the "
+      RESTART_OPTIONS "erf.moving_bodies.T1.adm_spreading=merged_rings")
   add_test_restart_abort(MovingBodies_Restart_ChangedStep OpenFAST_ADM_Restart 5
       "the checkpoint's bodies stepped 0[.]5"
       RESTART_OPTIONS "erf.fixed_dt=0.25 max_step=20")
@@ -2892,6 +2914,8 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   set(_mb_cases ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies)
   add_test_abort(MovingBodies_AnchorLevelAboveFinest ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
       "anchor_level = 1 is not a level of this run" "erf.moving_bodies.anchor_level=1")
+  add_test_abort(MovingBodies_AdmSpreadingUnknown ${_mb_cases}/OpenFAST_ADM_Restart OpenFAST_ADM_Restart.i
+      "T1[.]adm_spreading must be rings or merged_rings, not 'merged'" "erf.moving_bodies.T1.adm_spreading=merged")
   # two turbines whose OpenFAST models step with different dt on one rank, which steps them together
   add_test_abort(MovingBodies_MixedTimeSteps_OneRank ${_mb_cases}/OpenFAST_ADM_TwoTurbines OpenFAST_ADM_TwoTurbines.i
       "use different time steps [(]25 vs 50 substeps per ERF step[)]" "erf.moving_bodies.T2.fst_file=stub_turbine_dt002.fst")

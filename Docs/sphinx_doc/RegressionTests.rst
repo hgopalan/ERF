@@ -662,7 +662,12 @@ momentum source in ``moving_bodies/momentum_source.csv`` equals minus the
 thrust in ``T1_erf.csv``, since the rings preserve the rotor force and the
 spreading is normalised exactly. ``OpenFASTADM_BoxParity`` runs the same deck
 in one box and split unevenly in x and y and requires the plotfiles and the
-flow logs to agree.
+flow logs to agree. ``OpenFAST_ADM_MergedRings`` (``Tests/RunOptionParity.cmake``)
+runs the same deck with ``adm_spreading = rings`` and ``merged_rings``. The stub
+rotor is rigid, so the plotfiles must agree to a relative and absolute
+tolerance of :math:`10^{-12}` (the forces are summed in another order), and the
+second run's log must count 20 rings, one per radial station, where the first builds 60. ``MovingBodies_AdmSpreadingUnknown``
+gives the key an unknown value and requires the run to stop naming it.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`_
 
@@ -961,9 +966,9 @@ writes the checkpoint goes on to step 10 (``OVERRUN``), so its logs already
 hold rows past the checkpoint, which the restart must drop; every OpenFAST
 restart-parity test runs this way.
 
-``MovingBodies_Restart_ChangedBodyKey``, ``_ChangedStep``, ``_LaterStopTime``
+``MovingBodies_Restart_ChangedBodyKey``, ``_ChangedAdmSpreading``, ``_ChangedStep``, ``_LaterStopTime``
 and ``_AddedBody`` (``Tests/RunRestartAbort.cmake``) restart the same
-checkpoint with one change each (a body's ``num_points_t``, ``erf.fixed_dt``,
+checkpoint with one change each (a body's ``num_points_t``, its ``adm_spreading``, ``erf.fixed_dt``,
 a stop time past the one OpenFAST was started with, a second body) and require
 the restart to stop with a message naming it. ``MovingBodies_Restart_MalformedStatsOnRank1``
 and ``_MalformedWakeOnRank1`` write the checkpoint on two ranks with the turbine

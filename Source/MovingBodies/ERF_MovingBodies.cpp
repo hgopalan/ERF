@@ -1649,6 +1649,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         }
         for (int i = 0; i < nturb; ++i) {
             if (m_turbine_mode[i] == "none" || !m_driver->is_owner(i)) { continue; }
+            double axis_deg = 0.0;
             if (!m_axis_checked) {
                 const Real s = erf_actuator::max_out_of_plane_sine(turbs[i]);
                 const double deg = std::asin(std::min(s, Real(1.0))) * 180.0 / 3.14159265358979323846;
@@ -1657,17 +1658,7 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                           std::to_string(deg) +
                           " degrees out of the plane normal to the hub axis; the hub orientation convention does not match this OpenFAST");
                 }
-                const auto& n = turbs[i].hub_axis;
-                std::ostringstream line;
-                line << "erf.moving_bodies." << turbs[i].name << ": hub axis (" << n[0] << ", " << n[1] << ", " << n[2]
-                     << "), blade force nodes within " << deg << " degrees of the rotor plane, ";
-                if (m_turbine_mode[i] == "adm") {
-                    line << m_turbine_points_t[i] << " points per ring\n";
-                } else {
-                    line << "actuator line of " << turbs[i].num_blades * turbs[i].num_force_pts_blade
-                         << " blade points, tip radius " << erf_actuator::tip_radius(turbs[i]) << " m\n";
-                }
-                AllPrint() << line.str();
+                axis_deg = deg;
             }
             if (m_turbine_mode[i] == "alm") {
                 // the line's force must not jump over cells between two steps: the tip, the
@@ -1689,8 +1680,24 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
             // the rotor's points, the tower's loads (OpenFAST's tower force nodes, if the model has
             // them and the user asked for them) and the nacelle drag point at the hub, in either
             // mode, each with its own kernel
-            erf_actuator::turbine_points(turbs[i], m_turbine_mode[i], m_turbine_points_t[i], m_turbine_in[i].nacelle_cd > 0.0,
-                                         m_turbine_in[i].kernel_widths(dx0), pos[i], force[i], widths[i]);
+            const int n_rotor = erf_actuator::turbine_points(turbs[i], m_turbine_mode[i], m_turbine_points_t[i],
+                                                             m_turbine_in[i].nacelle_cd > 0.0, m_turbine_in[i].kernel_widths(dx0),
+                                                             pos[i], force[i], widths[i], m_turbine_in[i].adm_spreading == "merged_rings");
+            if (!m_axis_checked) {
+                // the rings counted from the points built, so the line shows the layout in use
+                const auto& n = turbs[i].hub_axis;
+                std::ostringstream line;
+                line << "erf.moving_bodies." << turbs[i].name << ": hub axis (" << n[0] << ", " << n[1] << ", " << n[2]
+                     << "), blade force nodes within " << axis_deg << " degrees of the rotor plane, ";
+                if (m_turbine_mode[i] == "adm") {
+                    line << std::max(n_rotor - 1, 0) / m_turbine_points_t[i] << " rings of " << m_turbine_points_t[i] << " points"
+                         << ((m_turbine_in[i].adm_spreading == "merged_rings") ? ", one per radial station for all the blades\n" : "\n");
+                } else {
+                    line << "actuator line of " << turbs[i].num_blades * turbs[i].num_force_pts_blade
+                         << " blade points, tip radius " << erf_actuator::tip_radius(turbs[i]) << " m\n";
+                }
+                AllPrint() << line.str();
+            }
             margin[i] = exchange_margin(i, geom);
         }
         m_axis_checked = true;

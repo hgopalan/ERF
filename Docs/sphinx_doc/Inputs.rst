@@ -2779,6 +2779,14 @@ written without bodies (a precursor) starts the bodies afresh at the checkpoint'
 |                                                        | (mode = adm); the audit notes a ring spacing above       |                          |                          |
 |                                                        | two kernel widths                                        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.adm_spreading**             | openfast_turbine, mode = adm: rings (one ring per blade  | rings or merged_rings    | rings                    |
+|                                                        | node) or merged_rings (one ring per radial station for   |                          |                          |
+|                                                        | all the blades, at their mean radius with their summed   |                          |                          |
+|                                                        | force: the same disk to rounding on a rigid rotor with a |                          |                          |
+|                                                        | third of the points; the shaft force is kept, the torque |                          |                          |
+|                                                        | is exact when the blades' radii agree); anything else    |                          |                          |
+|                                                        | stops the run; may not change on restart                 |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk, and openfast_turbine with sampling = upstream:  | Real > 0                 | 1.0 (ct_disk),           |
 |                                                        | where the free stream is sampled, in diameters ahead     |                          | 2.0 (turbine)            |
 |                                                        | along the normal / shaft axis                            |                          |                          |

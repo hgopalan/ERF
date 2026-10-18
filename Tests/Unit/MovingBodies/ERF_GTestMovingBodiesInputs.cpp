@@ -260,10 +260,11 @@ TEST(MovingBodiesInputs, AComponentWidthNeedsItsComponent)
         pb.add("ct", 0.75);
         pb.add("epsilon_nacelle", 1.0);
         pb.add("nacelle_cd", 1.0);
+        pb.add("adm_spreading", std::string("merged_rings"));
         out = printed([] { MovingBodiesInputs::read(); }, msg);
         EXPECT_EQ(msg, "");
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            for (const std::string k : {"epsilon_nacelle", "nacelle_cd"}) {
+            for (const std::string k : {"epsilon_nacelle", "nacelle_cd", "adm_spreading"}) {
                 EXPECT_NE(out.find(disk + "." + k + " is given but not used: it is for an openfast_turbine"), std::string::npos) << out;
             }
         }
@@ -363,4 +364,51 @@ TEST(MovingBodiesInputs, TheDiagnosticsFormatDefaultsToPerTurbineAndMustBeKnown)
     pp.add("diagnostics_format", std::string("per_body"));
     EXPECT_NE(erf_gtest::abort_message([] { MovingBodiesInputs::read(); }).find("diagnostics_format"), std::string::npos);
     pp.add("diagnostics_format", std::string("per_turbine"));
+}
+
+// adm_spreading picks how a disk's rings are laid out: rings (one per blade node, the default) or
+// merged_rings (one per radial station for all the blades); any other value stops the run naming
+// the key. The choice is in an actuator disk's restart record, and a checkpoint written before the
+// key existed spread its disks with rings: a restart with merged_rings from it is a change.
+TEST(MovingBodiesInputs, TheAdmSpreadingDefaultsToRingsAndIsInTheRestartRecord)
+{
+    set_turbine("Tspr", "adm", "");
+    EXPECT_EQ(only_body(MovingBodiesInputs::read()).adm_spreading, "rings");
+    {
+        amrex::ParmParse pb("erf.moving_bodies.Tspr");
+        pb.add("adm_spreading", std::string("merged_rings"));
+    }
+    MovingBodyInputs b = only_body(MovingBodiesInputs::read());
+    EXPECT_EQ(b.adm_spreading, "merged_rings");
+    {
+        set_turbine("Tspr2", "adm", "");
+        amrex::ParmParse pb("erf.moving_bodies.Tspr2");
+        pb.add("adm_spreading", std::string("merged"));
+        const std::string msg = erf_gtest::abort_message([] { MovingBodiesInputs::read(); });
+        EXPECT_NE(msg.find("Tspr2.adm_spreading must be rings or merged_rings"), std::string::npos) << msg;
+    }
+
+    // recorded for an actuator disk only
+    auto r = MovingBodiesInputs::restart_record(b);
+    EXPECT_EQ(record_value(r, "adm_spreading"), "merged_rings");
+    {
+        MovingBodyInputs alm = b;
+        alm.mode = "alm";
+        EXPECT_EQ(record_value(MovingBodiesInputs::restart_record(alm), "adm_spreading"), "");
+    }
+
+    // a checkpoint without the entry spread with rings
+    std::map<std::string,std::string> chk;
+    for (const auto& kv : r) {
+        if (kv.first != "adm_spreading") { chk[kv.first] = kv.second; }
+    }
+    std::string key, was, now;
+    EXPECT_TRUE(MovingBodiesInputs::changed_record_entry(chk, r, key, was, now));
+    EXPECT_EQ(key, "adm_spreading"); EXPECT_EQ(was, "rings"); EXPECT_EQ(now, "merged_rings");
+    b.adm_spreading = "rings";
+    EXPECT_FALSE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
+    // with the entry recorded, a change either way is one
+    chk["adm_spreading"] = "merged_rings";
+    EXPECT_TRUE(MovingBodiesInputs::changed_record_entry(chk, MovingBodiesInputs::restart_record(b), key, was, now));
+    EXPECT_EQ(key, "adm_spreading"); EXPECT_EQ(was, "merged_rings"); EXPECT_EQ(now, "rings");
 }
