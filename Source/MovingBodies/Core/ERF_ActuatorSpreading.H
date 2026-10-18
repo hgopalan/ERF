@@ -127,7 +127,10 @@ bool uniform_mesh_norm (amrex::Real px, amrex::Real py, amrex::Real pz, amrex::R
  *
  * The images are binned to tiles of 8^3 faces of each box: one kernel per box and face grid, one
  * thread per face of the tiles some kernel reaches, which adds its terms in point then image order
- * without atomics on the sources (deterministic, and the order of the point-by-point sum).
+ * without atomics on the sources (deterministic, and the order of the point-by-point sum). On one
+ * host thread (no GPU, at most one OpenMP thread) each image instead adds into the faces of its own
+ * reach box, in the same image order: every face takes the same terms in the same order, so the
+ * sources are bit-identical, without the tile pass's walk over images that miss the face.
  * @param[in] f_over_s 3*n forces over their whole normalisations (N/m^3), component fastest; a zero skips the point's component
  * @param buffers device memory kept from call to call (the call uses its own when nullptr)
  */

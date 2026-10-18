@@ -775,3 +775,52 @@ TEST(ActuatorSpreading, ARankHoldingOnlyBoxesAloftSkipsTheKernelsBelowThem)
         EXPECT_EQ(with[3+d], without[3+d]) << "high point, dir " << d;
     }
 }
+
+// The second pass on one host thread adds each image into the faces of its own reach box; on a device (or with
+// several threads) one thread per face adds the images binned to its tile. Both add every face's terms in image
+// order: every face of every box must be bit-identical, over terrain with several boxes, several points per face
+// and periodic images.
+TEST(ActuatorSpreading, TheHostScatterIsTheFaceByFacePassBitForBit)
+{
+    Mesh m;
+    m.hill = 60.0;
+    m.max_grid = {{8, 6, 1024}};
+    std::vector<Real> pos, scale, epsv;
+    for (int p = 0; p < 12; ++p) {
+        const auto q = xyz((0.7 + 1.9 * p) * m.dx(), (0.4 + 0.83 * p) * m.dy(), (0.2 + 0.05 * p) * m.H);
+        pos.insert(pos.end(), q.begin(), q.end());
+        const auto f = xyz(1.0e3 * (p + 1), -2.0e2 * p, (p % 3 == 0) ? 0.0 : 5.0e1);   // a zero scale skips a component
+        scale.insert(scale.end(), f.begin(), f.end());
+        epsv.push_back((1.2 + 0.1 * (p % 4)) * m.dx());
+    }
+    Sources scatter(m, true);
+    Sources by_face(m, true, &scatter.dm);
+    for (Sources* s : {&scatter, &by_face}) {
+        s->sx.setVal(0.0); s->sy.setVal(0.0); s->sz.setVal(0.0);
+        erf_actuator::ActuatorDeviceBuffers buf;
+        buf.force_face_major = (s == &by_face);
+        erf_actuator::add_scaled_kernels(pos, scale, epsv, s->znd.get(), s->detj.get(), s->geom, s->sx, s->sy, s->sz, nullptr, &buf);
+        // the face-by-face pass launches a kernel per box and face grid it reaches; the host scatter none
+        long launches = buf.kernel_launches;
+        amrex::ParallelDescriptor::ReduceLongSum(launches);
+#if !defined(AMREX_USE_GPU) && !defined(AMREX_USE_OMP)
+        if (s == &scatter) { EXPECT_EQ(launches, 0); } else { EXPECT_GT(launches, 0); }
+#endif
+    }
+    long nonzero = 0;
+    for (int dir = 0; dir < 3; ++dir) {
+        const amrex::MultiFab& a = (dir == 0) ? scatter.sx : (dir == 1) ? scatter.sy : scatter.sz;
+        const amrex::MultiFab& b = (dir == 0) ? by_face.sx : (dir == 1) ? by_face.sy : by_face.sz;
+        for (amrex::MFIter mfi(a, false); mfi.isValid(); ++mfi) {
+            const auto x = a.const_array(mfi);
+            const auto y = b.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if (x(i,j,k) != Real(0.0)) { ++nonzero; }
+                if (x(i,j,k) != y(i,j,k)) { ADD_FAILURE() << "dir " << dir << " face (" << i << "," << j << "," << k << "): "
+                                                          << x(i,j,k) << " vs " << y(i,j,k); }
+            });
+        }
+    }
+    amrex::ParallelDescriptor::ReduceLongSum(nonzero);
+    EXPECT_GT(nonzero, 1000);
+}
