@@ -518,11 +518,12 @@ add_scaled_kernels (const std::vector<Real>& pos, const std::vector<Real>& f_ove
 
     const KernelImages im(kf, pos, epsilon, buf);
 #ifndef AMREX_USE_GPU
-    if (!buf.force_face_major && !(OpenMP::in_parallel() || OpenMP::get_max_threads() > 1)) {
-        // One thread on the host: each image adds into the faces of its own reach box, in image (point, then
+    if (!buf.force_face_major && !OpenMP::in_parallel()) {
+        // On the host (where ParallelFor runs its iterations in order, OpenMP or not, as this pass is not called
+        // from a parallel region): each image adds into the faces of its own reach box, in image (point, then
         // image) order. A face then takes the same terms in the same order as from the face-major pass below,
-        // whose threads (one per face, needed on a device or with several threads, where images would race on a
-        // face) each walk every image binned to their tile, half of which miss the face
+        // whose threads (one per face, needed on a device, where images would race on a face) each walk every
+        // image binned to their tile, half of which miss the face
         const std::vector<Real>& eps_host = buf.point_eps.host;
         for (MFIter mfi(src_x, false); mfi.isValid(); ++mfi) {
             Array4<Real const> znd = has_znd ? z_phys_nd->const_array(mfi) : Array4<Real const>{};

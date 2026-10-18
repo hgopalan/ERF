@@ -74,7 +74,7 @@ struct ActuatorDeviceBuffers
     StagedBuffer<int> sample_cnt;            //!< 1 per point: how many of this rank's boxes hold it
 
     long kernel_launches{0};                 //!< kernels launched through these buffers so far (for the tests)
-    bool force_face_major{false};            //!< tests: the second pass face by face even on one host thread (as on a device)
+    bool force_face_major{false};            //!< tests only: the second pass face by face on the host too (as on a device)
 };
 
 } // namespace erf_actuator

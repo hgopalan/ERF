@@ -92,7 +92,9 @@ and the spreading pass gives each face one thread, which adds the terms of
 the images binned to its tile of faces in point order. Neither uses atomic
 additions, so the sources do not depend on how the device schedules its
 threads, and on a CPU they equal, to the last bit, those of spreading one
-point at a time. The device buffers the kernels read are kept from step to
+point at a time. On a CPU the spreading pass runs no kernel: each image adds
+into the faces of its own reach, in the same point order, which leaves every
+face the same sum and skips the images a face's tile holds that do not reach it. The device buffers the kernels read are kept from step to
 step, and grow to the largest exchange. The normalisation of a turbine's kernel is the sum of
 the parts the ranks its kernel reaches compute on their own boxes, added by
 the owner of the turbine or disk in rank order and sent back with the force. The sources are computed once per step, from the
