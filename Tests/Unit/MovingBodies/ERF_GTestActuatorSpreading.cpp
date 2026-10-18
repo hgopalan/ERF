@@ -615,7 +615,11 @@ TEST(ActuatorSpreading, BatchedKernelsMatchThePointByPointReference)
         std::vector<Real> f_over_s(norm.size());
         for (std::size_t q = 0; q < norm.size(); ++q) { f_over_s[q] = p_force[q] / norm[q]; }
         before = buf.kernel_launches;
+        // the face-by-face pass, whose launches this counts (on the host the images scatter without kernels)
+        buf.force_face_major = true;
         erf_actuator::add_scaled_kernels(p_pos, f_over_s, p_eps, s.znd.get(), s.detj.get(), s.geom, s.sx, s.sy, s.sz, nullptr, &buf);
+        buf.force_face_major = false;
+        EXPECT_GT(buf.kernel_launches - before, 0);
         EXPECT_LE(buf.kernel_launches - before, 3 * nlocal);
         EXPECT_GE(buf.image_pos.device.size(), 3 * p_eps.size());
 
@@ -773,5 +777,68 @@ TEST(ActuatorSpreading, ARankHoldingOnlyBoxesAloftSkipsTheKernelsBelowThem)
         EXPECT_EQ(without[d], Real(0.0)) << "low point, dir " << d;
         EXPECT_GT(with[3+d], Real(0.0)) << "high point, dir " << d;
         EXPECT_EQ(with[3+d], without[3+d]) << "high point, dir " << d;
+    }
+}
+
+// The second pass on one host thread adds each image into the faces of its own reach box; on a device (or with
+// several threads) one thread per face adds the images binned to its tile. Both add every face's terms in image
+// order: every face of every box must be bit-identical, over terrain with several boxes, several points per face
+// and periodic images.
+TEST(ActuatorSpreading, TheHostScatterIsTheFaceByFacePassBitForBit)
+{
+#ifdef AMREX_USE_GPU
+    GTEST_SKIP() << "a device has only the face-by-face pass";
+#endif
+    // over terrain and on a flat mesh, several boxes, several points per face, periodic images in x and y, zero
+    // scales, kernels reaching the ground and the top, and sources that already hold values (several bodies add
+    // into the same sources)
+    for (const Real hill : {Real(60.0), Real(0.0)}) {
+        SCOPED_TRACE("hill " + std::to_string(hill));
+        Mesh m;
+        m.hill = hill;
+        m.max_grid = {{8, 6, 1024}};
+        std::vector<Real> pos, scale, epsv;
+        for (int p = 0; p < 12; ++p) {
+            const auto q = xyz((0.7 + 1.9 * p) * m.dx(), (0.4 + 0.83 * p) * m.dy(), (0.2 + 0.05 * p) * m.H);
+            pos.insert(pos.end(), q.begin(), q.end());
+            const auto f = xyz(1.0e3 * (p + 1), -2.0e2 * p, (p % 3 == 0) ? 0.0 : 5.0e1);   // a zero scale skips a component
+            scale.insert(scale.end(), f.begin(), f.end());
+            epsv.push_back((1.2 + 0.1 * (p % 4)) * m.dx());
+        }
+        Sources scatter(m, true);
+        Sources by_face(m, true, &scatter.dm);
+        for (Sources* s : {&scatter, &by_face}) {
+            // the same non-zero start in both
+            for (int dir = 0; dir < 3; ++dir) {
+                amrex::MultiFab& f = (dir == 0) ? s->sx : (dir == 1) ? s->sy : s->sz;
+                for (amrex::MFIter mfi(f, false); mfi.isValid(); ++mfi) {
+                    auto a = f.array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { a(i,j,k) = Real(0.37) * (i - 2 * j + 3 * k + dir) / Real(7.0); });
+                }
+            }
+            erf_actuator::ActuatorDeviceBuffers buf;
+            buf.force_face_major = (s == &by_face);
+            erf_actuator::add_scaled_kernels(pos, scale, epsv, s->znd.get(), s->detj.get(), s->geom, s->sx, s->sy, s->sz, nullptr, &buf);
+            // the face-by-face pass launches a kernel per box and face grid it reaches; the host scatter none
+            long launches = buf.kernel_launches;
+            amrex::ParallelDescriptor::ReduceLongSum(launches);
+            if (s == &scatter) { EXPECT_EQ(launches, 0); } else { EXPECT_GT(launches, 0); }
+        }
+        long changed = 0;
+        for (int dir = 0; dir < 3; ++dir) {
+            const amrex::MultiFab& a = (dir == 0) ? scatter.sx : (dir == 1) ? scatter.sy : scatter.sz;
+            const amrex::MultiFab& b = (dir == 0) ? by_face.sx : (dir == 1) ? by_face.sy : by_face.sz;
+            for (amrex::MFIter mfi(a, false); mfi.isValid(); ++mfi) {
+                const auto x = a.const_array(mfi);
+                const auto y = b.const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                    if (x(i,j,k) != Real(0.37) * (i - 2 * j + 3 * k + dir) / Real(7.0)) { ++changed; }
+                    if (x(i,j,k) != y(i,j,k)) { ADD_FAILURE() << "dir " << dir << " face (" << i << "," << j << "," << k << "): "
+                                                              << x(i,j,k) << " vs " << y(i,j,k); }
+                });
+            }
+        }
+        amrex::ParallelDescriptor::ReduceLongSum(changed);
+        EXPECT_GT(changed, 1000);
     }
 }

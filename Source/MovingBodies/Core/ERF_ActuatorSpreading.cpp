@@ -14,6 +14,7 @@
 #include <AMReX_Array4.H>
 #include <AMReX_Gpu.H>
 #include <AMReX_MFIter.H>
+#include <AMReX_OpenMP.H>
 #include <AMReX_ParallelDescriptor.H>
 
 #include "ERF_ActuatorDeviceBuffers.H"
@@ -516,6 +517,44 @@ add_scaled_kernels (const std::vector<Real>& pos, const std::vector<Real>& f_ove
     MultiFab* src[3] = {&src_x, &src_y, &src_z};
 
     const KernelImages im(kf, pos, epsilon, buf);
+#ifndef AMREX_USE_GPU
+    if (!buf.force_face_major && !OpenMP::in_parallel()) {
+        // On the host (where ParallelFor runs its iterations in order, OpenMP or not, as this pass is not called
+        // from a parallel region): each image adds into the faces of its own reach box, in image (point, then
+        // image) order. A face then takes the same terms in the same order as from the face-major pass below,
+        // whose threads (one per face, needed on a device, where images would race on a face) each walk every
+        // image binned to their tile, half of which miss the face
+        const std::vector<Real>& eps_host = buf.point_eps.host;
+        for (MFIter mfi(src_x, false); mfi.isValid(); ++mfi) {
+            Array4<Real const> znd = has_znd ? z_phys_nd->const_array(mfi) : Array4<Real const>{};
+            for (int dir = 0; dir < 3; ++dir) {
+                const Box fbx = mfi.validbox().convert(IntVect::TheDimensionVector(dir));
+                Array4<Real> const& s = src[dir]->array(mfi);
+                for (std::size_t m = 0; m < im.point.size(); ++m) {
+                    const int p = im.point[m];
+                    const Real scale = f_over_s[3*p+dir];
+                    if (scale == Real(0.0)) { continue; }
+                    const Box c = im.reach[m][dir] & fbx;
+                    if (c.isEmpty()) { continue; }
+                    const Real qx = im.pos[m][0], qy = im.pos[m][1], qz = im.pos[m][2];
+                    const Real inv_eps2 = eps_host[2*p], reach2 = eps_host[2*p+1];
+                    const auto lo = amrex::lbound(c);
+                    const auto hi = amrex::ubound(c);
+                    for (int k = lo.z; k <= hi.z; ++k) {
+                        for (int j = lo.y; j <= hi.y; ++j) {
+                            for (int i = lo.x; i <= hi.x; ++i) {
+                                if (boundary_face(dir, i, j, k, per, dlo, dhi)) { continue; }
+                                const Real w = kernel_weight(dir, i, j, k, qx, qy, qz, plo, dx, znd, has_znd, inv_eps2, reach2);
+                                if (w > Real(0.0)) { s(i,j,k) += scale * w; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
+#endif
     buf.scales.host.assign(f_over_s.begin(), f_over_s.end());
     buf.scales.upload();
     std::vector<std::array<Bin,3>> bin;
