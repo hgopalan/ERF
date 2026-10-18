@@ -158,6 +158,35 @@ reads the AeroDyn file named in the ``.fst`` and refuses to start when its
 ``Wake_Mod`` is not 0 for ``disk``, or is 0 for ``upstream`` and
 ``disk_corrected``, which need an induction model on (``Wake_Mod = 1``, BEMT;
 ``mode = none`` leaves it to the model).
+With ``adm_spreading = merged_rings`` the blades' nodes at the same radial
+station share one ring instead of one ring each. Blade ``b``'s node at station
+``k`` has distance :math:`a_{bk}` along the shaft, radius :math:`r_{bk}` and
+force components :math:`(f^{x}_{bk}, f^{r}_{bk}, f^{\theta}_{bk})` (axial,
+radial, tangential, on the fluid). The shared ring of the :math:`N_b` blades
+stands at the means and carries the sums:
+
+.. math::
+
+   \bar a_k = \frac{1}{N_b} \sum_b a_{bk}, \qquad
+   \bar r_k = \frac{1}{N_b} \sum_b r_{bk}, \qquad
+   F^{c}_k = \sum_b f^{c}_{bk}, \quad c \in \{x, r, \theta\}.
+
+The rings of a node are at the same azimuths for every blade, and the
+spreading is linear in the forces, so on a rigid rotor (all :math:`r_{bk}` and
+:math:`a_{bk}` alike) the shared ring spreads the same source as the
+:math:`N_b` rings, to rounding, with :math:`1/N_b` of the points. The force
+along the shaft is kept for any rotor. The torque is
+:math:`\sum_k \bar r_k F^{\theta}_k` against :math:`\sum_{b,k} r_{bk} f^{\theta}_{bk}`
+for the blades' rings. They differ at each station by
+:math:`\sum_b (r_{bk} - \bar r_k)(f^{\theta}_{bk} - F^{\theta}_k / N_b)`, which is
+:math:`N_b` times the population covariance of the radii and the tangential loads,
+so the torque is exact when the blades' radii (or their tangential loads) agree.
+On a flexible rotor the shared ring also stands at the blades' mean distance
+along the shaft. Where the blades' deflections differ by :math:`\Delta a`, this
+changes the source near the tip by about :math:`(\Delta a / \epsilon)^2` of
+itself when the blades' loads are alike: small when the kernel width
+:math:`\epsilon` is several times the blades' spread in deflection. The spreading's cost is proportional to the number of points, so
+it falls by about :math:`N_b`. The default, ``rings``, keeps one ring per blade node.
 The thrust in the diagnostics is the sum of the hub and blade node forces, so
 its shaft component equals minus that of the integrated source. With ``mode = none``
 the turbine is driven by the flow but puts no force into it (one-way

@@ -211,6 +211,11 @@ MovingBodiesInputs::read ()
                 Abort(pre + ".sampling = " + b.sampling + " needs mode = adm: an actuator line resolves its own induction");
             }
             if (b.mode != "adm") { warn_inactive(ppb, pre, "num_points_t", "the rings are for mode = adm"); }
+            ppb.query("adm_spreading", b.adm_spreading);
+            if (b.adm_spreading != "rings" && b.adm_spreading != "merged_rings") {
+                Abort(pre + ".adm_spreading must be rings or merged_rings, not '" + b.adm_spreading + "'");
+            }
+            if (b.mode != "adm") { warn_inactive(ppb, pre, "adm_spreading", "the rings are for mode = adm"); }
             b.sample_diameters_upstream = 2.0;   // turbines: two diameters, where the rotor's upstream induction is below 1 %
             ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);
             if (!(b.sample_diameters_upstream > 0.0) || !std::isfinite(b.sample_diameters_upstream)) {
@@ -300,7 +305,7 @@ MovingBodiesInputs::read ()
             // the keys of an openfast_turbine: a ct_disk has no model, rotor nodes, tower or nacelle
             for (const char* k : {"fst_file", "mode", "sampling", "num_force_points_blade", "num_force_points_tower", "nacelle_cd",
                                   "nacelle_area", "epsilon_tower", "epsilon_nacelle", "fllc", "fllc_relax", "fllc_start_time",
-                                  "fllc_eps_chord", "fllc_eps_dr", "correction_relax", "correction_time"}) {
+                                  "fllc_eps_chord", "fllc_eps_dr", "correction_relax", "correction_time", "adm_spreading"}) {
                 warn_inactive(ppb, pre, k, "it is for an openfast_turbine; " + pre + " is a ct_disk, spread with " + pre + ".epsilon only");
             }
             ppb.get("rotor_radius", b.rotor_radius);
@@ -372,6 +377,7 @@ MovingBodiesInputs::restart_record (const MovingBodyInputs& b)
         {"epsilon", num(b.epsilon)}, {"air_density", num(b.air_density)}};
     // the keys the body's options use: one it ignores may change freely
     if (b.type != "openfast_turbine" || b.mode == "adm") { r.push_back({"num_points_t", std::to_string(b.num_points_t)}); }
+    if (b.type == "openfast_turbine" && b.mode == "adm") { r.push_back({"adm_spreading", b.adm_spreading}); }
     if (b.type == "openfast_turbine") {
         r.insert(r.end(), {{"fst_file", b.fst_file}, {"mode", b.mode}, {"sampling", b.sampling},
                            {"num_force_points_blade", std::to_string(b.num_force_points_blade)},
@@ -406,6 +412,13 @@ MovingBodiesInputs::changed_record_entry (const std::map<std::string,std::string
     for (const auto& kv : now) {
         auto f = chk.find(kv.first);
         if (f == chk.end() && (kv.first == "epsilon_tower" || kv.first == "epsilon_nacelle")) { f = chk.find("epsilon"); }
+        // a checkpoint from before adm_spreading spread every turbine's disk with rings
+        if (f == chk.end() && kv.first == "adm_spreading" && kv.second != "rings") {
+            key = kv.first;
+            chk_value = "rings";
+            now_value = kv.second;
+            return true;
+        }
         if (f != chk.end() && !same_record_value(f->second, kv.second)) {
             key = kv.first;
             chk_value = f->second;

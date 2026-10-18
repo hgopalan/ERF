@@ -10,6 +10,11 @@
 # REQUIRE_ON_FILE, when given, is a path relative to each run directory that the "on" leg must
 # produce and the "off" leg must not.  Without it a misspelled option would leave both legs
 # identical and the test would pass while checking nothing.
+#
+# RTOL and ATOL, when given, replace the zero tolerances: for an option that changes how a sum is
+# taken, not what it is, so the answers may differ by rounding alone. ON_LOG_REGEX, when given, must
+# match the on leg's simulation.log and not the off leg's, for an option that writes no file of its own;
+# OFF_LOG_REGEX, when given, the off leg's and not the on leg's.
 # -DX= defines X as empty, so test for a value, not for DEFINED
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ResolveExecutable.cmake")
@@ -90,9 +95,40 @@ if(NOT "${REQUIRE_ON_FILE}" STREQUAL "")
     endif()
 endif()
 
+if(NOT "${ON_LOG_REGEX}" STREQUAL "")
+    file(READ "${ON_DIR}/simulation.log" _on_log)
+    file(READ "${OFF_DIR}/simulation.log" _off_log)
+    if(NOT _on_log MATCHES "${ON_LOG_REGEX}")
+        message(FATAL_ERROR "RunOptionParity.cmake: the on leg's simulation.log does not match '${ON_LOG_REGEX}', so the option under test never took effect")
+    endif()
+    if(_off_log MATCHES "${ON_LOG_REGEX}")
+        message(FATAL_ERROR "RunOptionParity.cmake: the off leg's simulation.log matches '${ON_LOG_REGEX}', so the option under test was not switched off")
+    endif()
+endif()
+
+if(NOT "${OFF_LOG_REGEX}" STREQUAL "")
+    file(READ "${ON_DIR}/simulation.log" _on_log)
+    file(READ "${OFF_DIR}/simulation.log" _off_log)
+    if(NOT _off_log MATCHES "${OFF_LOG_REGEX}")
+        message(FATAL_ERROR "RunOptionParity.cmake: the off leg's simulation.log does not match '${OFF_LOG_REGEX}'")
+    endif()
+    if(_on_log MATCHES "${OFF_LOG_REGEX}")
+        message(FATAL_ERROR "RunOptionParity.cmake: the on leg's simulation.log matches '${OFF_LOG_REGEX}', so the option under test did not change it")
+    endif()
+endif()
+
+set(_rtol 0)
+set(_atol 0)
+if(NOT "${RTOL}" STREQUAL "")
+    set(_rtol "${RTOL}")
+endif()
+if(NOT "${ATOL}" STREQUAL "")
+    set(_atol "${ATOL}")
+endif()
+
 execute_process(
     COMMAND ${launch_one} ${FCOMPARE} --abort_if_not_all_found
-            --rel_tol 0 --abs_tol 0
+            --rel_tol ${_rtol} --abs_tol ${_atol}
             ${OFF_DIR}/${PLTFILE} ${ON_DIR}/${PLTFILE}
     WORKING_DIRECTORY "${WORKING_DIRECTORY}"
     OUTPUT_FILE "${WORKING_DIRECTORY}/parity.log"
@@ -101,4 +137,4 @@ execute_process(
 if(NOT parity_result EQUAL 0)
     message(FATAL_ERROR "RunOptionParity.cmake: ${PLTFILE} differs between the two runs, so the diagnostic changed the answer: ${parity_result} (see parity.log)")
 endif()
-message(STATUS "RunOptionParity: ${PLTFILE} is unchanged by '${ON_OPTIONS}'")
+message(STATUS "RunOptionParity: ${PLTFILE} is unchanged by '${ON_OPTIONS}' (rel_tol ${_rtol}, abs_tol ${_atol})")

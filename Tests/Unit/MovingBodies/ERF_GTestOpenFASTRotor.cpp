@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_OpenFASTRotor.H"
 
 namespace {
@@ -732,4 +733,128 @@ TEST(OpenFASTRotor, DiskCorrectionRelaxationTimeScaleDampsADelayedFlow)
     // IEA 15 MW's R / U): a bound of dt / tau alone, without the gain, rings there by some 4 %
     EXPECT_LT(delayed_loop(0.96, 0.2, 0.2, 6.0, 1.0, 11.3, 1.03, 3000), 1.0e-3);
     EXPECT_LT(delayed_loop(0.96, 0.2, 0.2, 10.0, 1.0, 11.3, 1.03, 3000), 1.0e-3);
+}
+
+// adm_spreading = merged_rings: the blades' nodes at one radial station share one ring. On a rigid
+// rotor the blades' rings coincide (same radius, same distance along the shaft, the same azimuths),
+// so the shared ring has blade 0's ring points and, at each point, the sum of the three blades' ring
+// forces there: the same sources with a third of the points.
+TEST(OpenFASTRotor, MergedRingsOnARigidRotorAreTheBladesRingsSummed)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    std::array<Real,3> axis{{static_cast<Real>(std::cos(0.4)), static_cast<Real>(std::sin(0.4)), Real(0.05)}};   // yawed and tilted
+    const int nodes = 5, npt = 12;
+    const TurbineState t = make_rotor(hub, axis, nodes, 120.0, 2.0e4, 3.0e3);
+    std::vector<Real> pos, f, mpos, mf;
+    erf_actuator::adm_rings(t, npt, pos, f);
+    erf_actuator::adm_rings(t, npt, mpos, mf, true);
+    ASSERT_EQ(pos.size(), 3u * (1 + 3 * nodes * npt));
+    ASSERT_EQ(mpos.size(), 3u * (1 + nodes * npt));
+    ASSERT_EQ(mf.size(), mpos.size());
+    // the hub point is the same
+    for (int d = 0; d < 3; ++d) { EXPECT_EQ(mpos[d], pos[d]); EXPECT_EQ(mf[d], f[d]); }
+    // station k: blade b's ring is ring (b * nodes + k) of the per-blade list
+    for (int k = 0; k < nodes; ++k) {
+        for (int j = 0; j < npt; ++j) {
+            const std::size_t m = 1 + k * npt + j;
+            std::array<Real,3> sum{{0.0, 0.0, 0.0}};
+            for (int b = 0; b < 3; ++b) {
+                const std::size_t p = 1 + (b * nodes + k) * npt + j;
+                for (int d = 0; d < 3; ++d) {
+                    EXPECT_NEAR(mpos[3*m+d], pos[3*p+d], tol() * 120.0) << "station " << k << " point " << j << " blade " << b;
+                    sum[d] += f[3*p+d];
+                }
+            }
+            for (int d = 0; d < 3; ++d) { EXPECT_NEAR(mf[3*m+d], sum[d], tol() * 2.0e4) << "station " << k << " point " << j; }
+        }
+    }
+    // the rotor's force and torque on the fluid are those of the per-blade rings
+    std::array<Real,3> got, want;
+    Real q_got, q_want;
+    totals(mpos, mf, hub, axis, got, q_got);
+    totals(pos, f, hub, axis, want, q_want);
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(got[d], want[d], tol() * 15 * 2.0e4) << "component " << d; }
+    EXPECT_NEAR(q_got, q_want, tol() * std::abs(q_want));
+    EXPECT_GT(std::abs(q_want), 0.0);
+}
+
+// Deflected blades: each blade's node at a station has its own radius and distance along the shaft.
+// The shared ring stands at their means and carries the sum of their forces, so the force along the
+// shaft is exact; the torque is the mean radius times the summed tangential force, which differs from
+// the blades' own torque by their radii's spread.
+TEST(OpenFASTRotor, MergedRingsOnADeflectedRotorKeepTheShaftForce)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
+    const int nodes = 4, npt = 16;
+    const Real R = 120.0;
+    TurbineState t = make_rotor(hub, axis, nodes, R, 2.0e4, 3.0e3);
+    // blade b: pushed downstream by (b + 1) m per station, its radii scaled by 1 + 0.01 (b - 1),
+    // and its forces scaled by 1 + 0.2 b
+    const Real dr[3] = {Real(-0.01), Real(0.0), Real(0.01)};
+    for (int b = 0; b < 3; ++b) {
+        for (int k = 0; k < nodes; ++k) {
+            const int nd = 1 + b * nodes + k;
+            for (int d = 1; d < 3; ++d) { t.force_pos[3*nd+d] = hub[d] + (1 + dr[b]) * (t.force_pos[3*nd+d] - hub[d]); }
+            t.force_pos[3*nd] = hub[0] + Real(b + 1) * (k + 1);
+            for (int d = 0; d < 3; ++d) { t.force[3*nd+d] *= Real(1.0 + 0.2 * b); }
+        }
+    }
+    std::vector<Real> mpos, mf;
+    erf_actuator::adm_rings(t, npt, mpos, mf, true);
+    ASSERT_EQ(mpos.size(), 3u * (1 + nodes * npt));
+    Real want_q = 0.0;    // mean radius times the summed tangential force, on the fluid
+    for (int k = 0; k < nodes; ++k) {
+        Real r_sum = 0.0, along_sum = 0.0, ft_sum = 0.0;
+        for (int b = 0; b < 3; ++b) {
+            const int nd = 1 + b * nodes + k;
+            const Real y = t.force_pos[3*nd+1] - hub[1], z = t.force_pos[3*nd+2] - hub[2];
+            const Real r = std::sqrt(y*y + z*z);
+            r_sum += r;
+            along_sum += t.force_pos[3*nd] - hub[0];
+            ft_sum += -(t.force[3*nd+2] * y - t.force[3*nd+1] * z) / r;   // tangential, about +x, on the fluid
+        }
+        want_q += r_sum / 3 * ft_sum;
+        for (int j = 0; j < npt; ++j) {
+            const std::size_t m = 1 + k * npt + j;
+            const Real y = mpos[3*m+1] - hub[1], z = mpos[3*m+2] - hub[2];
+            EXPECT_NEAR(std::sqrt(y*y + z*z), r_sum / 3, tol() * R) << "station " << k;
+            EXPECT_NEAR(mpos[3*m] - hub[0], along_sum / 3, tol() * R) << "station " << k;
+        }
+    }
+    std::array<Real,3> got, want;
+    Real q_got, q_blades;
+    totals(mpos, mf, hub, axis, got, q_got);
+    totals(t.force_pos, t.force, hub, axis, want, q_blades);
+    EXPECT_NEAR(got[0], -want[0], tol() * 15 * 2.0e4);    // the shaft force, exact
+    EXPECT_NEAR(q_got, want_q, tol() * std::abs(want_q));
+    EXPECT_GT(std::abs(q_got + q_blades), 1.0e-4 * std::abs(q_blades));   // the blades' radii differ
+    EXPECT_LT(std::abs(q_got + q_blades), 1.0e-2 * std::abs(q_blades));
+}
+
+// The merged rings are an actuator-disk layout: the actuator line ignores the flag, the default
+// (unmerged) call is the per-blade layout, and a rotor whose blade nodes are not all there stops.
+TEST(OpenFASTRotor, MergedRingsAreForTheDiskOnly)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
+    const int nodes = 3, nt = 8;
+    TurbineState t = make_rotor(hub, axis, nodes, 120.0, 2.0e4, 3.0e3);
+    const KernelWidths w{Real(10.0), Real(30.0), Real(20.0)};
+    std::vector<Real> p1, f1, e1, p2, f2, e2;
+    erf_actuator::turbine_points(t, "alm", nt, false, w, p1, f1, e1);
+    erf_actuator::turbine_points(t, "alm", nt, false, w, p2, f2, e2, true);
+    EXPECT_EQ(p1, p2); EXPECT_EQ(f1, f2); EXPECT_EQ(e1, e2);
+    p1.clear(); f1.clear(); e1.clear(); p2.clear(); f2.clear(); e2.clear();
+    erf_actuator::turbine_points(t, "adm", nt, false, w, p1, f1, e1);
+    erf_actuator::adm_rings(t, nt, p2, f2, false);
+    EXPECT_EQ(p1, p2); EXPECT_EQ(f1, f2);
+    p1.clear(); f1.clear(); e1.clear();
+    EXPECT_EQ(erf_actuator::turbine_points(t, "adm", nt, false, w, p1, f1, e1, true), 1 + nodes * nt);
+    EXPECT_EQ(e1.size(), std::size_t(1 + nodes * nt));
+    // the last blade's nodes missing
+    t.num_force_nodes -= nodes;
+    std::vector<Real> p3, f3;
+    const std::string msg = erf_gtest::abort_message([&] { erf_actuator::adm_rings(t, nt, p3, f3, true); });
+    EXPECT_NE(msg.find("merged rings need every blade's force nodes"), std::string::npos) << msg;
 }

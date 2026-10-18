@@ -38,6 +38,7 @@ struct MovingBodyInputs
                                              //!< and momentum theory, OpenFAST induction on; the adm default) | upstream (free stream
                                              //!< sample_diameters_upstream diameters ahead of the hub, OpenFAST's own BEM induction on)
     int num_force_points_blade{50};          //!< actuator force points per blade requested from OpenFAST
+    std::string adm_spreading{"rings"};      //!< mode adm: rings (a ring per blade node) or merged_rings (a ring per radial station, the blades' forces summed)
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
     amrex::Real nacelle_cd{0.0};             //!< nacelle drag coefficient (0: no nacelle drag)
     amrex::Real nacelle_area{0.0};           //!< nacelle frontal area (m^2), needed when nacelle_cd > 0
