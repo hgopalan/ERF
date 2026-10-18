@@ -679,14 +679,20 @@ TEST(ActuatorSpreading, AColumnSplitInZGivesTheFullColumnsAnswerBitForBit)
     }
     Sources table(m, true);
     Sources column(m, true, &table.dm);
+    // each rank's bounds: the table where one of its boxes is aloft, the ground-and-spacing bounds where all of
+    // its boxes reach the ground (on several ranks a rank may hold only the bottom boxes)
     const erf_actuator::ZBounds zb = erf_actuator::mesh_z_bounds(*table.znd, table.geom, false);
-    ASSERT_TRUE(zb.has_table());
-    ASSERT_FALSE(zb.all_ground);
+    EXPECT_EQ(zb.has_table(), !zb.all_ground);
+    int any_table = zb.has_table() ? 1 : 0;
+    amrex::ParallelDescriptor::ReduceIntMax(any_table);
+    EXPECT_EQ(any_table, 1);
     // the table bounds each kernel to part of the column (without it: all of it), so faces are skipped
-    for (std::size_t p = 0; p < epsv.size(); ++p) {
-        int kb = 0, kt = 0;
-        zb.k_range(pos[3*p+2] - Real(3.0) * eps, pos[3*p+2] + Real(3.0) * eps, 0, m.nz - 1, kb, kt);
-        EXPECT_LT(kt - kb + 1, 3 * m.nz / 4) << "point " << p;
+    if (zb.has_table()) {
+        for (std::size_t p = 0; p < epsv.size(); ++p) {
+            int kb = 0, kt = 0;
+            zb.k_range(pos[3*p+2] - Real(3.0) * eps, pos[3*p+2] + Real(3.0) * eps, 0, m.nz - 1, kb, kt);
+            if (kb <= kt) { EXPECT_LT(kt - kb + 1, 3 * m.nz / 4) << "point " << p; }
+        }
     }
     const erf_actuator::ZBounds none{};
     auto run = [&] (Sources& s, const erf_actuator::ZBounds* bounds, std::vector<Real>& norm) {
