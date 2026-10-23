@@ -16,6 +16,11 @@
 //   at every height and span.
 // Gusts.CalmAirHasNoIntensityAndNoLoad: U = 0 leaves the intensity, the factor and the loads at 0, the point
 //   gust at g sigma_u.
+// Gusts.StillAirGustsAreComputedUnderTheFloatingPointTraps: span_gust and the random gust's time scale in calm air
+//   raise no floating-point flag, T = L_u / U is infinite at U = 0 and holds the process, and under amrex's three
+//   traps calm and windy spans give the same fields as without them (the guarded ratios U_n / U and L_u / U used to
+//   trip amrex.fpe_trap_invalid or fpe_trap_zero when speculated: a still-air random-gust run stopped at step 1;
+//   only an optimised build shows it).
 // Gusts.TheTowersBackgroundFactorIsASCE74s: B_t = 1 / (1 + 0.375 h / L_s) is 1/2 when 0.375 h = L_s and falls with h.
 // Gusts.TheIntegralLengthIsIECs: L_u = 8.1 Lambda_1, Lambda_1 = 0.7 z below 60 m and 42 m above, continuous at 60 m.
 // Gusts.TheEventIsOneMinusCosineAndArrivesWithItsFront: the shape is 0 at its ends and outside, 1 in the middle and
@@ -33,12 +38,14 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "ERF_ASCE74.H"
 #include "ERF_Gusts.H"
+#include "ERF_GTestFPTraps.H"
 #include "ERF_GTestThrowOnAbort.H"
 
 using namespace erf_conductors;
@@ -157,6 +164,39 @@ TEST(Gusts, CalmAirHasNoIntensityAndNoLoad)
     EXPECT_EQ(s.peak_load, 0.0);
     EXPECT_NEAR(s.gust_wind, 2.7 * 1.39 * std::sqrt(0.5), 1e-12);
     EXPECT_NEAR(s.normal_sigma, gust_sigma_v_ratio * 1.39 * std::sqrt(0.5), 1e-12) << "calm air: no direction, the lateral part";
+}
+
+TEST(Gusts, StillAirGustsAreComputedUnderTheFloatingPointTraps)
+{
+    // calm air: the ratio U_n / U is guarded, and an optimising compiler evaluated it anyway, so
+    // amrex.fpe_trap_invalid stopped a still-air random-gust run in write_gusts at step 1. Same for the random
+    // gust's time scale L_u / U under amrex.fpe_trap_zero. Both now divide by a floored wind. The flags check
+    // reports a speculated division as a failure on any optimised build; the trap-on run then repeats the cases
+    auto calm = [] { return span_gust(0.0, 0.0, 0.5, 150.0, 0.03, 1.0, 1.225, 1.39, 2.7, 67.056); };
+    auto windy = [] { return span_gust(10.0, 5.0, 1.5, 150.0, 0.03, 1.0, 1.225, 1.39, 2.7, 67.056); };
+    SpanGust s0, w0;
+    double T0 = 0.0, T1 = 0.0;
+    EXPECT_EQ(erf_gtest::raised_fp_flags([&] { s0 = calm(); w0 = windy(); T0 = gust_time_scale(340.2, 0.0); T1 = gust_time_scale(340.2, 6.0); }), 0)
+        << "a floating-point flag was raised (a guarded division evaluated speculatively)";
+    EXPECT_NEAR(s0.normal_sigma, gust_sigma_v_ratio * 1.39 * std::sqrt(0.5), 1e-12) << "calm air: no direction, the lateral part";
+    EXPECT_EQ(s0.intensity, 0.0) << "no normal wind, no intensity";
+    EXPECT_EQ(s0.peak_load, 0.0);
+    EXPECT_EQ(T0, std::numeric_limits<double>::infinity()) << "calm air holds the process";
+    EXPECT_EQ(gust_ou_step(0.7, 0.9, T0, -1.3), 0.7) << "and the held process keeps its value";
+    EXPECT_EQ(T1, 340.2 / 6.0) << "the plain division for a wind";
+    if (::testing::Test::HasFailure()) { return; }   // a flag raised: the trap-on run would stop the test binary
+    const erf_gtest::FPTrapsOn traps;
+    if (!erf_gtest::FPTrapsOn::active()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+    for (const auto& [s, r] : {std::pair{calm(), s0}, std::pair{windy(), w0}}) {
+        EXPECT_EQ(s.sigma, r.sigma);
+        EXPECT_EQ(s.normal_sigma, r.normal_sigma);
+        EXPECT_EQ(s.intensity, r.intensity);
+        EXPECT_EQ(s.gust_response, r.gust_response);
+        EXPECT_EQ(s.peak_load, r.peak_load);
+    }
+    EXPECT_EQ(gust_time_scale(340.2, 0.0), T0);
+    EXPECT_EQ(gust_time_scale(340.2, 6.0), T1);
+    EXPECT_TRUE(erf_gtest::FPTrapsOn::active()) << "the traps are still on";
 }
 
 TEST(Gusts, TheTowersBackgroundFactorIsASCE74s)

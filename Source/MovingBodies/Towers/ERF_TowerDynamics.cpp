@@ -2,6 +2,7 @@
 
 #include "ERF_TowerDynamics.H"
 
+#include <algorithm>
 #include <cmath>
 
 #include <AMReX.H>
@@ -49,10 +50,17 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
     }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(Mb > 0.0, "OneModeTower: no drag node stands above the base");
     m_Kb = Mb * std::pow(two_pi * static_cast<double>(type.frequency), 2);
-    // the compliances in series under a load at the cross-arm; a stiffness of 0 is a rigid foundation
+    // the compliances in series under a load at the cross-arm; a stiffness of 0 is a rigid foundation. Each
+    // division runs on the stiffness floored away from zero and a factor selects the rigid case, rather than
+    // a guarded division: an optimising compiler may evaluate a guarded arm speculatively, and H^2 / 0 would
+    // then trip amrex.fpe_trap_zero on a rigid footing although the result is discarded. The floor is far below
+    // any physical stiffness, so a positive stiffness gives the same compliance as the plain division.
+    constexpr double k_floor = 1.0e-30;
+    const double kr = static_cast<double>(type.foundation_rotational_stiffness);
+    const double kl = static_cast<double>(type.foundation_lateral_stiffness);
     const double cb = 1.0 / m_Kb;
-    const double cr = (type.foundation_rotational_stiffness > 0.0) ? H * H / type.foundation_rotational_stiffness : 0.0;
-    const double cl = (type.foundation_lateral_stiffness > 0.0) ? 1.0 / type.foundation_lateral_stiffness : 0.0;
+    const double cr = ((kr > 0.0) ? 1.0 : 0.0) * (H * H / std::max(kr, k_floor));
+    const double cl = ((kl > 0.0) ? 1.0 : 0.0) * (1.0 / std::max(kl, k_floor));
     const double c = cb + cr + cl;
     auto shape = [&] (double z) { return (cb * z * z + cr * z + cl) / c; };
     for (std::size_t i = 0; i < nodes.size(); ++i) {

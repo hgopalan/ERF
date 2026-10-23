@@ -1929,7 +1929,7 @@ Conductors::add_gusts (double time, double dt, const std::vector<std::vector<Rea
         auto advance_z = [&] (std::size_t p, double height, double U) {
             const double Lu = m_in.has_gust_integral_length ? static_cast<double>(m_in.gust_integral_length)
                                                             : erf_conductors::gust_integral_length(height);
-            const double T = (U > 0.0) ? Lu / U : std::numeric_limits<double>::infinity();
+            const double T = erf_conductors::gust_time_scale(Lu, U);
             const double xi = erf_conductors::gust_normal(seed, static_cast<std::uint64_t>(p), step);
             m_gust_z[p] = m_gust_z_set ? erf_conductors::gust_ou_step(m_gust_z[p], dt, T, xi) : xi;
         };

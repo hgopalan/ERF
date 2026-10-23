@@ -135,6 +135,12 @@ double gust_event_phase (const GustEvent& e, double x, double y, double t);
 double gust_normal (std::uint64_t seed, std::uint64_t stream, std::uint64_t step);
 
 /**
+ * The random gust's integral time scale T = L_u / U (s) for an integral length L_u (m) and a wind U (m/s); infinite
+ * for U <= 0 (still air), which holds the process.
+ */
+double gust_time_scale (double length, double wind);
+
+/**
  * One exact step of the unit-variance Ornstein-Uhlenbeck process of integral time scale T (s, > 0; infinite
  * holds z): z exp(-dt / T) + sqrt(1 - exp(-2 dt / T)) xi, dt (s) >= 0 and xi standard normal.
  */
