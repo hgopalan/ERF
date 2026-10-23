@@ -13,6 +13,9 @@
 // - TheWindDampsItsSwayByTheDragRelativeToTheMembers: by sum phi^2 rho Cf w L U / (2 M omega) more.
 // - ItsStateRestoresTheSameMotion, and a non-finite state is refused.
 // - ALineOnThePeakMovesAndPullsByTheShapeThere.
+// - ItsFootingsAreBuiltUnderTheFloatingPointTraps: rigid and elastic footings raise no floating-point flag and,
+//   under amrex's three traps, give the same stiffness as without them and as F (1/K_b + H^2/k_r + 1/k_l) written
+//   out (the guarded H^2 / 0 used to trip amrex.fpe_trap_zero when speculated; only an optimised build shows it).
 // - ABadStepOrANonFiniteLoadIsRefusedNamingTheTower and
 //   ATowerThatCannotMoveIsRefusedNamingItsKeys: the aborts name the tower and the input keys.
 
@@ -25,6 +28,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestFPTraps.H"
 #include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MemberDrag.H"
 #include "ERF_Tower.H"
@@ -153,6 +157,40 @@ TEST(OneModeTower, FreeItRingsDownAtTheDampedFrequencyWithItsDecrement)
     EXPECT_NEAR(Td * f * std::sqrt(1.0 - z * z), 1.0, 1.0e-4) << "the damped period";
     const double decrement = std::log(peaks.front() / peaks.back()) / (peaks.size() - 1);
     EXPECT_NEAR(decrement / (2.0 * pi * z / std::sqrt(1.0 - z * z)), 1.0, 1.0e-3) << "the logarithmic decrement";
+}
+
+TEST(OneModeTower, ItsFootingsAreBuiltUnderTheFloatingPointTraps)
+{
+    // a rigid footing (stiffness 0) took its compliance from a guarded division, H^2 / k_r or 1 / k_l only when
+    // k > 0; an optimising compiler evaluates such an arm anyway, so amrex.fpe_trap_zero stopped the run in this
+    // constructor once #518 let the traps stay on with lines (every moving-tower regression case). The
+    // compliances now come from floored divisions. The flags check reports a speculated division as a failure
+    // on any optimised build; the trap-on run then repeats the case as a run with amrex.fpe_trap_* sees it
+    const std::array<std::array<double,2>,4> footings{{{{0.0, 0.0}}, {{2.0e8, 0.0}}, {{0.0, 5.0e6}}, {{2.0e8, 5.0e6}}}};
+    auto build = [] (const std::array<double,2>& f) {
+        TowerType t = swaying();
+        t.foundation_rotational_stiffness = Real(f[0]);
+        t.foundation_lateral_stiffness = Real(f[1]);
+        return OneModeTower(standing(t), Real(g));
+    };
+    // the footings' compliances in series with the bending's, H^2 / k_r and 1 / k_l written out (H = 30 m)
+    const std::array<double,4> footing_compliance{{0.0, 900.0 / 2.0e8, 1.0 / 5.0e6, 900.0 / 2.0e8 + 1.0 / 5.0e6}};
+    std::vector<double> untrapped;
+    for (std::size_t i = 0; i < footings.size(); ++i) {
+        double K = 0.0, Kb = 0.0;
+        EXPECT_EQ(erf_gtest::raised_fp_flags([&] { const OneModeTower m = build(footings[i]); K = m.stiffness(); Kb = m.bending_stiffness(); }), 0)
+            << "footing " << i << ": a floating-point flag was raised (a guarded division evaluated speculatively)";
+        EXPECT_NEAR(K * (1.0 / Kb + footing_compliance[i]), 1.0, 1.0e-12) << "footing " << i;
+        untrapped.push_back(K);
+    }
+    EXPECT_NEAR(untrapped[0] / build(footings[0]).bending_stiffness(), 1.0, 1.0e-14) << "nothing but the bending on rigid footings";
+    if (::testing::Test::HasFailure()) { return; }   // a flag raised: the trap-on run would stop the test binary
+    const erf_gtest::FPTrapsOn traps;
+    if (!erf_gtest::FPTrapsOn::active()) { GTEST_SKIP() << "amrex cannot set floating-point traps on this platform"; }
+    for (std::size_t i = 0; i < footings.size(); ++i) {
+        EXPECT_EQ(build(footings[i]).stiffness(), untrapped[i]) << "footing " << i << ": the traps change no answer";
+    }
+    EXPECT_TRUE(erf_gtest::FPTrapsOn::active()) << "the traps are still on";
 }
 
 TEST(OneModeTower, TheFoundationsTiltAndSlideAddTheirCompliancesInSeries)

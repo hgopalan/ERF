@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 
 #include <AMReX.H>
 #include <AMReX_BLassert.H>
@@ -14,6 +15,10 @@ namespace erf_conductors {
 
 namespace {
 constexpr double pi = 3.14159265358979323846;
+// the floor of a wind (m/s) a guarded ratio divides by. An optimising compiler may evaluate a guarded division
+// speculatively, and 0 / 0 or x / 0 in still air would then trip amrex.fpe_trap_invalid or fpe_trap_zero although
+// the result is discarded; a wind at or above the floor gives the same ratio as the plain division
+constexpr double wind_floor = 1.0e-30;
 } // namespace
 
 bool parse_gust_type (const std::string& name, GustType& g)
@@ -59,7 +64,7 @@ SpanGust span_gust (double wind, double normal_wind, double k, double span, doub
     s.gust_wind = wind + peak_factor * s.sigma;
     s.mean_load = 0.5 * air_density * cd * diameter * normal_wind * normal_wind;
     // the fluctuation normal to the span: the streamwise part along sin(phi), the lateral along cos(phi)
-    const double sin_phi = (wind > 0.0) ? std::min(normal_wind / wind, 1.0) : 0.0;
+    const double sin_phi = (wind > 0.0) ? std::min(normal_wind / std::max(wind, wind_floor), 1.0) : 0.0;
     const double sigma_v = gust_sigma_v_ratio * s.sigma;
     s.normal_sigma = std::sqrt(s.sigma * s.sigma * sin_phi * sin_phi + sigma_v * sigma_v * (1.0 - sin_phi * sin_phi));
     // with no mean wind normal to the span there is no intensity and no mean load to scale: they stay 0
@@ -117,6 +122,11 @@ double gust_normal (std::uint64_t seed, std::uint64_t stream, std::uint64_t step
     const double u1 = static_cast<double>((mix64(key ^ 1ULL) >> 11) + 1) * 0x1.0p-53;
     const double u2 = static_cast<double>(mix64(key ^ 2ULL) >> 11) * 0x1.0p-53;
     return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * pi * u2);
+}
+
+double gust_time_scale (double length, double wind)
+{
+    return (wind > 0.0) ? length / std::max(wind, wind_floor) : std::numeric_limits<double>::infinity();
 }
 
 double gust_ou_step (double z, double dt, double T, double xi)
