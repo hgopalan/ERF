@@ -257,14 +257,16 @@ This section describes how a tower in a run stands on the frame
   legs.
 - Motion: the frame moves about its static equilibrium under its own weight,
   so the cross-arm starts where the lines were built. Each coupling step
-  advances it by Newmark's method to the drag and the lines' pull at the
-  end of that step (the method averages them with those at its start); the
-  coupling resolves its first natural frequency, and Newmark's method
-  integrates the higher modes stably, the lines' pull included, since the
-  iterated coupling makes it implicit. That rests on the lines' own damping
-  (``damping_ratio`` of the line, 0.5 by default): a line mode with none,
-  coupled to the frame, could grow by about 5e-4 per coupling step. The
-  members' drag is held from the start of each coupling step, so the frame's
+  advances it under the drag and the lines' mean pull over that step, both
+  held over it, by the implicit midpoint rule (Newmark's method started from
+  the acceleration the held loads give). The frame then takes from the lines
+  the work they give up as MoorDyn moves the cross-arm at a constant velocity
+  (to the coupling tolerance), so the exchange gains no energy from motions the
+  coupling step does not resolve, such as the frame's stiff local modes under
+  the insulator strings' axial modes (about 45 Hz) (:ref:`sec:Conductors`,
+  moving towers). The footings' reactions are those under the held loads. The coupling resolves the frame's
+  first natural frequency, and Newmark's method integrates the higher modes
+  stably. The members' drag is held from the start of each coupling step, so the frame's
   ``damping_ratio`` must be positive (its modes above about 6 times the first
   frequency would otherwise grow under the drag). The type's ``damping_ratio`` sets
   the Rayleigh damping at the first natural frequency and at ten times it;

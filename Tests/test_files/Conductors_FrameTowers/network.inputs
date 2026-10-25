@@ -32,9 +32,12 @@ erf.conductors.T3.size             = 8 5 6
 erf.conductors.T3.allowable_force  = 25000
 erf.conductors.T3.allowable_moment = 250000
 
-# L1: T1 to T3, 3 span(s)
+# L1: T1 to T3, 3 span(s); its second tower stands 80 m further down the hill than in
+#     Conductors_Terrain (40 % of the way from Conductors_Terrain's site to T3), where its string
+#     carries the conductor's weight: at Conductors_Terrain's site the spans either side would pull
+#     it up (uplift)
 erf.conductors.L1.end_a  = 896.87 729.30 10
-erf.conductors.L1.towers = 936.93 726.87 30  1097.17 717.16 30
+erf.conductors.L1.towers = 936.93 726.87 30  1177.29 712.31 30
 erf.conductors.L1.end_b  = 1297.48 705.03 10
 erf.conductors.L1.stringing_tension = 20000
 erf.conductors.L1.diameter         = 0.0281

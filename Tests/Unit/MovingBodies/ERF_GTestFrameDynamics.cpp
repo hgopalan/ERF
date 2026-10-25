@@ -23,6 +23,10 @@
 // FrameDynamics.AChangingStepFollowsTheOscillatorOfEachStep: one dynamics stepping h1, h2, h1, ... and
 //   another on the same frame stepping h2 throughout (sharing its factorisation) each follow the modal
 //   oscillator's Newmark recursion with their own steps, and share the factorisation of a step they both take.
+// FrameDynamics.AHeldLoadDoesTheWorkTheEnergyGains: under loads held over each step (step_held), changing
+//   from step to step, the loads' work f (u' - u) is the gain of kinetic and strain energy plus the
+//   Rayleigh damping's work h vm^T C vm (vm = (u' - u)/h) to round-off, and the end acceleration
+//   satisfies M a = f - C v - K u; Newmark's step to the same loads misses the balance.
 // FrameDynamics.AStepLoadSettlesAtTheStaticResponse: a damped tower under a sudden load and gravity
 //   comes to rest at the static solution.
 // FrameDynamics.TheStateRestoresTheSameMotion: a state saved and restored continues bit for bit.
@@ -405,6 +409,71 @@ TEST(FrameDynamics, AChangingStepFollowsTheOscillatorOfEachStep)
     // both took h2 last: one factorisation serves the two
     ASSERT_NE(steady.effective_stiffness_factor(), nullptr);
     EXPECT_EQ(changing.effective_stiffness_factor(), steady.effective_stiffness_factor());
+}
+
+TEST(FrameDynamics, AHeldLoadDoesTheWorkTheEnergyGains)
+{
+    FrameInputs in;
+    ASSERT_TRUE(read_subdyn(case_file("C", ".dat"), in).empty());
+    auto f = build(in);
+    ASSERT_TRUE(f);
+    FrameModes modes;
+    ASSERT_TRUE(frame_modes(*f, 2, modes).empty());
+    double a0 = 0.0, a1 = 0.0;
+    rayleigh_coefficients(modes.frequency[0], 0.02, 10.0 * modes.frequency[0], 0.02, a0, a1);
+    const double h = 1.0 / (20.0 * modes.frequency[0]);
+    // swinging in its first two modes, under a pull on an arm tip and on the peak that changes every step
+    std::vector<double> u0(modes.shape[0].size()), v0(u0.size());
+    for (std::size_t i = 0; i < u0.size(); ++i) {
+        u0[i] = 0.01 * modes.shape[0][i];
+        v0[i] = 0.3 * modes.shape[1][i];
+    }
+    auto load = [&] (int n) {
+        std::vector<double> l(f->num_dofs(), 0.0);
+        l[6 * f->node_of_joint(18)] = 2.0e4 * (1.0 + 0.5 * std::sin(0.7 * n));
+        l[6 * f->node_of_joint(17) + 2] = -5.0e3 * (1.0 + 0.5 * std::cos(1.3 * n));
+        return l;
+    };
+    // the loads' work less the energy gain and the damping's work over one step
+    auto imbalance = [&] (FrameDynamics& d, int n, bool held, double& scale) {
+        const std::vector<double> u = d.displacement();
+        const double e = d.kinetic_energy() + d.strain_energy();
+        const std::vector<double> l = load(n);
+        if (held) { d.step_held(h, l, 0.0); } else { d.step(h, l, 0.0); }
+        std::vector<double> du(u.size()), vm(u.size());
+        for (std::size_t i = 0; i < u.size(); ++i) { du[i] = d.displacement()[i] - u[i]; vm[i] = du[i] / h; }
+        const std::vector<double> mv = f->apply_mass(vm), kv = f->apply_stiffness(vm);
+        double damping = 0.0;
+        for (std::size_t i = 0; i < vm.size(); ++i) { damping += h * vm[i] * (a0 * mv[i] + a1 * kv[i]); }
+        const double work = dot(f->load_vector(l, 0.0), du);
+        const double gain = d.kinetic_energy() + d.strain_energy() - e;
+        scale = std::abs(work) + std::abs(gain) + std::abs(damping);
+        return work - gain - damping;
+    };
+    FrameDynamics held(*f, a0, a1), newmark(*f, a0, a1);
+    ASSERT_TRUE(held.start(u0, v0, load(0), 0.0).empty());
+    ASSERT_TRUE(newmark.start(u0, v0, load(0), 0.0).empty());
+    double worst_newmark = 0.0;
+    for (int n = 1; n <= 40; ++n) {
+        double scale = 0.0;
+        EXPECT_NEAR(imbalance(held, n, true, scale), 0.0, 1e-10 * scale) << "step " << n;
+        // the end acceleration is the equation of motion's under the held loads (on the free degrees of
+        // freedom: the fixed ones carry the support reactions)
+        const std::vector<double> fl = f->load_vector(load(n), 0.0);
+        const std::vector<double> ma = f->apply_mass(held.acceleration());
+        const std::vector<double> mv = f->apply_mass(held.velocity()), kv = f->apply_stiffness(held.velocity());
+        const std::vector<double> ku = f->apply_stiffness(held.displacement());
+        double rmax = 0.0, fmax = 0.0;
+        for (const std::size_t i : f->free_dofs()) {
+            rmax = std::max(rmax, std::abs(ma[i] + a0 * mv[i] + a1 * kv[i] + ku[i] - fl[i]));
+            fmax = std::max(fmax, std::abs(ku[i]) + std::abs(fl[i]));
+        }
+        EXPECT_LT(rmax, 1e-9 * fmax) << "step " << n;
+        double s = 0.0;
+        worst_newmark = std::max(worst_newmark, std::abs(imbalance(newmark, n, false, s)) / s);
+    }
+    // Newmark's step takes the mean of the last step's loads and these: the balance is not met by construction
+    EXPECT_GT(worst_newmark, 1e-3);
 }
 
 TEST(FrameDynamics, AStepLoadSettlesAtTheStaticResponse)

@@ -161,13 +161,16 @@ public:
     /**
      * The fewest coupling steps a group of lines whose towers move takes over one period of its
      * highest tower frequency; the count is also at least erf.conductors.substeps. In each coupling
-     * step the towers advance under the mean of the lines' pull at the step's start and the iterated
-     * pull at its end, then MoorDyn moves the cross-arms (its coupled points) from where they were to
-     * where the towers took them. The step is repeated until that end pull converges (coupling_tolerance).
+     * step the towers advance under the lines' iterated mean pull over the step held over it, then
+     * MoorDyn moves the cross-arms (its coupled points) at a constant velocity from where they were to
+     * where the towers took them and returns the lines' mean pull (ConductorLine::mean_tower_force).
+     * The step is repeated until that mean pull converges (coupling_tolerance). The towers take the
+     * work the lines give up, to that tolerance, so the exchange gains no energy from motions the
+     * coupling step does not resolve; the count sets the accuracy of the towers' sway.
      */
     static constexpr int coupling_steps_per_period = 20;
     /**
-     * Each coupling step is iterated until no component of the lines' pull on the towers at its end
+     * Each coupling step is iterated until no component of the lines' mean pull on the towers over it
      * changes by more than coupling_tolerance times the largest pull component at the step's start
      * (at least 1 N), at most coupling_max_iterations times (erf_conductors::coupling_converged). The
      * relaxation factor starts at coupling_initial_relaxation and Aitken's method adapts it within

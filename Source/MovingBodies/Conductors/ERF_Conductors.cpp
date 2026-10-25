@@ -776,12 +776,14 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
     // the interface: every line's pull on every attachment of the group's towers, in one vector
     std::vector<std::size_t> first(towers.size() + 1, 0);
     for (std::size_t i = 0; i < towers.size(); ++i) { first[i+1] = first[i] + 3 * m_tower_lines[towers[i]].size(); }
-    auto pulls = [&] () {
+    // the pulls where the lines' MoorDyn states stand (mean: their means over the last coupled step)
+    auto pulls = [&] (bool mean) {
         std::vector<double> F(first.back());
         for (std::size_t i = 0; i < towers.size(); ++i) {
             const auto& tl = m_tower_lines[towers[i]];
             for (std::size_t a = 0; a < tl.size(); ++a) {
-                const auto f = m_lines[tl[a].first]->tower_force(tl[a].second);
+                const auto f = mean ? m_lines[tl[a].first]->mean_tower_force(tl[a].second)
+                                    : m_lines[tl[a].first]->tower_force(tl[a].second);
                 for (int d = 0; d < 3; ++d) { F[first[i] + 3*a + static_cast<std::size_t>(d)] = static_cast<double>(f[d]); }
             }
         }
@@ -799,12 +801,13 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
             for (std::size_t a = 0; a < x.size(); ++a) { x[a] = m_models[t]->attachment_displacement(a); }
             x0.push_back(x);
         }
-        const std::vector<double> F0 = pulls();
-        // the towers advance with the pulls at the start and the end of the coupling step (a one-mode
-        // tower under their mean held over the step, a frame by Newmark's method to the end pulls),
-        // and MoorDyn moves the lines' points to where the towers have taken them; the end pulls are
-        // found by fixed-point iteration with Aitken's relaxation, so that a stiff span (a short, taut
-        // one) cannot drive the exchange unstable
+        const std::vector<double> F0 = pulls(false);
+        // the towers advance under the lines' mean pull over the coupling step held over it, and
+        // MoorDyn moves the lines' points to where the towers have taken them at a constant velocity:
+        // the work the towers take from the pulls is then the work the lines give up, so the exchange
+        // makes no energy from motions the step does not resolve. The mean pulls are found by fixed-point
+        // iteration with Aitken's relaxation from the pulls at the step's start, so that a stiff
+        // span (a short, taut one) cannot drive the exchange unstable
         std::vector<double> F = F0, r_prev;
         double omega = coupling_initial_relaxation;
         int it = 0;
@@ -815,15 +818,11 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
                 if (it > 0) { m_models[t]->set_state(tower_state[i]); move_tower(t); }
                 // the members' drag in the wind held for the step at the nodes' velocities at its start
                 drag_on_tower(t);
-                std::vector<std::array<Real,3>> start(m_tower_lines[t].size()), end(start.size());
-                for (std::size_t a = 0; a < start.size(); ++a) {
-                    for (int d = 0; d < 3; ++d) {
-                        const std::size_t c = first[i] + 3*a + static_cast<std::size_t>(d);
-                        start[a][d] = static_cast<Real>(F0[c]);
-                        end[a][d] = static_cast<Real>(F[c]);
-                    }
+                std::vector<std::array<Real,3>> mean(m_tower_lines[t].size());
+                for (std::size_t a = 0; a < mean.size(); ++a) {
+                    for (int d = 0; d < 3; ++d) { mean[a][d] = static_cast<Real>(F[first[i] + 3*a + static_cast<std::size_t>(d)]); }
                 }
-                m_models[t]->step_between(static_cast<Real>(h), m_towers[t].loads(), start, end);
+                m_models[t]->step_between(static_cast<Real>(h), m_towers[t].loads(), mean, mean);
                 move_tower(t);
             }
             for (std::size_t m = 0; m < lines.size(); ++m) {
@@ -842,7 +841,7 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
                 }
                 m_lines[line]->step_coupled(time + k * h, h, start, velocity);
             }
-            const std::vector<double> Fn = pulls();
+            const std::vector<double> Fn = pulls(true);
             const std::string err = erf_conductors::coupling_converged(F0, F, Fn, coupling_tolerance, converged);
             if (!err.empty()) {
                 Abort("erf.conductors: the coupling of " + m_lines[lines.front()]->name() + " and its towers at t = " +

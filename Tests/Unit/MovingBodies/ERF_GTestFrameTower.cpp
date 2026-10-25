@@ -18,8 +18,15 @@
 //   mass), a damped tower settled under steady loads has the static solution's footing loads, the
 //   springs' force counted in each leg's reaction.
 // FrameTower.HeldByAStiffSpanItsSwayDecays: coupled to a spring three times its own stiffness at
-//   the cross-arm, iterated each step to the spring's end pull as the coupling with MoorDyn is, the
-//   tower's oscillation decays; given the mean of the start and end pulls it would grow.
+//   the cross-arm, iterated each step to the spring's mean pull over the step (the cross-arm moving
+//   at a constant velocity) as the coupling with MoorDyn is, the tower's oscillation decays.
+// FrameTower.AnInsulatorStringOnItsCrossArmDoesNotRing: a 60 kg string of two segments (1e7 N
+//   axial stiffness, MoorDyn's damping ratio 0.5) with 30 kg of conductor at its foot hangs from the
+//   cross-arm, integrated finely while the cross-arm moves at a constant velocity over each coupling
+//   step. At the coupling steps of the Conductors_FrameTowers deck (0.9 s / 76, 80, 84), the string's
+//   ring decays when the frame steps under the string's mean pull held over the step
+//   (step_between); stepped by Newmark's method to the pull at the step's end instead, it grows at
+//   one of these steps at least.
 // FrameTower.TheStateRestoresTheSameMotion: a state saved and restored continues bit for bit.
 // FrameTower.RefusesAFrameThatDoesNotFitItsTowerOrItsType: a frame whose cross-arm is far from the
 //   lines' attachment, or 1.5 m above or 7.5 m below the tower's cross-arm, or with two interface joints,
@@ -312,24 +319,23 @@ TEST(FrameTower, HeldByAStiffSpanItsSwayDecays)
         K = 1.0e4 / static_cast<double>(settle.attachment_displacement()[0]);
     }
     ASSERT_GT(K, 0.0);
-    // a span three times as stiff pulls the cross-arm toward x0; the pull at the end of each coupling
-    // step is found by fixed-point iteration from the start's, the tower's state restored each time
+    // a span three times as stiff pulls the cross-arm toward x0; its mean pull over each coupling step,
+    // the cross-arm moving at a constant velocity, is found by fixed-point iteration from the pull at
+    // the start, the tower's state restored each time
     const double k = 3.0 * K, x0 = 0.01;
     FrameTower ft(tw, frame_t(), g);
     const double h = 1.0 / (20.0 * static_cast<double>(ft.frequency()));
-    auto pull_at = [&] () {
-        const double x = static_cast<double>(ft.attachment_displacement()[0]);
-        return std::array<Real,3>{{static_cast<Real>(-k * (x - x0)), Real(0.0), Real(0.0)}};
-    };
     std::vector<double> x;
     for (int n = 0; n < 600; ++n) {
         const std::vector<double> s0 = ft.state();
-        const std::array<Real,3> F0 = pull_at();
+        const double xs = static_cast<double>(ft.attachment_displacement()[0]);
+        const std::array<Real,3> F0{{static_cast<Real>(-k * (xs - x0)), Real(0.0), Real(0.0)}};
         std::array<Real,3> F = F0;
         for (int it = 0; it < 50; ++it) {
             ASSERT_TRUE(ft.set_state(s0));
-            ft.step_between(static_cast<Real>(h), none, {F0}, {F});
-            const std::array<Real,3> Fn = pull_at();
+            ft.step_between(static_cast<Real>(h), none, {F}, {F});
+            const double xe = static_cast<double>(ft.attachment_displacement()[0]);
+            const std::array<Real,3> Fn{{static_cast<Real>(-k * (0.5 * (xs + xe) - x0)), Real(0.0), Real(0.0)}};
             const bool done = std::abs(static_cast<double>(Fn[0] - F[0])) <= 1e-6 * k * x0;
             F = Fn;
             if (done) { break; }
@@ -344,6 +350,97 @@ TEST(FrameTower, HeldByAStiffSpanItsSwayDecays)
         last = std::max(last, std::abs(x[x.size() - 1 - n] - xe));
     }
     EXPECT_LT(last, 0.5 * first) << "first " << first << " m, last " << last << " m";
+}
+
+TEST(FrameTower, AnInsulatorStringOnItsCrossArmDoesNotRing)
+{
+    const Tower tw = turned(framed());
+    const std::vector<Real> none(3 * tw.nodes().size(), Real(0.0));
+    // the string's two segments (MoorDyn's lumping: half of each segment's mass at its ends), the conductor at its
+    // foot, displacements along z from equilibrium; c = zeta sqrt(EA m_l) per segment (MoorDyn's -zeta)
+    const double EA = 1.0e7, L = 2.5, mass = 60.0;
+    const double k = EA / (0.5 * L), c = 0.5 * std::sqrt(EA * mass / L);
+    const double m1 = 0.5 * mass, m2 = 0.25 * mass + 30.0;
+    struct String { double y1{0.0}, v1{0.0}, y2{0.0}, v2{0.0}; };
+    // the string's pull on the cross-arm (up) with the cross-arm at z u moving at ud
+    auto pull = [&] (const String& s, double u, double ud) { return k * (s.y1 - u) + c * (s.v1 - ud); };
+    auto rates = [&] (const String& s, double u, double ud) {
+        const double f1 = -pull(s, u, ud) + k * (s.y2 - s.y1) + c * (s.v2 - s.v1);
+        const double f2 = -k * (s.y2 - s.y1) - c * (s.v2 - s.v1);
+        return std::array<double,4>{{s.v1, f1 / m1, s.v2, f2 / m2}};
+    };
+    // the string over a coupling step, the cross-arm moving from u0 at a constant velocity ud: the pull at the
+    // end and its mean over the step (trapezoidal rule over the fine steps), by fourth-order Runge-Kutta
+    auto advance = [&] (String& s, double u0, double ud, double h, double& end, double& mean) {
+        const int nf = 200;
+        const double d = h / nf;
+        mean = 0.5 * pull(s, u0, ud);
+        for (int i = 0; i < nf; ++i) {
+            const double t = i * d;
+            auto at = [&] (const String& b, const std::array<double,4>& r, double w) {
+                return String{b.y1 + w * r[0], b.v1 + w * r[1], b.y2 + w * r[2], b.v2 + w * r[3]};
+            };
+            const auto r1 = rates(s, u0 + ud * t, ud);
+            const auto r2 = rates(at(s, r1, 0.5 * d), u0 + ud * (t + 0.5 * d), ud);
+            const auto r3 = rates(at(s, r2, 0.5 * d), u0 + ud * (t + 0.5 * d), ud);
+            const auto r4 = rates(at(s, r3, d), u0 + ud * (t + d), ud);
+            s.y1 += d / 6.0 * (r1[0] + 2.0 * r2[0] + 2.0 * r3[0] + r4[0]);
+            s.v1 += d / 6.0 * (r1[1] + 2.0 * r2[1] + 2.0 * r3[1] + r4[1]);
+            s.y2 += d / 6.0 * (r1[2] + 2.0 * r2[2] + 2.0 * r3[2] + r4[2]);
+            s.v2 += d / 6.0 * (r1[3] + 2.0 * r2[3] + 2.0 * r3[3] + r4[3]);
+            mean += (i + 1 < nf ? 1.0 : 0.5) * pull(s, u0 + ud * (t + d), ud);
+        }
+        mean /= nf;
+        end = pull(s, u0 + ud * h, ud);
+    };
+    // the string's ring (the largest swing of the cross-arm's z) over the first and the last 50 coupling steps
+    // of 400 after the conductor is pulled 1 mm down, held_mean the coupling with MoorDyn, else Newmark's end pull
+    auto ring = [&] (double h, bool held_mean, double& first, double& last) {
+        FrameTower ft(tw, frame_t(), g);
+        String s;
+        s.y2 = -1.0e-3;
+        double fe = pull(s, 0.0, 0.0);
+        std::vector<double> z;
+        for (int n = 0; n < 400; ++n) {
+            const std::vector<double> s0 = ft.state();
+            const String str0 = s;
+            const double u0 = static_cast<double>(ft.attachment_displacement()[2]);
+            double F = fe, end = 0.0, mean = 0.0;
+            for (int it = 0; it < 60; ++it) {
+                if (!ft.set_state(s0)) { ADD_FAILURE() << "state"; return; }
+                s = str0;
+                const std::array<Real,3> P{{Real(0.0), Real(0.0), static_cast<Real>(F)}};
+                if (held_mean) { ft.step_between(static_cast<Real>(h), none, {P}, {P}); }
+                else { ft.step(static_cast<Real>(h), none, std::vector<std::array<Real,3>>{P}); }
+                const double u1 = static_cast<double>(ft.attachment_displacement()[2]);
+                advance(s, u0, (u1 - u0) / h, h, end, mean);
+                const double Fn = held_mean ? mean : end;
+                const bool done = std::abs(Fn - F) <= 1e-10 * k * 1.0e-3;
+                F = Fn;
+                if (done) { break; }
+            }
+            fe = end;
+            z.push_back(static_cast<double>(ft.attachment_displacement()[2]));
+        }
+        double mz = 0.0;
+        for (const double v : z) { mz += v / static_cast<double>(z.size()); }
+        first = last = 0.0;
+        for (std::size_t n = 0; n < 50; ++n) {
+            first = std::max(first, std::abs(z[n] - mz));
+            last = std::max(last, std::abs(z[z.size() - 1 - n] - mz));
+        }
+    };
+    double grew = 0.0;
+    for (const int steps : {76, 80, 84}) {
+        const double h = 0.9 / steps;
+        double first = 0.0, last = 0.0;
+        ring(h, true, first, last);
+        EXPECT_LT(last, 0.5 * first) << steps << " coupling steps per 0.9 s, mean pull held: first " << first << " m, last " << last << " m";
+        ring(h, false, first, last);
+        grew = std::max(grew, last / first);
+    }
+    // the coupling with Newmark's end pull grows at one of these steps at least: the check is not vacuous
+    EXPECT_GT(grew, 2.0);
 }
 
 TEST(FrameTower, TheStateRestoresTheSameMotion)

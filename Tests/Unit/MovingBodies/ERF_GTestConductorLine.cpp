@@ -16,11 +16,14 @@
 // ATowerOfALevelSectionCarriesOneSpansWeight: a tower carries one span's weight (and its string's),
 //     the spans either side balancing along the line.
 // MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull: a coupled step moves the cross-arms at
-//     the velocity it is given, and MoorDyn's force on them is the pull the tower carries.
+//     the velocity it is given, MoorDyn's force on them is the pull the tower carries, and the pull's
+//     mean over the step is the mean of the pulls after each MoorDyn step, those of a twin line stepped
+//     one MoorDyn step per call (whose mean is the pull after its one step).
 // HeldStillACoupledPointIsAFixedOne: a coupled point held still behaves as a fixed one.
 // AStringInADipIsFlaggedInUplift: a string the spans either side pull up is flagged in uplift.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -407,6 +410,10 @@ TEST(ConductorLine, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
         const std::string file = in.diagnostics_dir + "/" + name + ".moordyn.txt";
         ConductorLine line(s, in, 9.81, file);
         ASSERT_TRUE(line.towers_move()) << name;
+        // a twin, stepped one MoorDyn step per call, for the mean pull
+        LineInputs st = section(name + "_twin", ins);
+        st.tower_type = "lat";
+        ConductorLine twin(st, in, 9.81, in.diagnostics_dir + "/" + name + "_twin.moordyn.txt");
         const std::string text = slurp(file);
         EXPECT_NE(text.find("2     Coupled   400   500   -9970"), std::string::npos) << text;
         EXPECT_NE(text.find("3     Coupled   700   500   -9970"), std::string::npos) << text;
@@ -414,6 +421,7 @@ TEST(ConductorLine, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
         // tower 1's cross-arm moves at 0.2 m/s across the line for 0.1 s; tower 2's stays
         line.set_wind(uniform(line.num_kinematics_points(), 0.0, 0.0, 0.0), 0.05);
         const std::vector<amrex::Real> start(6, 0.0), velocity{0.0, 0.2, 0.0, 0.0, 0.0, 0.0};
+        twin.set_wind(uniform(twin.num_kinematics_points(), 0.0, 0.0, 0.0), 0.05);
         line.step_coupled(0.0, 0.1, start, velocity);
         // where the line meets each cross-arm: the string's top, or the next span's first node
         auto at_tower = [&] (int j) {
@@ -432,6 +440,33 @@ TEST(ConductorLine, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
             const double mag = std::sqrt(F[0] * F[0] + F[1] * F[1] + F[2] * F[2]);
             EXPECT_GT(mag, 1000.0) << name << " tower " << j + 1;
             for (int d = 0; d < 3; ++d) { EXPECT_NEAR(f[d], F[d], 1.0e-6 * mag) << name << " tower " << j + 1 << " dir " << d; }
+        }
+        // the mean pull over the call is the mean of the pulls after each MoorDyn step (MoorDyn's
+        // Runge-Kutta midpoint forces): the twin, stepped one MoorDyn step per call over the same motion
+        const double dtm = twin.moordyn_step();
+        int ncall = static_cast<int>(std::ceil(0.1 / dtm - 1.0e-9));
+        if (0.1 / ncall > dtm) { ++ncall; }
+        ASSERT_GT(ncall, 1) << name;
+        const double sub = 0.1 / ncall;
+        std::array<double,3> sum[2] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+        for (int i = 0; i < ncall; ++i) {
+            std::vector<amrex::Real> at(6, 0.0);
+            at[1] = static_cast<amrex::Real>(0.2 * i * sub);
+            twin.step_coupled(i * sub, sub, at, velocity);
+            for (int j = 0; j < 2; ++j) {
+                const auto f = twin.tower_force(j);
+                // a call of one MoorDyn step: its mean is the pull after it
+                const auto m1 = twin.mean_tower_force(j);
+                for (int d = 0; d < 3; ++d) { sum[j][d] += f[d]; EXPECT_EQ(m1[d], f[d]) << name << " call " << i; }
+            }
+        }
+        for (int j = 0; j < 2; ++j) {
+            const auto m = line.mean_tower_force(j), e = line.tower_force(j);
+            const double mag = std::sqrt(static_cast<double>(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]));
+            for (int d = 0; d < 3; ++d) {
+                EXPECT_NEAR(m[d], sum[j][d] / ncall, 1.0e-9 * mag + 4.0 * std::numeric_limits<amrex::Real>::epsilon() * mag)
+                    << name << " tower " << j + 1 << " dir " << d;
+            }
         }
         // a step that holds the towers keeps the cross-arm where the coupled step left it
         line.step(0.1, 0.1);

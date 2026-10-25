@@ -644,29 +644,46 @@ sink, and its weight does not add to the overturning as it leans
 A line whose towers move steps in coupling steps, at least ``substeps`` and
 at least 20 over the period of its fastest tower; lines that share towers step
 together. In each, every tower advances under its members' drag and the lines'
-pull at the start and at the end of the coupling step: a one-mode tower under
-their mean held over the step, which its exact solution integrates as the
-trapezoidal rule does, and a frame tower by Newmark's method to the pull at the
-end, which the method itself averages with the start (given the mean instead, a
-frame would see the pull half a coupling step late, the same negative damping
-:math:`k \Delta t_c / 2` as below). Then MoorDyn
-moves each line's points on the towers from where they were to where the towers
-have taken them, at a constant velocity over the call (MoorDyn moves a coupled
-point linearly), and hands back their pull. The pull at the end is not known
-before MoorDyn's call, so the coupling step is iterated: the lines' MoorDyn
-states and the towers' are kept at its start and restored for each iteration
-(MoorDyn's in-memory serialization), and the estimate of the end pull is
-updated with Aitken's relaxation until it changes by less than
-:math:`10^{-4}` of the largest pull (at most 50 iterations). A single exchange,
-the towers stepping with the pull from the end of the last call, is only
-conditionally stable: a short, nearly taut span pulls back in milliseconds,
-and a pull that lags acts on the tower as negative damping: :math:`k \Delta t_c
-/ 2` (N s/m) for a span of stiffness :math:`k` (N/m) and a coupling step
-:math:`\Delta t_c` (s) on a one-mode tower holding the start pull, and
-:math:`k \Delta t_c` on a frame whose Newmark step takes it as the end load,
-which outgrows the tower's own damping once :math:`k` exceeds a fraction of
-the tower's stiffness (at a damping ratio of 0.02 and 20 coupling steps a
-period, about a quarter for a one-mode tower and an eighth for a frame). The
+mean pull over the coupling step, both held over the step: a one-mode tower by
+its exact solution for a held load, a frame tower by the implicit midpoint rule
+(Newmark's method started from the acceleration the held loads give). Then
+MoorDyn moves each line's points on the towers from where they were to where
+the towers have taken them, at a constant velocity over the coupling step
+(MoorDyn moves a coupled point linearly), in one call per internal step of
+MoorDyn's, and the lines' pull on each tower is read after every call and
+averaged over the step: MoorDyn's second-order Runge-Kutta step leaves the
+forces at its midpoint, where it applies them over the whole step. A tower whose
+attachment moves by :math:`\Delta\mathbf x` under a held pull
+:math:`\bar{\mathbf F}` takes the work :math:`\bar{\mathbf F} \cdot
+\Delta\mathbf x`; with :math:`\bar{\mathbf F}` the lines' mean pull over the
+step, that is the work the lines give up, since the attachment moves at the
+constant velocity :math:`\Delta\mathbf x / \Delta t_c`. The exchange then
+neither makes nor loses energy, to the coupling tolerance, so it gains none from
+motions the coupling step :math:`\Delta t_c` does not resolve, and the coupling
+step need only resolve the towers' sway. The fastest motions at a
+tower are not the tower's: an insulator string (axial stiffness
+:math:`10^7` N over 2.5 m) with its own mass and the conductor's near its foot
+rings at about 45 Hz against a frame's stiff cross-arm, far above what 20
+coupling steps a period of a 4 Hz tower resolve. Exchanging the pull at the
+step's end instead, with a frame stepping by Newmark's method to it, lets the
+interface gain energy from that ring when the coupling step is near half its
+period. ``Conductors_FrameTowers_CouplingStep_MoorDyn`` runs
+``Conductors_FrameTowers`` (0.9 s steps, 76 coupling steps chosen) with 76 and
+with 160 coupling steps, and the middle span's tensions must agree to three
+digits. The
+mean pull is not known before MoorDyn's calls, so the coupling step is
+iterated: the lines' MoorDyn states and the towers' are kept at its start and
+restored for each iteration (MoorDyn's in-memory serialization), and the
+estimate of the mean pull, from the pull at the step's start, is updated with
+Aitken's relaxation until it changes by less than :math:`10^{-4}` of the
+largest pull (at most 50 iterations). A single exchange, the towers stepping
+with the pull from the end of the last call, is only conditionally stable: a
+short, nearly taut span pulls back in milliseconds, and a pull that lags acts
+on the tower as negative damping, :math:`k \Delta t_c / 2` (N s/m) for a span
+of stiffness :math:`k` (N/m) on a tower holding the start pull, which outgrows
+the tower's own damping once :math:`k` exceeds a fraction of the tower's
+stiffness (about a quarter at a damping ratio of 0.02 and 20 coupling steps a
+period). The
 members' drag is held from the start of each coupling step, a damping force a
 step late that an undamped frame's modes above about 6 times its first
 frequency would grow under: a frame's ``damping_ratio`` must be positive.
@@ -684,7 +701,8 @@ members' current velocity, so the wind damps the sway: a member moving with the
 wind feels less of it. The foundation takes the loads
 less the inertia of the nodes (each node's mass times its acceleration), so
 a tower swaying freely still loads its footings; both are those at the
-coupling step's end, the acceleration under the pull then. MoorDyn's pull on a coupled
+coupling step's end, the acceleration under the lines' mean pull over that
+step. MoorDyn's pull on a coupled
 point leaves out the inertia of the line's end node, a few kilograms against
 the tower's tonnes.
 
