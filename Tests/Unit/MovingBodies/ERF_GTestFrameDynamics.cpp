@@ -455,8 +455,11 @@ TEST(FrameDynamics, AHeldLoadDoesTheWorkTheEnergyGains)
     ASSERT_TRUE(newmark.start(u0, v0, load(0), 0.0).empty());
     double worst_newmark = 0.0;
     for (int n = 1; n <= 40; ++n) {
+        // imbalance() sets scale: call it before the tolerance reads scale (the order in which a call's
+        // arguments are evaluated is unspecified; GCC read scale first, as 0)
         double scale = 0.0;
-        EXPECT_NEAR(imbalance(held, n, true, scale), 0.0, 1e-10 * scale) << "step " << n;
+        const double r_held = imbalance(held, n, true, scale);
+        EXPECT_NEAR(r_held, 0.0, 1e-10 * scale) << "step " << n;
         // the end acceleration is the equation of motion's under the held loads (on the free degrees of
         // freedom: the fixed ones carry the support reactions)
         const std::vector<double> fl = f->load_vector(load(n), 0.0);
@@ -470,7 +473,8 @@ TEST(FrameDynamics, AHeldLoadDoesTheWorkTheEnergyGains)
         }
         EXPECT_LT(rmax, 1e-9 * fmax) << "step " << n;
         double s = 0.0;
-        worst_newmark = std::max(worst_newmark, std::abs(imbalance(newmark, n, false, s)) / s);
+        const double r_newmark = imbalance(newmark, n, false, s);
+        worst_newmark = std::max(worst_newmark, std::abs(r_newmark) / s);
     }
     // Newmark's step takes the mean of the last step's loads and these: the balance is not met by construction
     EXPECT_GT(worst_newmark, 1e-3);
