@@ -2514,6 +2514,34 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
           LABELS "regression;conductors"
           ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation.log")
   endfunction()
+  # A deck whose towers move, run with the coupling steps ERF chooses and with SUBSTEPS: the columns
+  # COLUMNS of the log LOG must agree row by row to 3 significant digits (2 units of the last).
+  function(setup_test_coupling_convergence TEST_NAME TEST_FILES_DIR LOG COLUMNS SUBSTEPS)
+      setup_test()
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+          "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+          "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+          "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+          "-DNRANKS=${NP}"
+          "-DTEST_EXE=${TEST_EXE}"
+          "-DCONFIG=$<CONFIG>"
+          "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i"
+          "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+          "-DLOG=${LOG}"
+          "-DCOLUMNS=${COLUMNS}"
+          "-DSUBSTEPS=${SUBSTEPS}"
+          "-DSIGDIGITS=3"
+          "-DULPS=2"
+          -P ${PROJECT_SOURCE_DIR}/Tests/RunCouplingConvergence.cmake)
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+          TIMEOUT 600
+          PROCESSORS ${NP}
+          WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+          LABELS "regression;conductors"
+          ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation_default.log;${CURRENT_TEST_BINARY_DIR}/simulation_fine.log")
+  endfunction()
   if(ERF_MOORDYN_USE_STUB)
     # a prescribed 15 m/s crosswind handed to the line at every node, against the stub
     add_test_conductors(Conductors_PrescribedWind Conductors_PrescribedWind "plt00010" "S1.dat"
@@ -2679,6 +2707,15 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     add_test_conductors(Conductors_FrameTowers_MoorDyn Conductors_FrameTowers "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_frame_logs}" GOLD_SUFFIX ".moordyn.gold")
     set(_frame_restart Conductors_FrameTowers_Restart_MoorDyn)
+  endif()
+  if(NOT ERF_MOORDYN_USE_STUB)
+    # The coupling of MoorDyn's lines and the frame towers must not depend on the coupling step: the
+    # tensions of L1's middle span with the coupling steps ERF chooses (76 per ERF step here) and with
+    # 160 agree to 3 digits. The insulator strings' axial modes (about 45 Hz) under the frames' stiff
+    # cross-arms are not resolved by either count, so this holds only while the exchange between the
+    # towers and the lines neither makes nor loses energy.
+    setup_test_coupling_convergence(Conductors_FrameTowers_CouplingStep_MoorDyn Conductors_FrameTowers
+                                    "conductors/L1_span2.dat" "tension_a tension_b max_tension" 160)
   endif()
   set(_frame_parity_logs "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv")
   string(APPEND _frame_parity_logs " conductors/tower_L1_t1_members_stats.csv conductors/coupling.dat")

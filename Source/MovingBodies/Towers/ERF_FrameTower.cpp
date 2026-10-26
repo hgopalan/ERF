@@ -253,6 +253,11 @@ std::array<Real,3> FrameTower::to_erf (const std::array<double,3>& v) const
 
 void FrameTower::step (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_force)
 {
+    advance(dt, node_force, line_force, false);
+}
+
+void FrameTower::advance (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_force, bool held)
+{
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_force.size() == 3 * m_drag.size(), "FrameTower::step: 3 forces per drag node are needed");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_force.size() == m_attach.size(), "FrameTower::step: one line pull per attachment is needed");
     std::vector<double> load(m_frame->num_dofs(), 0.0);
@@ -263,15 +268,22 @@ void FrameTower::step (Real dt, const std::vector<Real>& node_force, const std::
     for (const double f : load) {
         if (!std::isfinite(f)) { amrex::Abort("tower " + m_name + ": a load on its frame is not finite (the wind's drag or a line's pull)"); }
     }
-    m_dyn->step(static_cast<double>(dt), load, 0.0);
+    if (held) { m_dyn->step_held(static_cast<double>(dt), load, 0.0); }
+    else { m_dyn->step(static_cast<double>(dt), load, 0.0); }
     m_load = load;
     m_stepped = true;
 }
 
-void FrameTower::step_between (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& /*line_start*/,
+void FrameTower::step_between (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_start,
                                const std::vector<std::array<Real,3>>& line_end)
 {
-    step(dt, node_force, line_end);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_start.size() == m_attach.size() && line_end.size() == m_attach.size(),
+                                     "FrameTower::step_between: one start and one end pull per attachment are needed");
+    std::vector<std::array<Real,3>> mean(line_end.size());
+    for (std::size_t a = 0; a < mean.size(); ++a) {
+        for (std::size_t d = 0; d < 3; ++d) { mean[a][d] = Real(0.5) * (line_start[a][d] + line_end[a][d]); }
+    }
+    advance(dt, node_force, mean, true);
 }
 
 std::array<Real,3> FrameTower::displacement (std::size_t node) const

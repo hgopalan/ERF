@@ -95,9 +95,10 @@ public:
     void step (amrex::Real dt, const std::vector<amrex::Real>& node_force,
                const std::vector<std::array<amrex::Real,3>>& line_force) override;
     /**
-     * Newmark's method takes the loads at the end of the step, and with them the trapezoidal mean
-     * over it: the pulls at the end, not their mean, which would lag them by half a step (a
-     * negative damping of the line's stiffness times dt/2).
+     * The mean of the pulls at the start and the end held over the step with the drag, by the
+     * implicit midpoint rule (FrameDynamics::step_held): the work the frame takes from the pulls is
+     * their mean times the attachments' displacement, the work MoorDyn's lines give up when they
+     * move the attachments at a constant velocity and the mean is their mean pull over the step.
      */
     void step_between (amrex::Real dt, const std::vector<amrex::Real>& node_force,
                        const std::vector<std::array<amrex::Real,3>>& line_start,
@@ -174,6 +175,9 @@ private:
     std::array<amrex::Real,3> to_erf (const std::array<double,3>& v) const;
     /** The frame loads of the tower's present drag and line pulls (6 per node, frame axes). */
     std::vector<double> present_loads (const Tower& tower) const;
+    /** Advance by dt under the drag and line pulls given: at the end of the step (Newmark), or held over it (held, the midpoint rule). */
+    void advance (amrex::Real dt, const std::vector<amrex::Real>& node_force,
+                  const std::vector<std::array<amrex::Real,3>>& line_force, bool held);
     /** A point's motion through its link: of the dynamic displacement u, plus the weight's extra sag since the first temperature. */
     std::array<double,3> moved (const RigidLink& link, const std::vector<double>& u) const;
 

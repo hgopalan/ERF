@@ -63,8 +63,9 @@ erf.conductors.anchor_level       = -1          # -1 .. amr.max_level. The level
                                                 #   amr.max_level. It must exist from the start and for the whole
                                                 #   run, or the run stops. Default: -1
 erf.conductors.air_density        = 1.225       # Real > 0 (kg/m^3). The density MoorDyn applies the drag with. Default: 1.225
-erf.conductors.substeps           = 1           # Integer >= 1. MoorDyn calls per ERF step, the wind held over the step.
-                                                #   Default: 1
+erf.conductors.substeps           = 1           # Integer >= 1. MoorDyn calls per ERF step for lines on fixed supports,
+                                                #   the wind held over the step; lines on moving towers take at least
+                                                #   this many coupling steps. Default: 1
 erf.conductors.moordyn_dt         = 0.0         # Real >= 0 (s). Upper bound on MoorDyn's internal step; 0: none beyond
                                                 #   moordyn_cfl. Default: 0
 erf.conductors.moordyn_cfl        = 0.1         # Real in (0, 0.15]. Courant factor of MoorDyn's internal step. Default: 0.1

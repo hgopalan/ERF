@@ -1,5 +1,6 @@
 # The lines over hills of Conductors_Terrain (two sections dead-ended on three transformers, in a
-# neutral boundary layer over terrain with the k-equation RANS closure), with lattice towers that
+# neutral boundary layer over terrain with the k-equation RANS closure), L1's second tower 80 m
+# further down the hill so that its insulator string carries the conductor, with lattice towers that
 # bend as their frame model: every tower of the lattice type stands on the SubDyn frame of
 # lattice_frame.dat (76 beam members, four fixed legs; case T of Tests/test_files/FrameSubDynTower),
 # loaded by its members' drag and its line's pull, and MoorDyn moves the cross-arms the lines hang

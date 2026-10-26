@@ -71,6 +71,17 @@ public:
                        double gravity, double t = 0.0);
     /** Advance by h (s, > 0) to the loads node_loads and gravity at the end of the step. */
     void step (double h, const std::vector<double>& node_loads, double gravity);
+    /**
+     * Advance by h (s, > 0) under node_loads and gravity held over the step: the implicit midpoint
+     * rule, (u' - u)/h = (v + v')/2 and M (v' - v)/h + C (v + v')/2 + K (u + u')/2 = f, which is
+     * Newmark's method started from the acceleration M a = f - C v - K u under the held loads. The
+     * work f (u' - u) of the held loads then equals the change of the kinetic and strain energy plus
+     * the energy the damping takes, exactly; a partner that moves the frame's loaded points at the
+     * constant velocity (u' - u)/h and returns its mean force over the step exchanges energy with the
+     * frame without loss or gain. Uses the step's K_eff, and the mass matrix factored once per frame
+     * for the acceleration at the end of the step.
+     */
+    void step_held (double h, const std::vector<double>& node_loads, double gravity);
 
     double time () const { return m_t; }
     const std::vector<double>& displacement () const { return m_u; }
@@ -99,6 +110,7 @@ private:
     std::vector<double> m_u, m_v, m_a;
     double m_h{0.0};                  //!< the step the effective stiffness is factored for (s); 0: none yet
     std::shared_ptr<const DenseCholesky> m_keff;   //!< K_eff factored for m_h, shared with the dynamics of the same frame
+    std::shared_ptr<const DenseCholesky> m_mass;   //!< the free mass matrix factored (step_held), shared with the dynamics of the same frame
 };
 
 } // namespace erf_towers

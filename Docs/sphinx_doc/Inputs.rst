@@ -5119,8 +5119,9 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.air_density**                            | the fluid density MoorDyn applies the drag with (kg/m^3) | Real > 0             | 1.225                    |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.substeps**                               | MoorDyn calls per ERF step, the wind held over the step  | Integer >= 1         | 1                        |
-|                                                           | (count)                                                  |                      |                          |
+| **erf.conductors.substeps**                               | MoorDyn calls per ERF step for lines on fixed supports,  | Integer >= 1         | 1                        |
+|                                                           | the wind held over the step; lines on moving towers take |                      |                          |
+|                                                           | at least this many coupling steps (count)                |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.moordyn_dt**                             | an upper bound on MoorDyn's internal step (s); 0: no     | Real >= 0            | 0                        |
 |                                                           | bound beyond moordyn_cfl                                 |                      |                          |

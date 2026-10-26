@@ -243,12 +243,45 @@ void ConductorLine::step_coupled (double time, double dt, const std::vector<Real
             xd[3*j+d] = static_cast<double>(velocity[3*j+d]);
         }
     }
+    // one call per MoorDyn step: MoorDyn's second-order Runge-Kutta step leaves the line's forces at
+    // its midpoint, where it applies them over the whole step, so the mean of the pull over the call
+    // is the mean of the forces after each call (and MoorDyn would otherwise end on a shorter step)
+    const double dtm = m_sys->dt();
+    if (!(std::isfinite(dtm) && dtm > 0.0 && dt / dtm < static_cast<double>(max_moordyn_calls))) {
+        Abort("erf.conductors." + m_in.name + ": MoorDyn's internal step (" + std::to_string(dtm) + " s) would take more than " +
+              std::to_string(max_moordyn_calls) + " calls over a coupling step of " + std::to_string(dt) +
+              " s, or is not positive; check erf.conductors.moordyn_dt and erf.conductors.moordyn_cfl");
+    }
+    int ncall = std::max(1, static_cast<int>(std::ceil(dt / dtm - 1.0e-9)));
+    if (dt / ncall > dtm) { ++ncall; }
+    const double sub = dt / ncall;
+    const int nt = num_spans() - 1;
+    std::vector<std::array<double,3>> sum(static_cast<std::size_t>(nt), std::array<double,3>{{0.0, 0.0, 0.0}});
     double t = time;
-    m_sys->step(m_x, xd, m_f, t, dt);
+    for (int i = 0; i < ncall; ++i) {
+        m_sys->step(m_x, xd, m_f, t, sub);
+        // where the call left them, the start of the next call (and of a step that holds them still)
+        for (std::size_t k = 0; k < m_x.size(); ++k) { m_x[k] += xd[k] * sub; }
+        for (int j = 0; j < nt; ++j) {
+            const auto f = tower_force(j);
+            for (int d = 0; d < 3; ++d) { sum[static_cast<std::size_t>(j)][static_cast<std::size_t>(d)] += static_cast<double>(f[d]); }
+        }
+    }
     m_clock = t;
-    // where the step left them, for a step that holds them still
-    for (std::size_t k = 0; k < m_x.size(); ++k) { m_x[k] += xd[k] * dt; }
+    m_mean_pull.assign(static_cast<std::size_t>(nt), std::array<Real,3>{{0.0, 0.0, 0.0}});
+    for (std::size_t j = 0; j < m_mean_pull.size(); ++j) {
+        for (std::size_t d = 0; d < 3; ++d) { m_mean_pull[j][d] = static_cast<Real>(sum[j][d] / ncall); }
+    }
     check_outputs_finite(time + dt);
+}
+
+double ConductorLine::moordyn_step () const { return m_sys->dt(); }
+
+std::array<Real,3> ConductorLine::mean_tower_force (int j) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(j >= 0 && static_cast<std::size_t>(j) < m_mean_pull.size(),
+                                     "ConductorLine::mean_tower_force: no such tower, or no coupled step taken yet");
+    return m_mean_pull[static_cast<std::size_t>(j)];
 }
 
 std::array<Real,3> ConductorLine::coupled_force (int j) const

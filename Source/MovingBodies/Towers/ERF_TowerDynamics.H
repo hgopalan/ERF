@@ -49,9 +49,11 @@ public:
     }
     /**
      * Advance by dt with the lines' pulls at the start and at the end of the step (the drag
-     * held over it), as the coupling with MoorDyn gives them. By default the tower takes the
-     * mean pull held over the step, which a model that integrates a held load exactly
-     * (OneModeTower) needs; a model whose integrator takes the end-of-step load overrides it.
+     * held over it). The tower takes the mean of the two held over the step: OneModeTower
+     * integrates a held load exactly, FrameTower by the implicit midpoint rule. Either way the
+     * work the tower takes from the pulls is their mean times the attachments' displacement,
+     * which the coupling with MoorDyn makes the work the lines give up, by handing the lines'
+     * mean pull over the step as both the start and the end pull.
      */
     virtual void step_between (amrex::Real dt, const std::vector<amrex::Real>& node_force,
                                const std::vector<std::array<amrex::Real,3>>& line_start,
@@ -156,7 +158,8 @@ public:
                const std::vector<std::array<amrex::Real,3>>& line_force) override;
     /**
      * The mean pull held over the step, integrated exactly; the inertia the footings take at the
-     * step's end (inertial_force()) is that under the end pull, the load the foundation sees then.
+     * step's end (inertial_force()) is that under line_end. The coupling with MoorDyn hands the
+     * lines' mean pull over the step as line_end too, so the footings carry that mean.
      */
     void step_between (amrex::Real dt, const std::vector<amrex::Real>& node_force,
                        const std::vector<std::array<amrex::Real,3>>& line_start,

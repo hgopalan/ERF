@@ -44,6 +44,27 @@ std::shared_ptr<const DenseCholesky> effective_stiffness (const Frame& f, double
     return k;
 }
 
+/**
+ * The free mass matrix of frame f factored, shared by every FrameDynamics of the same frame like
+ * effective_stiffness(). Not thread-safe, for the same reason. A singular mass matrix gives null,
+ * with bad the free degree of freedom where the factorisation failed.
+ */
+std::shared_ptr<const DenseCholesky> mass_factor (const Frame& f, long& bad)
+{
+    static std::map<const Frame*, std::weak_ptr<const DenseCholesky>> cache;
+    bad = -1;
+    const auto found = cache.find(&f);
+    if (found != cache.end()) {
+        if (auto m = found->second.lock()) { return m; }
+    }
+    for (auto it = cache.begin(); it != cache.end();) { it = it->second.expired() ? cache.erase(it) : std::next(it); }
+    auto m = std::make_shared<DenseCholesky>();
+    bad = m->factor(f.assemble_free(0.0, 1.0), f.num_free_dofs());
+    if (bad >= 0) { return nullptr; }
+    cache[&f] = m;
+    return m;
+}
+
 constexpr double two_pi = 2.0 * 3.14159265358979323846;
 
 /**
@@ -295,14 +316,15 @@ std::string FrameDynamics::start (const std::vector<double>& u, const std::vecto
     if (m_a0 != 0.0) { mv = m_frame.apply_mass(v); }
     std::vector<double> r(n);
     for (std::size_t i = 0; i < n; ++i) { r[i] = f[i] - kw[i] - m_a0 * mv[i]; }
-    DenseCholesky mass;
-    const long bad = mass.factor(m_frame.assemble_free(0.0, 1.0), m_frame.num_free_dofs());
-    if (bad >= 0) {
+    long bad = -1;
+    std::shared_ptr<const DenseCholesky> mass = mass_factor(m_frame, bad);
+    if (!mass) {
         return "FrameDynamics::start: the mass matrix is singular at free degree of freedom " + std::to_string(bad) +
                " (a node without mass or rotary inertia)";
     }
+    m_mass = mass;
     std::vector<double> b = to_free(r);
-    mass.solve(b);
+    mass->solve(b);
     m_u = to_full(to_free(u));
     m_v = to_full(to_free(v));
     m_a = to_full(b);
@@ -340,6 +362,45 @@ void FrameDynamics::step (double h, const std::vector<double>& node_loads, doubl
         m_a[i] = an;
         m_u[i] = un[i];
     }
+    m_t += h;
+}
+
+void FrameDynamics::step_held (double h, const std::vector<double>& node_loads, double gravity)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(h) && h > 0.0, "FrameDynamics::step_held: the step must be finite and positive (s)");
+    if (!m_keff || !(std::abs(h - m_h) <= 1.0e-14 * h)) {
+        m_keff = effective_stiffness(m_frame, m_a0, m_a1, h);
+        m_h = h;
+    }
+    if (!m_mass) {
+        long bad = -1;
+        m_mass = mass_factor(m_frame, bad);
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_mass, "FrameDynamics::step_held: the mass matrix is singular (a node without mass or rotary inertia)");
+    }
+    const std::size_t n = m_u.size();
+    // Newmark's K_eff u' = f + M (c0 u + c2 v + a) + C (c1 u + v) with M a = f - C v - K u gives
+    // K_eff (u' - u) = 2 (f - K u) + (4/h) M v; then v' = 2 (u' - u)/h - v, and M a' = f - C v' - K u'
+    const std::vector<double> f = m_frame.load_vector(node_loads, gravity);
+    const std::vector<double> ku = m_frame.apply_stiffness(m_u);
+    const std::vector<double> mv = m_frame.apply_mass(m_v);
+    std::vector<double> r(n);
+    for (std::size_t i = 0; i < n; ++i) { r[i] = 2.0 * (f[i] - ku[i]) + (4.0 / h) * mv[i]; }
+    std::vector<double> b = to_free(r);
+    m_keff->solve(b);
+    const std::vector<double> du = to_full(b);
+    for (std::size_t i = 0; i < n; ++i) {
+        m_u[i] += du[i];
+        m_v[i] = 2.0 * du[i] / h - m_v[i];
+    }
+    // the acceleration at the end of the step, M a' = f - (a0 M + a1 K) v' - K u'
+    std::vector<double> w(n);
+    for (std::size_t i = 0; i < n; ++i) { w[i] = m_u[i] + m_a1 * m_v[i]; }
+    const std::vector<double> kw = m_frame.apply_stiffness(w);
+    const std::vector<double> mv1 = (m_a0 != 0.0) ? m_frame.apply_mass(m_v) : std::vector<double>(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i) { r[i] = f[i] - kw[i] - m_a0 * mv1[i]; }
+    b = to_free(r);
+    m_mass->solve(b);
+    m_a = to_full(b);
     m_t += h;
 }
 

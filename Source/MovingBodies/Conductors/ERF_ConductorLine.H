@@ -115,13 +115,29 @@ public:
     /** Whether the towers' cross-arms are MoorDyn's coupled points, which the caller moves (the towers move). */
     bool towers_move () const { return m_coupled; }
     /**
-     * Advance the line by dt from time (both s) in one MoorDyn call, moving the towers' cross-arms:
-     * each starts displaced by displacement (m, 3 per tower, ERF's frame, from where it stands
-     * unloaded) and moves at velocity (m/s, 3 per tower) over the step. Only for a line whose towers
-     * move. Aborts, naming the line, when MoorDyn returns a value that is not finite.
+     * Advance the line by dt from time (both s), moving the towers' cross-arms: each starts displaced
+     * by displacement (m, 3 per tower, ERF's frame, from where it stands unloaded) and moves at
+     * velocity (m/s, 3 per tower) over the step. MoorDyn is called once per internal step of its own
+     * (MoorDyn's dtM, the step shortened to divide dt), and the line's pull on each tower is read
+     * after every call: MoorDyn's second-order Runge-Kutta step leaves the forces at its midpoint,
+     * which it applies over the whole step, so mean_tower_force() is the mean of those readings.
+     * Only for a line whose towers move. Aborts, naming the line, when MoorDyn returns a value that
+     * is not finite, or when its internal step is not positive or would take more than
+     * max_moordyn_calls calls.
      */
     void step_coupled (double time, double dt, const std::vector<amrex::Real>& displacement,
                        const std::vector<amrex::Real>& velocity);
+    /**
+     * The mean over the last step_coupled() of the line's pull on tower j+1 (N, j from 0; tower_force()
+     * read after every MoorDyn step): the force whose work on the cross-arm, moving at a constant
+     * velocity over the step, is the work the line took from it. It describes that call only: a
+     * set_state() or step() after it leaves it as it was.
+     */
+    std::array<amrex::Real,3> mean_tower_force (int j) const;
+    /** MoorDyn's internal step (s), which step_coupled() calls MoorDyn once per. */
+    double moordyn_step () const;
+    /** The most MoorDyn calls step_coupled() makes over one coupling step. */
+    static constexpr int max_moordyn_calls = 1000000;
     /**
      * The force (N) MoorDyn's last step left on tower j+1's coupled point (j from 0): this line's pull
      * on the cross-arm there (its two spans', or its insulator string's). Force components are the
@@ -282,6 +298,7 @@ private:
     unsigned m_nkin{0};                //!< the number of kinematics points
     bool m_coupled{false};             //!< the towers' cross-arms are MoorDyn's coupled points
     std::vector<double> m_x, m_f;      //!< the coupled points where the last step left them (m, MoorDyn's frame) and their forces (N)
+    std::vector<std::array<amrex::Real,3>> m_mean_pull;   //!< per tower, the mean pull over the last step_coupled() (N)
     std::vector<amrex::Real> m_wind;   //!< 3*m_nkin, the wind last handed to MoorDyn (m/s)
     std::vector<amrex::Real> m_ground; //!< the terrain height under each node (m)
 };

@@ -869,7 +869,8 @@ against the golds written before those changed. The flow is
 ``Conductors_Terrain``'s gold, since nothing goes back into it.
 
 ``Conductors_FrameTowers`` (stub) and ``Conductors_FrameTowers_MoorDyn``
-(real library) run the same lines on towers that bend as their frame model
+(real library) run the same lines, L1's second tower 80 m further down the hill
+so that its insulator string carries the conductor, on towers that bend as their frame model
 (:ref:`sec:TowerFrame`): every lattice tower stands on the SubDyn frame of
 ``lattice_frame.dat`` (76 beam members on four fixed legs, first natural
 frequency 4.22 Hz; case T of ``Tests/test_files/FrameSubDynTower``), its
@@ -882,7 +883,12 @@ statistics of L1's first tower and the middle span of one line are compared
 with golds of each library; the restart parity tests
 ``Conductors_FrameTowers_Restart`` and ``Conductors_FrameTowers_Restart_MoorDyn``
 carry the frames' Newmark state across the checkpoint. The flow is
-``Conductors_Terrain``'s gold.
+``Conductors_Terrain``'s gold. ``Conductors_FrameTowers_CouplingStep_MoorDyn``
+runs the deck with the 76 coupling steps per ERF step ERF chooses and with 160,
+and the tensions of L1's middle span must agree to three digits: the insulator
+strings' axial modes under the frames' stiff cross-arms are resolved by neither
+count, so this holds only while the exchange between the towers and the lines
+gains no energy from them.
 
 ``Conductors_GeneratedTowers`` (stub) and ``Conductors_GeneratedTowers_MoorDyn``
 (real library) run the same lines on towers that bend as a frame ERF generates
