@@ -35,7 +35,7 @@ For a span of chord :math:`c` (m) and unstretched length :math:`L > c` (m)
 the still-air shape is close to a parabola of mid-span sag
 :math:`s = \sqrt{3 c (L - c) / 8}` (m), with the horizontal tension
 :math:`H = w c^2 / (8 s)` (N) for a weight :math:`w` (N/m, net of the air's
-buoyancy) per unit length. MoorDyn's stationary solver finds the elastic
+buoyancy) per unstretched metre, as MoorDyn takes the mass. MoorDyn's stationary solver finds the elastic
 catenary itself, and for every level span between fixed points the start-up
 log prints MoorDyn's sag and end tension against those of the elastic
 catenary (see `Verification`_). A steady crosswind of speed :math:`U` (m/s)
@@ -188,20 +188,23 @@ of slack and 20 segments in air of density 1.2 kg/m^3 (the unit tests
   22.382 degrees on average over 30 to 60 s, against 22.391 degrees from the
   wind span over the weight span (0.04 %), and at most 0.11 degrees along
   the line, the spans either side balancing;
-* in still air the span hangs in the elastic catenary: the parameter
-  :math:`a = H/w` solves :math:`2a\sinh(c/2a) = L_s`, where the stretched
-  length :math:`L_s` exceeds the unstretched one by the strain integrated
-  along the line, :math:`(H/EA)\,(c/2 + (a/2)\sinh(c/a))`. For the test
-  span this gives a sag of 13.584 m, a horizontal tension of 13 256 N and
-  an end tension of 13 473 N; MoorDyn gives 13.599 m and 13 430 N with 20
-  segments and converges to 13.5838 m with 160 (the parabola estimate,
-  12.99 m, and the inextensible catenary, 13.01 m, are both too low). The
+* in still air the span hangs in the elastic catenary (Irvine, *Cable
+  Structures*, 1981), with the weight :math:`w` per unstretched metre as
+  MoorDyn's mass: the horizontal tension :math:`H` solves
+  :math:`c = HL/EA + (2H/w)\,\sinh^{-1}(wL/2H)`, the sag is
+  :math:`(H/w)\,(\sqrt{1 + (wL/2H)^2} - 1) + wL^2/8EA` and the end tension
+  :math:`\sqrt{H^2 + (wL/2)^2}`. For the test span this gives a sag of
+  13.5836 m, a horizontal tension of 13 251 N and an end tension of 13 468 N;
+  MoorDyn gives 13.599 m and 13 430 N with 20 segments and converges to
+  13.5838 m with 160, its stretched length 301.6339 m equal to the
+  catenary's (the parabola estimate, 12.99 m, and the inextensible catenary,
+  13.01 m, are both too low). The
   start-up log prints MoorDyn's sag and end tension against the elastic
   catenary for every level span between fixed points.
 * the dead ends of that span carry its weight and the catenary's horizontal
   tension: the pulls MoorDyn gives on the two fixed points add up to
   4812.82 N downwards against the line's weight of 4812.96 N, and each
-  pulls 13 234 N along the chord against the catenary's 13 256 N (0.17 %).
+  pulls 13 234 N along the chord against the catenary's 13 251 N (0.13 %).
 
 The blowout and swing period agree within 0.1 %, the string swing within
 0.3 % and the still-air sag within 0.11 %; the tests allow 1 % (0.5 % for the
@@ -220,7 +223,7 @@ than a long one and drag the string between them along the line. Once the
 attachments stand on the terrain, each span's length is set from the points
 the conductor hangs from (the bottoms of the strings at the towers), a chord
 :math:`c` over a horizontal distance :math:`h`: the parabola of horizontal
-tension :math:`H` under the weight :math:`w` per unit length is
+tension :math:`H` under the weight :math:`w` per unstretched metre is
 
 .. math::
 
@@ -876,10 +879,13 @@ ends' tensions differ by the weight times the rise, :math:`W c \sin\beta`, since
 the wind does no work along the chord, and the level span's lies half way
 between them, so the upper end carries the level span's plus
 :math:`W c \sin\beta / 2`: against the exact inclined elastic catenary,
-within -0.7 to +0.8 % for chords of 50 to 800 m up to 30 degrees, slacks up to
+within -0.7 to +0.02 % for chords of 50 to 800 m up to 30 degrees, slacks up to
 1 % and axial stiffnesses of :math:`10^7` N or more, falling to 1.7 % low at 3 %
-slack in still air (the level span's alone is 1 to 14 % low at 10 to 30
-degrees, more on the slacker spans). A span's height is the
+slack in still air (the level span's alone is up to 14 % low at 10 to 30
+degrees, more on the slacker spans). Weight and wind are both taken per
+unstretched metre; the wind per stretched metre would raise the tension by
+:math:`\varepsilon F^2/(F^2 + W^2)` for a strain :math:`\varepsilon`, under
+0.1 % at strains below :math:`10^{-3}`. A span's height is the
 wire's effective height: the mean of its two attachment points' heights above the
 ground under them (the bottoms of the insulator strings at the towers), less a
 third of its sag in still air, measured vertically (``asce74_wire_height =

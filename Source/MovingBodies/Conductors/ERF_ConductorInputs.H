@@ -202,20 +202,19 @@ struct Catenary
     amrex::Real horizontal_tension{0.0}; //!< H (N)
     amrex::Real end_tension{0.0};        //!< tension at the attachments (N)
     amrex::Real stretched_length{0.0};   //!< the line's length under its own weight (m)
-    bool solved{false};                  //!< a tension matching the length was found (false: strains near 50 % and above)
+    bool solved{false};                  //!< the end strain T / EA is below 50 % (false: no conductor this model describes)
 };
 
 /**
- * The elastic catenary of a span of unstretched length L, net weight w per unit length and axial
- * stiffness EA hanging between two points at the same height a chord c apart: the catenary
- * parameter a = H / w solves 2 a sinh(c / 2a) = L_s, where the stretched length L_s exceeds L by
- * the strain integrated along the span, (H / EA) (c/2 + (a/2) sinh(c/a)). The unstretched length
- * this gives falls as H grows where the line can hang (end tensions below EA; above it a slack
- * span's turns back down and counts as too slack), so H is found by bisection, for a slack span
- * (L > c) or a taut one held by its stretch (L <= c) alike; `solved` is false when no H matches L
- * (strains near 50 % and above). Used to check MoorDyn's still-air shape.
- * Units: chord, length (m); weight_per_length (N/m, net of the air's buoyancy); axial_stiffness (N).
- * Returns: all zeros when any argument is not positive.
+ * The elastic catenary of a span of unstretched length L, net weight w per unstretched metre (as MoorDyn's
+ * mass per length) and axial stiffness EA hanging between two points at the same height a chord c apart
+ * (Irvine, Cable Structures, 1981): the horizontal tension H solves c = H L / EA + (2H / w) asinh(w L / 2H),
+ * which rises with H, so one bisection serves a slack span (L > c) and a taut one held by its stretch
+ * (L <= c) alike. The sag is (H / w)(sqrt(1 + (w L / 2H)^2) - 1) + w L^2 / 8 EA, the end tension
+ * sqrt(H^2 + (w L / 2)^2). `solved` is false when the end strain reaches 50 % (no conductor; the callers stop).
+ * Used to check MoorDyn's still-air shape and for the ASCE 74 wire loads.
+ * Units: chord, length (m); weight_per_length (N per unstretched m, net of the air's buoyancy); axial_stiffness (N).
+ * Returns: all zeros when any argument is not positive, and when not `solved`.
  */
 Catenary elastic_catenary (amrex::Real chord, amrex::Real length, amrex::Real weight_per_length,
                            amrex::Real axial_stiffness);

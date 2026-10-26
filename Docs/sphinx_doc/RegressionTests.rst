@@ -993,8 +993,8 @@ check for a 40 m/s gust over open country (``conductors/asce74.csv``, the
 heights measured to the bottoms of the strings) is compared with a gold.
 ``Conductors_Circuit_Legacy`` and ``Conductors_Circuit_Legacy_MoorDyn`` run the
 same deck with the check's earlier forms (``asce74_wire_height = attachment``,
-``asce74_inclined_spans = false``) against the ``asce74.csv`` golds written
-before those changed. The flow is
+``asce74_inclined_spans = false``, with the current elastic catenary) against
+golds of their ``asce74.csv``. The flow is
 ``Conductors_FlowWind``'s gold, since nothing goes back into it.
 
 ``Conductors_Terrain`` (stub) and ``Conductors_Terrain_MoorDyn`` (real

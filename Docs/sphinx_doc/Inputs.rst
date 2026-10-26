@@ -5666,7 +5666,7 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<line>.diameter**                        | conductor diameter (m)                                   | Real > 0             | must be set              |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<line>.mass_per_length**                 | mass per unit length (kg/m)                              | Real > air_density * | must be set              |
+| **erf.conductors.<line>.mass_per_length**                 | mass per unstretched metre (kg/m), as MoorDyn takes it   | Real > air_density * | must be set              |
 |                                                           |                                                          | pi * diameter^2 / 4  |                          |
 |                                                           |                                                          | (the air the         |                          |
 |                                                           |                                                          | conductor displaces) |                          |

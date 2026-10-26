@@ -108,20 +108,36 @@ TEST(ConductorInputs, ASingleSpanLineIsReadWithItsDefaultsAndDerivedGeometry)
     EXPECT_DOUBLE_EQ(in.epsilon, 2.0);
 }
 
-// The elastic catenary of the 300 m Drake span with 1.5 m of slack (net weight 15.9634 N/m in air of
-// 1.2 kg/m^3, EA 3e7 N): reference values from an independent solution of the same equations, which
-// MoorDyn-C reproduces to 0.002 % with 160 segments (sag 13.5838 m, stretched length 301.6339 m)
+// The elastic catenary of the 300 m Drake span with 1.5 m of slack (net weight 15.9634 N per unstretched
+// metre in air of 1.2 kg/m^3, EA 3e7 N): reference values from a direct integration of the cable's equations in
+// the unstretched arc length (scipy quad to 1e-13, not the closed form the code uses), which MoorDyn-C reproduces
+// with 160 segments (sag 13.5838 m, 0.0013 %; stretched length 301.6339 m). The weight taken per stretched metre
+// (the form before) gives H 13256.4 N and an end tension 0.04 % high.
 TEST(ConductorInputs, ElasticCatenaryOfALevelSpan)
 {
     const double w = (1.628 - 1.2 * 0.25 * 3.14159265358979323846 * 0.0281 * 0.0281) * 9.81;
     const auto cat = erf_conductors::elastic_catenary(300.0, 301.5, w, 3.0e7);
-    EXPECT_NEAR(cat.sag, 13.5841, 1.0e-4 * 13.5841);
-    EXPECT_NEAR(cat.horizontal_tension, 13256.4, 1.0e-4 * 13256.4);
-    EXPECT_NEAR(cat.end_tension, 13473.3, 1.0e-4 * 13473.3);
-    EXPECT_NEAR(cat.stretched_length, 301.6340, 1.0e-6 * 301.634);
+    // a float holds the reference to its 7 digits
+    const double tol = (std::is_same<amrex::Real, float>::value) ? 2.0e-6 : 1.0e-7;
+    EXPECT_NEAR(cat.sag, 13.583619, tol * 13.583619);
+    EXPECT_NEAR(cat.horizontal_tension, 13251.040118, tol * 13251.04);
+    EXPECT_NEAR(cat.end_tension, 13467.784064, tol * 13467.78);
+    EXPECT_NEAR(cat.stretched_length, 301.633901, tol * 301.634);
     // inextensible in the limit of a stiff line: sag 13.0131 m, more than the parabola's 12.9904 m
     const auto stiff = erf_conductors::elastic_catenary(300.0, 301.5, w, 1.0e15);
-    EXPECT_NEAR(stiff.sag, 13.0131, 1.0e-4 * 13.0131);
+    EXPECT_NEAR(stiff.sag, 13.013092, tol * 13.013092);
+    // three more spans against the same direct integration (c, L, w, EA, sag, end tension): a short span under
+    // ASCE 74's 40 m/s wind resultant, a taut span held by its stretch, a soft span with 10 % slack (mean strain
+    // 0.2 %, where the weight per stretched metre was 0.2 % off)
+    const double refs[3][6] = {{50.0, 50.25, 29.6, 3.0e7, 2.19952987, 4280.75364},
+                               {300.0, 300.0, w, 3.0e7, 5.87021531, 30671.1252},
+                               {150.0, 165.0, 15.95, 1.0e6, 30.3471848, 2033.41948}};
+    for (const auto& r : refs) {
+        const auto ref = erf_conductors::elastic_catenary(amrex::Real(r[0]), amrex::Real(r[1]), amrex::Real(r[2]), amrex::Real(r[3]));
+        EXPECT_TRUE(ref.solved) << r[0] << " m";
+        EXPECT_NEAR(ref.sag, r[4], 4.0 * tol * r[4]) << r[0] << " m";
+        EXPECT_NEAR(ref.end_tension, r[5], 4.0 * tol * r[5]) << r[0] << " m";
+    }
     // H L / EA = 4e-9 m; a float holds 301.5 to 3e-5 m
     EXPECT_NEAR(stiff.stretched_length, 301.5, (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-6);
     // no slack: the line is held by its stretch alone, which matches the parabola's extra length
@@ -133,8 +149,9 @@ TEST(ConductorInputs, ElasticCatenaryOfALevelSpan)
 
 // Shorter slack spans, against Irvine's elastic catenary of a level span (the unstretched length L
 // and weight w per unstretched length): c = H L / EA + (2H / w) asinh(w L / 2H), sag
-// w L^2 / 8 EA + (H / w)(sqrt(1 + (w L / 2H)^2) - 1), solved here on its own. The two models differ
-// by the line's strain (1.5e-4 here); a 100 m span with 0.5 m of slack once gave a sag of 1e129 m
+// w L^2 / 8 EA + (H / w)(sqrt(1 + (w L / 2H)^2) - 1), solved here on its own. The code solves the same
+// model, so the two agree to roundoff (the form before, the weight per stretched metre, differed by the
+// strain, 1.5e-4 here); a 100 m span with 0.5 m of slack once gave a sag of 1e129 m
 TEST(ConductorInputs, ElasticCatenaryOfShortSlackSpans)
 {
     const double EA = 3.0e7;
@@ -155,16 +172,17 @@ TEST(ConductorInputs, ElasticCatenaryOfShortSlackSpans)
             double H = 0.0, sag = 0.0;
             irvine(c, L, w, H, sag);
             const auto cat = erf_conductors::elastic_catenary(amrex::Real(c), amrex::Real(L), amrex::Real(w), amrex::Real(EA));
-            EXPECT_NEAR(cat.sag, sag, 1.0e-3 * sag) << "chord " << c << " m, " << w << " N/m";
-            EXPECT_NEAR(cat.horizontal_tension, H, 1.0e-3 * H) << "chord " << c << " m, " << w << " N/m";
+            const double tol = (std::is_same<amrex::Real, float>::value) ? 2.0e-3 : 1.0e-9;
+            EXPECT_NEAR(cat.sag, sag, tol * sag) << "chord " << c << " m, " << w << " N/m";
+            EXPECT_NEAR(cat.horizontal_tension, H, tol * H) << "chord " << c << " m, " << w << " N/m";
         }
     }
 }
 
-// Over 378 spans (5 to 1500 m, slack 1e-5 to 300 %, 3 to 30 N/m, EA 3e6 to 1e8 N) the sag is Irvine's
-// to 1e-3 plus twice the end strain (the models differ by the strain); a guard at 3 EA instead of EA
-// fails two of them (a 10.2 m span with 177 % slack sags 5.6e6 m). A line stretched near 50 % and more
-// has no solution in this model, and says so.
+// Over 378 spans (5 to 1500 m, slack 1e-5 to 300 %, 3 to 30 N/m, EA 3e6 to 1e8 N) the sag and the end
+// tension are Irvine's to 1e-9 (the form before, the weight per stretched metre, differed by up to twice
+// the end strain and needed a slack-side guard: a 10.2 m span with 177 % slack once sagged 5.6e6 m). A line
+// stretched by half its length or more is no conductor, and says so.
 TEST(ConductorInputs, ElasticCatenaryOverASweepAndOutsideItsRange)
 {
     auto irvine = [] (double c, double L, double w, double EA, double& sag, double& T) {
@@ -188,16 +206,20 @@ TEST(ConductorInputs, ElasticCatenaryOverASweepAndOutsideItsRange)
                     const auto cat = erf_conductors::elastic_catenary(amrex::Real(c), amrex::Real(c * (1.0 + slack)),
                                                                       amrex::Real(w), amrex::Real(EA));
                     EXPECT_TRUE(cat.solved) << c << " m, slack " << slack << ", " << w << " N/m, EA " << EA;
-                    EXPECT_NEAR(cat.sag, sag, (1.0e-3 + 2.0 * T / EA + rel) * sag)
+                    EXPECT_NEAR(cat.sag, sag, (1.0e-9 + rel) * sag)
+                        << c << " m, slack " << slack << ", " << w << " N/m, EA " << EA;
+                    EXPECT_NEAR(cat.end_tension, T, (1.0e-9 + rel) * T)
                         << c << " m, slack " << slack << ", " << w << " N/m, EA " << EA;
                 }
             }
         }
     }
-    // a 55 m span of 1000 N EA under 15.95 N/m stretches about 50 %: no solution, flagged
+    // a 55 m span of 500 N EA under 15.95 N/m: an end strain of 96 %, no conductor; flagged
     const auto over = erf_conductors::elastic_catenary(amrex::Real(55.09), amrex::Real(55.09 * 1.026), amrex::Real(15.95),
-                                                       amrex::Real(1000.0));
+                                                       amrex::Real(500.0));
     EXPECT_FALSE(over.solved);
+    EXPECT_EQ(over.sag, 0.0) << "an unsolved span returns zeros (its sag need not fit a float)";
+    EXPECT_EQ(over.end_tension, 0.0);
 }
 
 TEST(ConductorInputs, TheGustLengthScaleFollowsTheASCE74Exposure)

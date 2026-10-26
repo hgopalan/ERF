@@ -18,7 +18,7 @@
  * Transmission and Substation Structures Conference 2009, Tables 1 and 2):
  *   B (suburban, wooded): alpha = 7.0, z_g = 1200 ft, kappa = 0.010, L_s = 170 ft;
  *   C (open country):     alpha = 9.5, z_g =  900 ft, kappa = 0.005, L_s = 220 ft.
- * The span then swings about its chord by atan(F / (W cos beta)), W its net weight per length and
+ * The span then swings about its chord by atan(F / (W cos beta)), W its net weight per unstretched metre and
  * beta the chord's angle to the horizontal (the weight's part along an inclined chord is carried by
  * the tension, not by the swing), and hangs as an elastic catenary under the resultant
  * sqrt(F^2 + (W cos beta)^2) across the chord, as a level span of the chord's length: its sag in
@@ -67,7 +67,7 @@ struct WireWindLoad
     double gust_response{0.0};//!< G_w (-)
     double pressure{0.0};     //!< Q k_z V^2 (Pa)
     double load{0.0};         //!< the wind load per length, Q k_z V^2 G_w C_f d (N/m)
-    double weight{0.0};       //!< the net weight per length (N/m)
+    double weight{0.0};       //!< the net weight per unstretched metre (N/m)
     double swing{0.0};        //!< the span's swing about its chord, atan(load / (weight cos(incline))) (rad)
     double sag{0.0};          //!< mid-span sag below the chord in the swung plane (m)
     double tension{0.0};      //!< the upper end's tension under the resultant load, on the chord's incline given (N)
@@ -84,7 +84,7 @@ struct WireWindLoad
  * @param chord        the span's chord (m, > 0), also the span length L of B_w
  * @param diameter     d (m, > 0)
  * @param cf           the drag coefficient C_f (-, >= 0)
- * @param weight       the net weight per length W (N/m, > 0)
+ * @param weight       the net weight per unstretched metre W (N/m, > 0)
  * @param length       the span's unstretched length (m, > 0)
  * @param EA           axial stiffness (N, > 0)
  * @param air_density  rho (kg/m^3, > 0)

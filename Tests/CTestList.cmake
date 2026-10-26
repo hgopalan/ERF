@@ -4275,8 +4275,8 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_Circuit Conductors_Circuit "plt00010" "P2_span2.dat"
                         "P2_span2.dat.gold" 8 Conductors_FlowWind EXTRA_LOGS "${_circuit_logs}" GOLD_SUFFIX ".gold")
-    # the old forms of the ASCE 74 check (the attachment height, the whole weight on an inclined chord) give
-    # the asce74.csv written before they changed
+    # the old forms of the ASCE 74 check (the attachment height, the whole weight on an inclined chord), with
+    # the current elastic catenary, against their own asce74.csv golds
     add_test_conductors(Conductors_Circuit_Legacy Conductors_Circuit "plt00010" "conductors/asce74.csv"
                         "asce74.csv.legacy.gold" 8 Conductors_FlowWind OPTIONS "${_asce74_old_forms}")
     set(_circuit_restart Conductors_Circuit_Restart)

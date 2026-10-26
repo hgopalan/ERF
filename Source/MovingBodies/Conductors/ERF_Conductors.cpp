@@ -259,7 +259,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
                             << cat.end_tension << " N (MoorDyn's differ by " << 100.0 * (c.mid_sag(k) / cat.sag - 1.0) << " % and "
                             << 100.0 * (c.tension_a(k) / cat.end_tension - 1.0) << " %)\n";
                 } else {
-                    Print() << "  " << s.name << which << ": no elastic catenary at this stiffness (a strain near 50 % or more)\n";
+                    Print() << "  " << s.name << which << ": no elastic catenary at this stiffness (an end strain of 50 % or more)\n";
                 }
             }
         }
@@ -374,7 +374,7 @@ Conductors::write_asce74 () const
                                                           static_cast<double>(m_in.air_density), incline);
             if (!L.solved) {
                 Abort("erf.conductors." + s.name + ": span " + std::to_string(k + 1) + " has no elastic catenary under the ASCE 74 load "
-                      "(axial_stiffness " + std::to_string(s.axial_stiffness) + " N would stretch it near 50 % or more)");
+                      "(axial_stiffness " + std::to_string(s.axial_stiffness) + " N would give an end strain of 50 % or more)");
             }
             out << s.name << "," << k + 1 << "," << z << "," << s.conductor_chord(k) << "," << s.lengths[static_cast<std::size_t>(k)] << ","
                 << L.kz << "," << L.gust_response << ","
