@@ -153,7 +153,10 @@ we specific inflow/outflow in the x-direction, and periodic in the y-direction, 
 from :cpp:`BndryFiles` will actually be used. A plane holds the domain's cells only along its face;
 the ghost cells beside the face in the other directions take the plane's periodic image along a
 periodic direction (as the interior cells across the seam do) and its nearest cell along a
-non-periodic one.
+non-periodic one. The planes hold level-0 cells; a refined level's ghost cells and faces take a
+linear blend of the two plane cells either side of them along each direction tangential to the
+face, those two cells found by the same periodic image or nearest cell, so the blend runs across
+a periodic seam as it does inside the domain.
 
 ::
 

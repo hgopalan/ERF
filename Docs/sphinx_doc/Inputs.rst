@@ -5604,7 +5604,7 @@ List of Parameters
 .. _sec:ConductorInputs:
 
 Conductor lines (MoorDyn lines)
--------------------------------
+===============================
 
 Overhead conductors, shield wires and their insulator strings, their motion
 in the wind computed by MoorDyn-C; see :ref:`sec:Conductors` for the model

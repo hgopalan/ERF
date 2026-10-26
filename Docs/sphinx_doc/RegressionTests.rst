@@ -946,6 +946,17 @@ carries the source and its small wake and so has a gold per library, the
 runner checks in every row of ``conductors/total_load.dat`` that the
 integrated momentum source equals the force the lines put into the air.
 
+``Conductors_TwoLevel`` (stub) and ``Conductors_TwoLevel_MoorDyn`` (real
+library) run the same span on a refined level: a static level-1 box (x 400 to
+1100 m, y 300 to 700 m, up to 200 m, below the domain's top), its steps
+subcycled. The lines step on that level, take its wind and put their drag into
+its flow; the span's log and the two-level plotfile are compared with golds,
+and every row of ``conductors/total_load.dat`` must show the source integrating
+to the force on the air. ``Conductors_TwoLevel_Restart`` and
+``Conductors_TwoLevel_Restart_MoorDyn`` carry the lines and their source
+across the checkpoint, the checkpointing run going on past it
+(``CHK_LEG_END``) so that the restarted run must drop the rows written after it.
+
 ``Conductors_Restart`` (stub) and ``Conductors_Restart_MoorDyn`` (real
 library) are the restart parity tests of ``Conductors_DragOnFlow``, the
 coupled case with ``drag_on_flow`` on: ten steps
@@ -1032,7 +1043,8 @@ hilltop line's first tower and the middle span of one line are compared with
 golds of each library (the real library's to four digits, as above); the
 restart parity tests ``Conductors_MovingTowers_Restart`` and
 ``Conductors_MovingTowers_Restart_MoorDyn`` carry the towers' sway across
-the checkpoint. ``Conductors_MovingTowers_Legacy`` and
+the checkpoint, the checkpointing run going on past it (``CHK_LEG_END``) so
+that every conductor and tower log is trimmed back to the checkpoint. ``Conductors_MovingTowers_Legacy`` and
 ``Conductors_MovingTowers_Legacy_MoorDyn`` run the deck with the towers'
 earlier forms (``diagonal_wind_factor = false``, ``arm_outside_shaft = false``)
 against the golds written before those changed. The flow is
@@ -1052,7 +1064,9 @@ cross-arm displacement, largest member utilisation), the
 statistics of L1's first tower and the middle span of one line are compared
 with golds of each library; the restart parity tests
 ``Conductors_FrameTowers_Restart`` and ``Conductors_FrameTowers_Restart_MoorDyn``
-carry the frames' Newmark state across the checkpoint. The flow is
+carry the frames' Newmark state across the checkpoint, the checkpointing run
+going on past it (``CHK_LEG_END``) so that every conductor log is trimmed back
+to the checkpoint. The flow is
 ``Conductors_Terrain``'s gold. ``Conductors_FrameTowers_CouplingStep_MoorDyn``
 runs the deck with the 76 coupling steps per ERF step ERF chooses and with 160,
 and the tensions of L1's middle span must agree to three digits: the insulator
