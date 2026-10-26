@@ -47,23 +47,22 @@ def gw(e, z, span):
 
 
 def elastic_catenary(chord, length, w, EA):
-    """End tension and sag of a level elastic catenary (ERF_ConductorInputs.H, elastic_catenary)."""
-    def unstretched(H):
-        a = H / w
-        x = chord / (2 * a)
-        if x > 300:
-            return float("inf")
-        return 2 * a * math.sinh(x) - H / EA * (0.5 * chord + 0.5 * a * math.sinh(chord / a))
-    lo, hi = math.log(1e-6 * w * chord), math.log(1e3 * EA)
+    """End tension and sag of a level elastic catenary (ERF_ConductorInputs.H, elastic_catenary): Irvine's,
+    with w per unstretched metre, H from chord = H L / EA + (2H / w) asinh(w L / 2H)."""
+    q = 0.5 * w * length
+
+    def chord_of(H):
+        return H * length / EA + 2.0 * H / w * math.asinh(q / H)
+    lo, hi = math.log(1e-12 * q), math.log(EA * (chord + 1.0) / length + q)
     for _ in range(200):
         mid = 0.5 * (lo + hi)
-        if unstretched(math.exp(mid)) > length:
+        if chord_of(math.exp(mid)) < chord:
             lo = mid
         else:
             hi = mid
     H = math.exp(0.5 * (lo + hi))
-    a = H / w
-    return H * math.cosh(chord / (2 * a)), a * (math.cosh(chord / (2 * a)) - 1)
+    r = q / H
+    return math.hypot(H, q), H / w * (r * r / (math.sqrt(1.0 + r * r) + 1.0)) + w * length ** 2 / (8.0 * EA)
 
 
 def inputs_value(text, key, default=None):

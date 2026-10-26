@@ -169,35 +169,35 @@ Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
 {
     Catenary cat;
     if (!(chord > 0.0 && length > 0.0 && w > 0.0 && EA > 0.0)) { return cat; }
-    // for a horizontal tension H the catenary parameter is a = H / w, the stretched length
-    // L_s = 2 a sinh(c / 2a), and the unstretched length L_s - (H / EA) (c/2 + (a/2) sinh(c/a)).
-    // Where the line could hang, its end tension H cosh(c / 2a) is far below EA, and there the
-    // unstretched length falls as H grows; on the slack side it turns back down once the stretch
-    // term outgrows the arc (at end tensions from about EA to tens of EA), so every slack H whose
-    // end tension reaches EA counts as too slack. The H that gives the line's length is then found by bisection (on
-    // log H, in double precision whatever Real is)
-    const double c = chord, L = length;
-    auto unstretched = [&](double H) {
-        const double a = H / static_cast<double>(w);
-        const double x = c / (2.0 * a);
-        if (x > 300.0) { return std::numeric_limits<double>::max(); }   // so slack that sinh overflows
-        if (x > 1.0 && H * std::cosh(x) > static_cast<double>(EA)) { return std::numeric_limits<double>::max(); }
-        return 2.0 * a * std::sinh(x) - H / static_cast<double>(EA) * (0.5 * c + 0.5 * a * std::sinh(c / a));
-    };
-    double lo = std::log(1.0e-6 * static_cast<double>(w) * c), hi = std::log(1.0e3 * static_cast<double>(EA));
+    // Irvine's elastic catenary of a level span, in the unstretched arc length s: the weight w acts per unstretched
+    // metre (as MoorDyn's mass), the vertical tension is V = w (s - L/2), the tension T = sqrt(H^2 + V^2) and each
+    // unstretched metre stretches by T / EA. Integrating dx/ds = (H/T)(1 + T/EA) over the span gives the chord
+    //   c(H) = H L / EA + (2H / w) asinh(w L / 2H),
+    // which rises with H from 0 to infinity, so every chord has one H, slack (L > c) or taut (L <= c). It is found by
+    // bisection on log H, in double precision whatever Real is
+    const double c = chord, L = length, wd = w, EAd = EA, q = 0.5 * wd * L;
+    auto chord_of = [&](double H) { return H * L / EAd + 2.0 * H / wd * std::asinh(q / H); };
+    // the bracket: c(H) > H L / EA, so c(EA (c + 1) / L) > c; and c(H) -> 0 as H -> 0, below c at H = 1e-12 w L / 2
+    double lo = std::log(1.0e-12 * q), hi = std::log(EAd * (c + 1.0) / L + q);
     for (int it = 0; it < 200; ++it) {
         const double mid = 0.5 * (lo + hi);
-        if (unstretched(std::exp(mid)) > L) { lo = mid; } else { hi = mid; }
+        if (chord_of(std::exp(mid)) < c) { lo = mid; } else { hi = mid; }
     }
     const double H = std::exp(0.5 * (lo + hi));
-    const double a = H / static_cast<double>(w);
-    // an answer on a bracket's edge or on the guard's seam is no answer: the model's stretch has no root
-    // there (strains near 50 % and above), and the caller must not take it for a sag
-    cat.solved = std::abs(unstretched(H) - L) <= 1.0e-6 * L;
+    const double T = std::hypot(H, q);
+    // the linear stretch has a root at any strain, but a conductor stretched by half its length or more is not a
+    // line this model describes; say so, as the callers stop on it
+    cat.solved = std::abs(chord_of(H) - c) <= 1.0e-9 * c && T < 0.5 * EAd;
+    // the callers use nothing of an unsolved span, and its sag may not fit a float Real
+    if (!cat.solved) { return cat; }
     cat.horizontal_tension = static_cast<Real>(H);
-    cat.sag = static_cast<Real>(a * (std::cosh(c / (2.0 * a)) - 1.0));
-    cat.end_tension = static_cast<Real>(H * std::cosh(c / (2.0 * a)));
-    cat.stretched_length = static_cast<Real>(2.0 * a * std::sinh(c / (2.0 * a)));
+    // the mid-span sag: the inextensible catenary's in the unstretched length, plus the stretch's w L^2 / 8 EA
+    // (sqrt(1 + r^2) - 1 written as r^2 / (sqrt(1 + r^2) + 1): no cancellation on a taut span, where r = q / H is small)
+    const double r = q / H;
+    cat.sag = static_cast<Real>(H / wd * (r * r / (std::sqrt(1.0 + r * r) + 1.0)) + wd * L * L / (8.0 * EAd));
+    cat.end_tension = static_cast<Real>(T);
+    // the stretched length L + (1/EA) integral of T ds
+    cat.stretched_length = static_cast<Real>(L + (q * T + H * H * std::asinh(q / H)) / (wd * EAd));
     return cat;
 }
 
