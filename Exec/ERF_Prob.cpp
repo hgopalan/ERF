@@ -12,6 +12,7 @@
 #include "ERF_MicrophysicsConstants.H"
 #include "ERF_TerrainMetrics.H"
 #include "Prob/ERF_ProblemDispatch.H"
+#include "Prob/ERF_ProbHeights.H"
 
 using namespace amrex;
 
@@ -198,8 +199,9 @@ Problem::init_custom_pert (
     else if (my_prob_name_ci == "bellforest") {
         // No state perturbation; uniform flow is set in init_custom_pert_vels
     }
-    else if (my_prob_name_ci == "wps"   ||
-             my_prob_name_ci == "metgrid") {
+    else if (my_prob_name_ci == "wps"     ||
+             my_prob_name_ci == "metgrid" ||
+             my_prob_name_ci == "perlin07") {
 #include "Prob/ERF_InitCustomPert_KE.H"
     }
     else {
@@ -358,7 +360,12 @@ Problem::update_rhotheta_sources (const double& time,
 
     if (my_prob_name_ci == "bomex") {
 #include "Prob/ERF_UpdateRhoThetaSources_Bomex.H"
-    } else if (my_prob_name_ci == "constant_rhotheta_src") {
+    } else if (my_prob_name_ci == "constant_rhotheta_src" ||
+               my_prob_name_ci == "perlin07") {
+        // perlin07 is the idealized coastal upwelling case of Perlin et al.
+        // (2007), which applies a uniform 1 K/day radiative cooling; it uses
+        // the same height-independent tendency as constant_rhotheta_src, set
+        // through prob.advection_heating_rate.
 #include "Prob/ERF_UpdateRhoThetaSources_Constant.H"
     } else if (my_prob_name_ci == "rico") {
 #include "Prob/ERF_UpdateRhoThetaSources_RICO.H"

@@ -105,6 +105,11 @@ ERF::init_from_metgrid (int lev)
     if (metgrid_force_sfc_k > 0)
         AMREX_ALWAYS_ASSERT(metgrid_use_sfc);
 
+    // The surface is used through metgrid_force_sfc_k ERF levels, so it must be one of them
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(metgrid_force_sfc_k >= 0 &&
+                                     metgrid_force_sfc_k <= geom[lev].Domain().length(2),
+        "erf.metgrid_force_sfc_k must be in [0, number of ERF vertical levels]");
+
     // Base state parameters from WRF and the layer interfaces derived from them.
     BaseStateParams bsp;
     bsp.set_layer_interfaces();
@@ -368,7 +373,7 @@ ERF::init_from_metgrid (int lev)
             // check and still yield a degenerate or inverted first layer.  Since
             // reconstruction is the default here, check now rather than letting a
             // bad Jacobian propagate.  This mirrors the check that
-            // init_terrain_from_wrfinput does on its reconstructed levels.
+            // init_from_wrfinput makes on the mesh it builds.
             {
                 Print() << "Verifying grid integrity" << std::endl;
 
@@ -751,6 +756,11 @@ ERF::init_from_metgrid (int lev)
         } // lev==0
 
     } // itime
+
+    // SLM's land state, from this level's own met_em file
+    if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+        init_lsm_from_metgrid(lev, nc_init_file[lev][0], NC_dateTime[0]);
+    }
 
     // FillBoundary to populate the internal halo cells
      r_hse.FillBoundary(geom[lev].periodicity());

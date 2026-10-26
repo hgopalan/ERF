@@ -57,8 +57,7 @@ prognostic variables. See :ref:`sec:SpectralBinMicrophysics`.
 | 6-class            |                         |             |             |                 |             |
 +--------------------+-------------------------+-------------+-------------+-----------------+-------------+
 | Spectral-bin       | ``SBM``                 | :math:`q_r` | --          | --              | --          |
-| infrastructure     |                         |             |             |                 |             |
-| fixture            |                         |             |             |                 |             |
+| advection          |                         |             |             |                 |             |
 +--------------------+-------------------------+-------------+-------------+-----------------+-------------+
 | Super-Droplet      | ``SuperDroplets``       | :math:`q_i` | :math:`q_r` | :math:`q_s`     | :math:`q_g` |
 | Method (SDM)       |                         |             |             |                 |             |
@@ -67,12 +66,14 @@ prognostic variables. See :ref:`sec:SpectralBinMicrophysics`.
 
 .. warning::
 
-   ``SBM`` is currently a bounded zero-transport infrastructure fixture, not
-   yet a production spectral-bin cloud-microphysics option. It stores and
-   validates a liquid spectral distribution and projects that distribution to
-   bulk ``qc`` and ``qr``, but spectral transport and cloud microphysical
-   processes are not yet enabled. See
-   :ref:`sec:SpectralBinMicrophysics` for the current supported configuration.
+   ``SBM`` currently provides resolved liquid-spectrum advection on one
+   atmospheric grid level, not complete warm-cloud microphysics. The
+   authoritative distribution is transported with ERF's dry-air mass flux
+   and projected to ``qc`` and ``qr``. Aerosol activation or evolution,
+   condensational growth, collision-coalescence, sedimentation,
+   precipitation, and operational multilevel spectral transport are not yet
+   available. See :ref:`sec:SpectralBinMicrophysics` for the supported
+   configuration.
 
 .. note::
 
