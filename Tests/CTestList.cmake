@@ -678,7 +678,7 @@ endif()
 if(ERF_TEST_PYTHON)
   add_test(NAME FirePlotfileDoc_MatchesCatalog
       COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py
-              --catalog ${PROJECT_SOURCE_DIR}/Source/Fire/ERF_FirePlotfileCatalog.H
+              --catalog ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FirePlotfileCatalog.H
               --doc ${PROJECT_SOURCE_DIR}/Docs/sphinx_doc/theory/fire_output.rst)
   add_test(NAME FirePlotfileDoc_SelfTest
       COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py --self-test)

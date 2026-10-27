@@ -3982,9 +3982,23 @@ ERF::ReadParameters ()
         pp.queryAdd("plot2d_per_2",  m_plot2d_per_2);
 
 #ifdef ERF_ENABLE_FIRE
-        pp.query("fire_plot_file", m_fire_plot_file);
-        pp.query("fire_plot_int",  m_fire_plot_int);
-        pp.query("fire_plot_per",  m_fire_plot_per);
+        // The engine's own fire plotfile (erf.fire.plot_*, as upstream ERF reads
+        // them), on the 3D plotfile schedule unless the deck gives one of its own
+        for (const char* old_key : {"fire_plot_file", "fire_plot_int", "fire_plot_per"}) {
+            if (pp.contains(old_key)) {
+                Abort(std::string("erf.") + old_key + " is now erf.fire." + std::string(old_key).substr(5));
+            }
+        }
+        {
+            ParmParse pp_fire("erf.fire");
+            pp_fire.query("plot_file", m_fire_plot_file);
+            const bool int_given = pp_fire.query("plot_int", m_fire_plot_int);
+            const bool per_given = pp_fire.query("plot_per", m_fire_plot_per);
+            if (!int_given && !per_given) {
+                m_fire_plot_int = m_plot3d_int_1;
+                m_fire_plot_per = m_plot3d_per_1;
+            }
+        }
 #endif
 
         pp.query("subvol_file",   subvol_file);

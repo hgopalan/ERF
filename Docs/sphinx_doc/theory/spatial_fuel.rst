@@ -114,7 +114,7 @@ distance field replaces the sentinel.
 Input Parameters
 ----------------
 
-Phase 10 adds fuel map and firebreak configuration parameters to the fire module. All parameters use the ``erf.fire.*`` prefix. Consult ``Source/Fire/ERF_FireParams.H`` for default values and code documentation.
+Phase 10 adds fuel map and firebreak configuration parameters to the fire module. All parameters use the ``erf.fire.*`` prefix. Consult ``FireEngine/ERF_FireParams.H`` for default values and code documentation.
 
 .. list-table:: Spatial Fuel Map Parameters
    :widths: 35 15 15 35

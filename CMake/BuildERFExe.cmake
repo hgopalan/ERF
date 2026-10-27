@@ -243,9 +243,9 @@ function(build_erf_lib erf_lib_name)
     if(NOT ERF_ENABLE_FIRE)
       # the dust layer applies the native fire engine's terrain wind corrections
       target_sources(${erf_lib_name} PRIVATE
-                     ${SRC_DIR}/Fire/ERF_FireWindAdjust.cpp)
+                     ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireWindAdjust.cpp)
       target_include_directories(${erf_lib_name} PUBLIC
-                                 $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Fire>)
+                                 $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/FireEngine>)
     endif()
     target_sources(${erf_lib_name} PRIVATE
                    ${SRC_DIR}/Dust/ERF_DustGrid.cpp
@@ -453,21 +453,23 @@ function(build_erf_lib erf_lib_name)
     target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/FireCoupling>)
     # The native fire engine (erf.fire.engine = native)
     target_sources(${erf_lib_name} PRIVATE
-      ${SRC_DIR}/Fire/ERF_FireEnginePrerequisites.cpp
-      ${SRC_DIR}/Fire/ERF_FireWindAdjust.cpp
-      ${SRC_DIR}/Fire/ERF_FireTerrainReader.cpp
-      ${SRC_DIR}/Fire/ERF_TerrainSlope.cpp
-      ${SRC_DIR}/Fire/ERF_Rothermel.cpp
-      ${SRC_DIR}/Fire/ERF_FireLayer.cpp
-      ${SRC_DIR}/Fire/ERF_FireCheckpoint.cpp
-      ${SRC_DIR}/Fire/ERF_FireSuppression.cpp
-      ${SRC_DIR}/Fire/ERF_Fire.cpp
-      ${SRC_DIR}/Fire/ERF_FirePlotfile.cpp
-      ${SRC_DIR}/Fire/ERF_StructureIgnition.cpp
-      ${SRC_DIR}/Fire/ERF_CustomFuel.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireEnginePrerequisites.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireWindAdjust.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireTerrainReader.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_TerrainSlope.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_Rothermel.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireLayer.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireCheckpoint.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireSuppression.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_Fire.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FirePlotfile.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_StructureIgnition.cpp
+      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_CustomFuel.cpp
     )
-    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Fire>)
-    target_compile_definitions(${erf_lib_name} PUBLIC ERF_ENABLE_FIRE)
+    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/FireEngine>)
+    # ERF_USE_FIRE is the upstream name (erf-model/ERF#4768), which FireEngine/ tests;
+    # ERF_ENABLE_FIRE stays until the rest of this fork moves to it
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_ENABLE_FIRE ERF_USE_FIRE)
   endif()
 
   if(ERF_BUILD_LIBRARY_ONLY)

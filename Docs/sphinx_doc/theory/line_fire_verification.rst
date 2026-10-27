@@ -51,7 +51,7 @@ backing fire :math:`R_0`, since the wind component into the fire is clipped
 at zero (Coen et al. 2013 make the same choice: "the backing rate of spread
 in these experiments is the zero-wind rate of spread"). ``check_linefire.py``
 carries an independent port of the Rothermel equations of
-``Source/Fire/ERF_Rothermel.cpp`` and evaluates them at the effective wind the
+``FireEngine/ERF_Rothermel.cpp`` and evaluates them at the effective wind the
 fire reports each step. The surface layer slows the sounding wind at 6.1 m as
 the run proceeds (by 15 % over 180 s at 2.5 m/s and 28 % at 5 m/s), and
 :math:`\phi_w` grows about as the square of the wind, so each pair of probes is
