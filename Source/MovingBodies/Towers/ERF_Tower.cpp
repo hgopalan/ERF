@@ -3,6 +3,7 @@
 #include "ERF_Tower.H"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -13,6 +14,64 @@
 using amrex::Real;
 
 namespace erf_towers {
+
+namespace {
+
+/** The face area of a piece of the cross-arm and the centroid of that area, from arm_segment(). */
+struct ArmPiece
+{
+    Real area{0.0};   //!< m^2
+    Real s{0.0};      //!< the centroid's distance from the shaft's axis along the cross-arm (m)
+    Real drop{0.0};   //!< the centroid's depth below the cross-arm's top (m)
+};
+
+/**
+ * The face area between s = a and s = b (a < b, both within the cross-arm) and its centroid, for the depth d(s)
+ * of Tower::arm_face_at(): linear in s between the breaks at the tips, where the taper starts on either side
+ * (Tower::arm_taper_start()) and 0, so on each piece between breaks d runs from d1 to d2 and the integrals of d,
+ * s d and d^2 are closed forms. The centroid lies at (int s d ds / A, int d^2 / 2 ds / A) below the top,
+ * A = int d ds. The tips are breaks too, so a b an ulp past the tip adds no length.
+ */
+ArmPiece arm_segment (const Tower& tower, Real a, Real b)
+{
+    const Real s0 = tower.arm_taper_start(), half_len = Real(0.5) * tower.type().arm_length;
+    std::array<Real,7> at{{a, -half_len, -s0, Real(0.0), s0, half_len, b}};
+    std::sort(at.begin(), at.end());
+    Real area = 0.0, moment_s = 0.0, moment_d2 = 0.0;
+    for (std::size_t i = 0; i + 1 < at.size(); ++i) {
+        const Real p = std::max(a, at[i]), q = std::min(b, at[i + 1]);
+        if (!(q > p)) { continue; }
+        const Real h = q - p, d1 = tower.arm_face_at(p), d2 = tower.arm_face_at(q);
+        area += h * (d1 + d2) / Real(2.0);
+        moment_s += p * h * (d1 + d2) / Real(2.0) + h * h * (d1 + Real(2.0) * d2) / Real(6.0);
+        moment_d2 += h * (d1 * d1 + d1 * d2 + d2 * d2) / Real(3.0);
+    }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(area > Real(0.0), "Tower: a cross-arm segment has no face area");
+    return ArmPiece{area, moment_s / area, Real(0.5) * moment_d2 / area};
+}
+
+} // namespace
+
+Real
+Tower::arm_taper_start () const
+{
+    // half the shaft's width at the cross-arm's bottom, H - d0 (the base when the face is deeper than the arm is
+    // high, which arm_outside_shaft refuses): where the generated frame's bottom chords leave the shaft's corners
+    const Real zb = std::max(Real(0.0), m_arm_height - m_type.arm_face());
+    return Real(0.5) * (m_type.base_width + (m_type.top_width - m_type.base_width) * zb / m_arm_height);
+}
+
+Real
+Tower::arm_face_at (Real s) const
+{
+    const Real half_len = Real(0.5) * m_type.arm_length, s0 = arm_taper_start();
+    const Real d0 = m_type.arm_face();
+    const Real r = std::abs(s);
+    if (r >= half_len) { return Real(0.0); }
+    if (r <= s0) { return d0; }
+    // here half_len > s0, so the taper's length is positive
+    return d0 * (half_len - r) / (half_len - s0);
+}
 
 Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>& base, Real arm_height,
               const std::array<Real,3>& across)
@@ -53,8 +112,10 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
     m_nbody = static_cast<int>(m_nodes.size());
     // the cross-arm, centred on the shaft: with arm_outside_shaft its two parts outside the shaft (the shaft's
     // nodes already carry the drag where the arm passes through it, the shaft as wide there as at the middle
-    // of the cross-arm's face), at the middle of its face, which hangs from the cross-arm's height; else along
-    // its whole length at that height
+    // of the cross-arm's face at the shaft), each node at the centroid of its segment's face, which is arm_face()
+    // deep out to the shaft's half width at the arm's bottom and tapers to the tip (arm_face_at), with the face's
+    // mean depth over the segment; else the earlier layout, along its whole length at the cross-arm's height,
+    // arm_face() deep all along
     const int na = TowerType::arm_segments;
     const bool outside = m_type.arm_outside_shaft;
     const std::string key = "erf.conductors." + m_type.name + ".";
@@ -69,20 +130,32 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
         amrex::Abort("Tower " + m_name + ": " + key + "arm_length (" + std::to_string(m_type.arm_length) + " m) must exceed the shaft's width " +
                      "at the middle of the cross-arm's face (" + std::to_string(2.0 * inner) + " m) for " + key + "arm_outside_shaft");
     }
-    auto arm_node = [&] (Real s, Real length) {
-        m_nodes.push_back(MemberNode{{{m_base[0] + s * m_across[0], m_base[1] + s * m_across[1], m_base[2] + za}},
-                                     m_across, length, phi * m_type.arm_face(), cf});
+    auto arm_node = [&] (Real s, Real z, Real length, Real depth) {
+        m_nodes.push_back(MemberNode{{{m_base[0] + s * m_across[0], m_base[1] + s * m_across[1], m_base[2] + z}},
+                                     m_across, length, phi * depth, cf});
     };
     if (outside) {
         // half the nodes on each side, from the tip inwards on the first, outwards on the second: the nodes run
-        // from one tip to the other
+        // from one tip to the other; each segment's node at its face's centroid with the face's mean depth
         const int nside = na / 2;
         const Real da = (Real(0.5) * m_type.arm_length - inner) / nside;
-        for (int i = 0; i < nside; ++i) { arm_node(-(Real(0.5) * m_type.arm_length - (Real(i) + Real(0.5)) * da), da); }
-        for (int i = 0; i < nside; ++i) { arm_node(inner + (Real(i) + Real(0.5)) * da, da); }
+        auto piece_node = [&] (Real a, Real b) {
+            const ArmPiece p = arm_segment(*this, a, b);
+            arm_node(p.s, m_arm_height - p.drop, b - a, p.area / (b - a));
+        };
+        for (int i = 0; i < nside; ++i) {
+            const Real b = -(inner + Real(nside - 1 - i) * da);
+            piece_node(b - da, b);
+        }
+        for (int i = 0; i < nside; ++i) {
+            const Real a = inner + Real(i) * da;
+            piece_node(a, a + da);
+        }
     } else {
         const Real da = m_type.arm_length / na;
-        for (int i = 0; i < na; ++i) { arm_node(-Real(0.5) * m_type.arm_length + (Real(i) + Real(0.5)) * da, da); }
+        for (int i = 0; i < na; ++i) {
+            arm_node(-Real(0.5) * m_type.arm_length + (Real(i) + Real(0.5)) * da, za, da, m_type.arm_face());
+        }
     }
     m_force.assign(3 * m_nodes.size(), 0.0);
     m_disp.assign(3 * m_nodes.size(), 0.0);

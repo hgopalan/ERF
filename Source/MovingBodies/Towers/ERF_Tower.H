@@ -44,10 +44,13 @@ struct FoundationLoad
  * One lattice tower of a TowerType standing on the terrain: a vertical shaft (the tower's "body")
  * from its base up to the cross-arm, and the peak above it, tapering linearly from base_width to
  * top_width; and a horizontal cross-arm of arm_length centred on the shaft at arm_height above
- * the base, along the horizontal unit vector `across`. Each is cut into drag nodes at the middle
- * of equal segments: the shaft's width there times the solidity is a shaft node's drag width;
- * the cross-arm's face depth times the solidity is a cross-arm node's. The shaft's nodes come
- * first (the peak's included), then the cross-arm's. Frame: ERF domain coordinates, z up.
+ * the base, along the horizontal unit vector `across`. Each is cut into drag nodes of equal
+ * segments: a shaft node stands at the middle of its segment, with the shaft's width there times
+ * the solidity as its drag width; the cross-arm's face is arm_face() deep out to the shaft's
+ * corners at the arm's bottom and tapers linearly to nothing at the tips, as the generated frame's
+ * truss of chords converging on its tip (arm_face_at()), so a cross-arm node stands at the centroid of its segment's face, with
+ * the face's mean depth over the segment times the solidity as its drag width. The shaft's nodes
+ * come first (the peak's included), then the cross-arm's. Frame: ERF domain coordinates, z up.
  */
 class Tower
 {
@@ -70,6 +73,21 @@ public:
     const std::array<amrex::Real,3>& base () const { return m_base; }
     /** The height of the cross-arm above the base (m). */
     amrex::Real arm_height () const { return m_arm_height; }
+    /**
+     * The depth of the cross-arm's face (m) at the distance s (m) from the shaft's axis along the cross-arm:
+     * the type's arm_face() out to arm_taper_start(), then tapering linearly to 0 at the tips (|s| = half
+     * the arm length), the shape of the generated frame's cross-arm (ERF_LatticeFrame.H), whose four chords
+     * run from the shaft's corners at the cross-arm's top and bottom to the tip, so the side view keeps the
+     * full depth out to the bottom corners and tapers from there. 0 at and beyond the tips, whatever the
+     * layout. The earlier layout (arm_outside_shaft = false) does not use it: its nodes carry arm_face()
+     * along the whole length.
+     */
+    amrex::Real arm_face_at (amrex::Real s) const;
+    /**
+     * Where the cross-arm's face starts to taper (m from the shaft's axis): half the shaft's width at the
+     * cross-arm's bottom, arm_height - arm_face() (at the base when the face is deeper than the arm is high).
+     */
+    amrex::Real arm_taper_start () const;
     /** The horizontal unit vector along the cross-arm (ERF frame). */
     const std::array<amrex::Real,3>& across () const { return m_across; }
     /** The drag nodes where the tower stands unloaded: the shaft's (the peak's included), then the cross-arm's. */
@@ -93,8 +111,8 @@ public:
     /** The drag nodes' velocities (3 per node, m/s, ERF frame), zero for a tower that stands still. */
     const std::vector<amrex::Real>& node_velocities () const { return m_vel; }
     /**
-     * The displacement of the cross-arm's first drag node (m, ERF frame), which stands at the middle of the
-     * cross-arm's face (arm_outside_shaft) or at the cross-arm's height; the tower models give the cross-arm
+     * The displacement of the cross-arm's first drag node (m, ERF frame), which stands at the centroid of the
+     * tip piece of the cross-arm's face on one side (arm_outside_shaft) or at the cross-arm's height; the tower models give the cross-arm
      * centre's displacement at its height (TowerModel::arm_centre_displacement()), which the logs report. A line
      * hanging from an attachment moves by TowerModel::attachment_displacement().
      */

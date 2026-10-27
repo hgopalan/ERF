@@ -44,7 +44,8 @@
 // SetGroundRefusesASurfaceOffsetBelowTheDomainTop: erf.conductors.surface_offset must hold the domain.
 // AnAttachmentOutsideTheDomainIsRefusedNamingItsKey: the abort names end_a, end_b or the tower.
 // ANonFiniteCouplingPullIsRefusedNotConverged: coupling_converged on NaN pulls; coupling_diverged at 20 in a row.
-// ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch, and tower_forms_mismatch (the tower forms).
+// ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch, and tower_forms_mismatch (the tower forms); a
+//     tower_forms_version 1 checkpoint (the rectangular cross-arm's nodes) cannot restart the outside layout.
 // GustsComeFromTheRANSkAlongEachSpan: with gust_type = factor, per span the root-mean-square wind and normal wind
 //     over its nodes and the mean k = (rho k)/rho, from stats_start, sampled where the nodes are at each step's start;
 //     gusts.csv's columns for a line across the wind and one at 45 degrees to it; nothing before stats_start; the
@@ -53,11 +54,14 @@
 //     gust statistics starting at the restart.
 // AnEventGustPassesEveryNodeAndTowerWithItsFront: with gust_type = event, the wind at every line node and tower drag
 //     node is the flow's plus g sigma_u times the 1 - cos shape at the node's phase at the step's middle, sigma_u from
-//     the mean k over the span's or tower's nodes; the origin defaults to the domain's centre; gust_series.dat.
+//     the mean k over the span's nodes or the tower's load-weighted one (the face area each drag node stands for
+//     times the wind on it), which an unweighted mean over the tower's nodes misses; the origin defaults to the domain's centre;
+//     gust_series.dat.
 // RandomGustsFollowTheirProcessesAndACircuitSharesThem: with gust_type = random, every span's gust is
 //     sigma_u sqrt(B) z, z the Ornstein-Uhlenbeck process stepped with T = L_u / U, the phases and the shield wire on
 //     shared towers taking the owner's spans' processes; a string the mean of the spans beside it; each tower
-//     sigma_u sqrt(B_t) z of its own; gust_series.dat's columns.
+//     sigma_u sqrt(B_t) z of its own, its k, U and the height of L_u the load-weighted (area x wind) means over its drag nodes;
+//     gust_series.dat's columns.
 // RandomGustsContinueAcrossARestart: a restart continues the random gusts where the checkpoint left them, and a
 //     checkpoint written without gusts draws them afresh from the stationary law at the restart's first step.
 // TheGustFactorRunsOnLinesWithLatticeTowers: gust_type = factor on a section with lattice towers, whose drag nodes
@@ -1479,17 +1483,22 @@ TEST(Conductors, TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart)
         });
     };
     const std::string state = slurp(chk + "/conductors/state");
-    ASSERT_NE(state.find("tower_forms_version 1\n"), std::string::npos) << state;
-    std::string without, older;
+    ASSERT_NE(state.find("tower_forms_version 2\n"), std::string::npos) << state;
+    std::string without, older, rectangle;
     {
         std::istringstream lines(state);
         for (std::string l; std::getline(lines, l);) {
             if (l.rfind("tower_forms ", 0) != 0) { without += l + "\n"; }
             if (l.rfind("tower_forms", 0) != 0) { older += l + "\n"; }
+            rectangle += (l == "tower_forms_version 2" ? std::string("tower_forms_version 1") : l) + "\n";
         }
     }
     msg = restart_with(without);
     EXPECT_NE(msg.find("holds no forms of tower Tf_t"), std::string::npos) << msg;
+    // version 1 recorded the outside layout with the rectangular cross-arm: its node forces are not these nodes'
+    msg = restart_with(rectangle);
+    EXPECT_NE(msg.find("before the cross-arm's face tapered to the tips"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("erf.conductors.lat.arm_outside_shaft = true"), std::string::npos) << msg;
     msg = restart_with(older);
     EXPECT_NE(msg.find("written before the tower forms were recorded"), std::string::npos) << msg;
     EXPECT_NE(msg.find("erf.conductors.lat.diagonal_wind_factor"), std::string::npos) << msg;
@@ -2086,12 +2095,20 @@ TEST(Conductors, AnEventGustPassesEveryNodeAndTowerWithItsFront)
                 if (sp == 0 && n == n0 + (nn - 1) / 2) { mid_gust.push_back(gust); }
             }
         }
-        // the towers stand still: their drag nodes where they were built
+        // the towers stand still: their drag nodes where they were built; the tower's k is the mean over its nodes
+        // weighted by the face area each stands for times the wind on it, which differs from the plain mean since k
+        // and the wind grow with the height
         for (std::size_t t = 0; t < 2; ++t) {
             const auto& nodes = c->towers()[t].nodes();
-            double kk = 0.0;
-            for (const auto& nd : nodes) { kk += static_cast<double>(k0 + kz * nd.pos[2]); }
-            const double A = g * sf * std::sqrt(kk / nodes.size());
+            double kk = 0.0, area = 0.0, plain = 0.0;
+            for (const auto& nd : nodes) {
+                const double w = static_cast<double>(nd.drag_width * nd.length) * std::abs(static_cast<double>(m.v_at(nd.pos[1], nd.pos[2])));
+                kk += w * static_cast<double>(k0 + kz * nd.pos[2]);
+                plain += static_cast<double>(k0 + kz * nd.pos[2]) / nodes.size();
+                area += w;
+            }
+            ASSERT_GT(std::abs(kk / area - plain), 1.0e-3 * plain) << "the weighting must tell: not a vacuous check";
+            const double A = g * sf * std::sqrt(kk / area);
             const auto& w = c->tower_winds()[t];
             ASSERT_EQ(w.size(), 3 * nodes.size());
             for (std::size_t j = 0; j < nodes.size(); ++j) {
@@ -2166,14 +2183,18 @@ TEST(Conductors, RandomGustsFollowTheirProcessesAndACircuitSharesThem)
             draw(static_cast<std::size_t>(sp), height, std::sqrt(u2 / nn));
         }
         for (std::size_t t = 0; t < 2; ++t) {
+            // the tower's wind and height: the means over its drag nodes weighted by the face area each stands for
+            // times the wind on it (its share of the fluctuating load)
             const auto& tw = c->towers()[t];
-            double u2 = 0.0, zm = 0.0;
+            double u2 = 0.0, zm = 0.0, area = 0.0;
             for (const auto& nd : tw.nodes()) {
                 const double v = static_cast<double>(m.v_at(nd.pos[1], nd.pos[2]));
-                u2 += v * v;
-                zm += static_cast<double>(nd.pos[2] - tw.base()[2]);
+                const double w = static_cast<double>(nd.drag_width * nd.length) * std::abs(v);
+                u2 += w * v * v;
+                zm += w * static_cast<double>(nd.pos[2] - tw.base()[2]);
+                area += w;
             }
-            draw(3 + t, zm / tw.nodes().size(), std::sqrt(u2 / tw.nodes().size()));
+            draw(3 + t, zm / area, std::sqrt(u2 / area));
         }
         c->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
         for (std::size_t i = 0; i < 4; ++i) {
@@ -2204,11 +2225,16 @@ TEST(Conductors, RandomGustsFollowTheirProcessesAndACircuitSharesThem)
         }
         for (std::size_t t = 0; t < 2; ++t) {
             const auto& tw = c->towers()[t];
-            // ASCE 74's h of the background factor is the tower's height, the cross-arm's plus the peak's
-            double kk = 0.0;
-            for (const auto& nd : tw.nodes()) { kk += static_cast<double>(k0 + kz * nd.pos[2]); }
+            // ASCE 74's h of the background factor is the tower's height, the cross-arm's plus the peak's; the
+            // tower's k the load-weighted (area x wind) mean over its drag nodes
+            double kk = 0.0, area = 0.0;
+            for (const auto& nd : tw.nodes()) {
+                const double w = static_cast<double>(nd.drag_width * nd.length) * std::abs(static_cast<double>(m.v_at(nd.pos[1], nd.pos[2])));
+                kk += w * static_cast<double>(k0 + kz * nd.pos[2]);
+                area += w;
+            }
             const double top = static_cast<double>(tw.arm_height() + tw.type().peak);
-            const double gust = sf * std::sqrt(kk / tw.nodes().size()) *
+            const double gust = sf * std::sqrt(kk / area) *
                                 std::sqrt(erf_conductors::tower_background_factor(top, Ls)) * z[3 + t];
             for (std::size_t j = 0; j < tw.nodes().size(); ++j) {
                 const double expect = static_cast<double>(m.v_at(tw.nodes()[j].pos[1], tw.nodes()[j].pos[2])) + gust;

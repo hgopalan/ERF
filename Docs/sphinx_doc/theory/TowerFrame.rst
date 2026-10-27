@@ -315,7 +315,10 @@ type's ``yield_strength`` (345 MPa by default).
   cross-arm's top and bottom to its tip, :math:`(0, \pm L_a/2, H)` with :math:`L_a` the
   ``arm_length``, in panels about as long as the cross-arm is deep, with a frame of four struts and
   a diagonal at each inner station and a diagonal on each face of every panel
-  but the last.
+  but the last. The tower's drag model takes the same shape: its cross-arm's
+  face is ``arm_depth`` deep over the shaft and tapers to the tips
+  (:doc:`Conductors`, "Towers"), so the drag nodes tied to this truss carry the
+  area of its side view.
 - Loads: the tower's drag and its lines' pull are tied to every joint but the
   crossings of diagonals, which only the diagonals' bending holds out of their
   face; a panel's wind acts at its leg joints, as lattice tower analyses apply it.
