@@ -89,10 +89,12 @@ TEST(OneModeTower, OnARigidFoundationItSwaysAtItsTypesFrequencyInTheQuadraticSha
     // both sums run in double over the same node masses and heights: equal to roundoff
     EXPECT_NEAR(m.generalized_mass(), M, 1.0e-12 * M);
     EXPECT_NEAR(m.stiffness(), M * std::pow(2.0 * pi * 2.0, 2), 1.0e-12 * m.stiffness());
-    // the cross-arm's drag nodes stand at the middle of its face, half its depth below the cross-arm: phi there,
-    // while the cross-arm itself, where the lines hang, moves with phi = 1, the modal displacement
-    const double za = (30.0 - 0.5 * static_cast<double>(tw.type().arm_face())) / 30.0;
+    // the cross-arm's drag nodes stand at the centroids of their pieces of its tapering face, below the cross-arm:
+    // phi there, while the cross-arm itself, where the lines hang, moves with phi = 1, the modal displacement
     for (std::size_t i = static_cast<std::size_t>(tw.num_body_nodes()); i < tw.nodes().size(); ++i) {
+        const double za = static_cast<double>(tw.nodes()[i].pos[2] - tw.base()[2]) / 30.0;
+        EXPECT_LT(za, 1.0) << i;
+        EXPECT_GT(za, 1.0 - 0.5 * static_cast<double>(tw.type().arm_face()) / 30.0) << i << ": above the face's middle at the shaft";
         EXPECT_NEAR(m.mode_shape(i), za * za, tol) << i;   // the node's height in Real
     }
     // the drag nodes' layout leaves the mass where it is: the same modal mass and stiffness with the cross-arm's

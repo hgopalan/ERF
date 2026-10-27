@@ -1130,7 +1130,7 @@ Conductors::restore (const std::string& dir)
 {
     // the state file: "step = ", "time = ", "clock_offset = ", "surface_offset = " and "coupling_logged = "
     // (both absent in older checkpoints), one "line <name> <nodes>" record per line, in input order, a
-    // "tower_forms_version 1" marker and one "tower_forms <tower> <d> <a> <p>" record per tower (absent in older
+    // "tower_forms_version <v>" marker and one "tower_forms <tower> <d> <a> <p>" record per tower (absent in older
     // checkpoints), and one "geometry" record per line (absent in older checkpoints)
     Vector<char> chars;
     ParallelDescriptor::ReadAndBcastFile(dir + "/state", chars);
@@ -1141,6 +1141,7 @@ Conductors::restore (const std::string& dir)
     std::vector<std::pair<std::string,unsigned>> saved;
     std::map<std::string,std::array<int,3>> saved_forms;
     bool forms_recorded = false;
+    int forms_version = 0;   // 1: the rectangular cross-arm's drag nodes; 2: the tapering face's (arm_outside_shaft)
     while (std::getline(in, line)) {
         std::istringstream ls(line);
         std::string key, eq;
@@ -1167,6 +1168,7 @@ Conductors::restore (const std::string& dir)
             saved.emplace_back(name, nodes);
         } else if (key == "tower_forms_version") {   // absent in older checkpoints, which had the earlier forms
             forms_recorded = true;
+            if (!(ls >> forms_version) || forms_version < 1) { Abort("malformed tower_forms_version line in '" + dir + "/state'"); }
         } else if (key == "tower_forms") {
             std::string name;
             std::array<int,3> f{{0, 0, 0}};
@@ -1220,6 +1222,14 @@ Conductors::restore (const std::string& dir)
                                                                       forms_recorded ? it->second : std::array<int,3>{{0, 0, 0}},
                                                                       tower_forms(tw.type()));
         if (!err.empty()) { Abort("the conductor checkpoint '" + dir + "': tower " + tw.name() + ": " + err); }
+        // version 1 recorded the outside layout with the rectangular cross-arm; its nodes stood elsewhere with other
+        // drag widths, which the checkpoint's sway, statistics and node forces belong to
+        if (forms_recorded && forms_version < 2 && tw.type().arm_outside_shaft) {
+            Abort("the conductor checkpoint '" + dir + "': tower " + tw.name() + " was written before the cross-arm's face tapered to "
+                  "the tips (tower_forms_version 1), with the drag nodes of a rectangular cross-arm; its sway, statistics and node "
+                  "forces belong to those nodes, so a restart cannot continue it with erf.conductors." + tw.type().name +
+                  ".arm_outside_shaft = true: restart from a checkpoint written by this version, or start afresh");
+        }
     }
     {
         const bool moving = std::any_of(m_models.begin(), m_models.end(), [] (const auto& m) { return m != nullptr; });
@@ -1393,8 +1403,9 @@ Conductors::write_checkpoint (const std::string& chkdir) const
             // what coupling.dat's next row counts so far (a restart continues the count)
             << "\ncoupling_logged = " << m_coupling_logged_iterations << " " << m_coupling_logged_unconverged << "\n";
         for (const auto& line : m_lines) { out << "line " << line->name() << " " << line->num_nodes() << "\n"; }
-        // each tower's forms, which a restart may not change, after a marker that this checkpoint records them
-        out << "tower_forms_version 1\n";
+        // each tower's forms, which a restart may not change, after a marker that this checkpoint records them;
+        // version 2: the outside layout's nodes stand on the tapering face (version 1: on the rectangle)
+        out << "tower_forms_version 2\n";
         for (const auto& tw : m_towers) {
             const auto f = tower_forms(tw.type());
             out << "tower_forms " << tw.name() << " " << f[0] << " " << f[1] << " " << f[2] << "\n";
@@ -1898,27 +1909,43 @@ Conductors::add_gusts (double time, double dt, const std::vector<std::vector<Rea
         }
         first += line.num_nodes();
     }
-    // per tower, over its drag nodes: the mean k, the root-mean-square horizontal wind, the mean height above the
-    // base and the highest node (whose gust the series logs)
+    // per tower, over its drag nodes weighted by each node's share of the fluctuating load, the face area it stands
+    // for (its drag width times its length) times the horizontal wind on it (the drag's fluctuation is 2 q Cf A U u'):
+    // the mean k, the root-mean-square horizontal wind and the mean height above the base, which are then the
+    // structure's and do not follow the number or the layout of the drag nodes; in still air (no wind on any node)
+    // the area alone weights them, which leaves the amplitude defined and the time scale infinite anyway. Also the
+    // highest node (whose gust the series logs)
     const std::size_t nt = m_towers.size();
     std::vector<double> ktow(nt, 0.0), utow(nt, 0.0), zmean(nt, 0.0), ztop(nt, 0.0);
     std::vector<std::size_t> top(nt, 0);
     first = 0;
     for (std::size_t t = 0; t < nt; ++t) {
         const auto& nodes = m_towers[t].nodes();
-        double u2 = 0.0;
+        std::vector<double> area(nodes.size()), speed(nodes.size());
+        double load = 0.0, face = 0.0;
         for (std::size_t j = 0; j < nodes.size(); ++j) {
             const double u = static_cast<double>(tuvw[3*(first+j)]), v = static_cast<double>(tuvw[3*(first+j)+1]);
             const double z = static_cast<double>(nodes[j].pos[2] - m_towers[t].base()[2]);
-            ktow[t] += tk[first + j];
-            u2 += u * u + v * v;
-            zmean[t] += z;
+            area[j] = static_cast<double>(nodes[j].drag_width) * static_cast<double>(nodes[j].length);
+            speed[j] = std::hypot(u, v);
+            load += area[j] * speed[j];
+            face += area[j];
             if (j == 0 || z > ztop[t]) { ztop[t] = z; top[t] = j; }
         }
-        const auto n = static_cast<double>(nodes.size());
-        ktow[t] /= n;
-        utow[t] = std::sqrt(u2 / n);
-        zmean[t] /= n;
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(face > 0.0, "Conductors::add_gusts: a tower's drag nodes stand for no face area");
+        const bool still = !(load > 0.0);
+        double u2 = 0.0, sum = 0.0;
+        for (std::size_t j = 0; j < nodes.size(); ++j) {
+            const double w = still ? area[j] : area[j] * speed[j];
+            const double z = static_cast<double>(nodes[j].pos[2] - m_towers[t].base()[2]);
+            ktow[t] += w * tk[first + j];
+            u2 += w * speed[j] * speed[j];
+            zmean[t] += w * z;
+            sum += w;
+        }
+        ktow[t] /= sum;
+        utow[t] = std::sqrt(u2 / sum);
+        zmean[t] /= sum;
         first += nodes.size();
     }
     if (!event) {

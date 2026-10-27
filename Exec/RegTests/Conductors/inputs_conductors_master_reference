@@ -252,7 +252,8 @@ erf.conductors.lattice.solidity         = 0.2     # Real in (0, 1). Members' are
 erf.conductors.lattice.arm_length       = 12.0    # Real > 0 (m); with arm_outside_shaft > the body's width at the
                                                   #   middle of the arm's face (at least top_width). The cross-arm's
                                                   #   length across the line. Must be set
-erf.conductors.lattice.arm_depth        = 1.5     # Real >= 0 (m). The cross-arm face's depth; 0: top_width.
+erf.conductors.lattice.arm_depth        = 1.5     # Real >= 0 (m). The cross-arm face's depth at the body, tapering
+                                                  #   linearly to 0 at the tips; 0: top_width.
                                                   #   Default: top_width
 erf.conductors.lattice.peak             = 0.0     # Real >= 0 (m). The body above the cross-arm. Default: 0
 erf.conductors.lattice.drag_coefficient = 0.0     # Real >= 0. On the members' area; 0: 4 phi^2 - 5.9 phi + 4 from the
@@ -262,10 +263,11 @@ erf.conductors.lattice.segments         = 10      # Integer >= 1. Drag nodes alo
 erf.conductors.lattice.diagonal_wind_factor = true  # Boolean. The body's and peak's drag times 1 + g sin^2(2 theta), g =
                                                     #   min(0.75 solidity, 0.2): ASCE 7's factor along a diagonal;
                                                     #   false: none. Default: true
-erf.conductors.lattice.arm_outside_shaft = true     # Boolean. The cross-arm's drag on its parts outside the body, at
-                                                    #   the middle of its face; false: along its whole length at the
-                                                    #   cross-arm's height. true needs arm_length > the body's width
-                                                    #   at the middle of the arm's face (> top_width).
+erf.conductors.lattice.arm_outside_shaft = true     # Boolean. The cross-arm's drag on its parts outside the body, each
+                                                    #   node at the centroid of its piece of the tapering face; false, the
+                                                    #   earlier layout: along its whole length at the cross-arm's height,
+                                                    #   arm_depth deep all along. true needs arm_length > the body's
+                                                    #   width at the middle of the face's depth at the body (> top_width).
                                                     #   Default: true
 erf.conductors.lattice.leg_spacing      = 0.0     # Real >= 0 (m). The four footings' square spacing; 0: base_width.
                                                   #   Not with a frame (8c, 8d), whose supports are the footings.

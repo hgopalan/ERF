@@ -9,12 +9,14 @@
 //   tower that stands still, leg_spacing with a frame, a frame without damping, a cross-arm no longer than
 //   the top width with arm_outside_shaft, and angle_principal_axes without frame_panels are refused.
 // - Tower.TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine: the shaft's drag nodes stand up the
-//   tapering shaft with the direction factor's gain, the cross-arm's across the line outside the shaft at
-//   the middle of its face; arm_outside_shaft = false and diagonal_wind_factor = false give the old layout.
+//   tapering shaft with the direction factor's gain; the cross-arm's face is arm_depth deep out to the shaft's
+//   corners at the arm's bottom and tapers linearly to the tips (arm_face_at), its nodes across the line outside the shaft at the
+//   centroids of their pieces of the face with the face's mean depth; arm_outside_shaft = false and
+//   diagonal_wind_factor = false give the old layout (the face's depth along the whole length).
 // - Tower.InAUniformWindTheDragAndBaseMomentAreTheHandValues: the shaft's drag exactly (its width
-//   is linear in height), the base moment to the midpoint rule's known error, the cross-arm's outside the
-//   shaft at the middle of its face; along a diagonal the shaft's drag times ASCE 7's 1 + 0.75 phi, half
-//   that gain at 22.5 degrees.
+//   is linear in height), the base moment to the midpoint rule's known error, the cross-arm's the closed
+//   integrals of its tapering face outside the shaft, force and moment both exact; along a diagonal the
+//   shaft's drag times ASCE 7's 1 + 0.75 phi, half that gain at 22.5 degrees.
 // - Tower.InALogLawWindTheDragIsTheFineIntegral: within the segments' quadrature error.
 // - Tower.TheLegsShareTheLoadAndResistTheOverturningMoment: the four legs share the downward load
 //   equally and the overturning moment linearly, in equilibrium, whichever way the tower faces;
@@ -208,8 +210,22 @@ TEST(Tower, TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine)
     t.peak = 4.5;
     const Tower tw("L1_t1", t, {{100.0, 200.0, 50.0}}, 30.0, {{0.0, 1.0, 0.0}});
     // ten body segments of 3 m, two peak segments of 2.25 m, and the cross-arm outside the shaft: two segments of
-    // 2.6025 m on each side, at the middle of its 1.2 m face, 0.6 m below it, from 0.795 m (half the shaft's width
-    // there, 6 - 4.5 x 29.4 / 30 = 1.59 m) to 6 m
+    // 2.6025 m on each side, from 0.795 m (half the shaft's width at the middle of the face's depth at the shaft,
+    // 29.4 m: 6 - 4.5 x 29.4 / 30 = 1.59 m) to 6 m. The face is 1.2 m deep out to the shaft's corners at the arm's
+    // bottom (28.8 m, half width 0.84 m) and tapers to 0 at the tips, d(s) = 1.2 (6 - s) / 5.16 beyond, so a piece
+    // from a to b on the taper has the area (d(a) + d(b)) (b - a) / 2, its centroid at
+    // a + (b - a) (d(a) + 2 d(b)) / (3 (d(a) + d(b))) along the arm and (d(a)^2 + d(a) d(b) + d(b)^2) / (3 (d(a) + d(b)))
+    // below the top; a piece across 0.84 m adds its full-depth part. The inner piece [0.795, 3.3975]: 1.2 m deep to
+    // 0.84 m, then from 1.2 to 0.60523 m, area 2.36244 m^2 (mean depth 0.90776 m), centroid 1.95178 m out and
+    // 0.47066 m down; the tip piece [3.3975, 6]: d from 0.60523 to 0, area 0.78756 m^2 (0.30262 m), centroid
+    // 4.265 m out, 0.20174 m down
+    EXPECT_NEAR(tw.arm_taper_start(), 0.84, tol * 10) << "half the shaft's width at the arm's bottom";
+    EXPECT_NEAR(tw.arm_face_at(0.0), 1.2, tol * 10);
+    EXPECT_NEAR(tw.arm_face_at(-0.84), 1.2, tol * 10) << "the full depth out to the shaft's bottom corners";
+    EXPECT_NEAR(tw.arm_face_at(3.42), 0.6, tol * 10) << "half way out along the taper, half the depth";
+    EXPECT_NEAR(tw.arm_face_at(-3.42), 0.6, tol * 10);
+    EXPECT_EQ(tw.arm_face_at(6.0), 0.0) << "nothing at the tip";
+    EXPECT_EQ(tw.arm_face_at(7.0), 0.0) << "nothing beyond it";
     ASSERT_EQ(tw.num_body_nodes(), 12);
     ASSERT_EQ(tw.nodes().size(), 16u);
     const auto& n0 = tw.nodes()[0];
@@ -221,25 +237,38 @@ TEST(Tower, TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine)
     Real arm = 0.0;
     for (std::size_t i = 12; i < 16; ++i) {
         const auto& n = tw.nodes()[i];
-        EXPECT_NEAR(n.pos[2], 79.4, tol * 100);
         EXPECT_NEAR(n.pos[0], 100.0, tol * 100);
         EXPECT_EQ(n.axis, (P3{{0.0, 1.0, 0.0}}));
-        EXPECT_NEAR(n.drag_width, 0.2 * 1.2, tol * 10);
         EXPECT_NEAR(n.length, 2.6025, tol * 10);
         EXPECT_GE(std::abs(n.pos[1] - 200.0), 0.795) << "outside the shaft";
         EXPECT_EQ(n.diagonal_gain, 0.0) << "the cross-arm takes no shaft direction factor";
         arm += n.pos[1] - 200.0;
     }
     EXPECT_NEAR(arm, 0.0, tol * 1000) << "the arm is centred on the body";
-    EXPECT_NEAR(tw.nodes()[12].pos[1], 200.0 - 4.69875, tol * 1000);
-    EXPECT_NEAR(tw.nodes()[13].pos[1], 200.0 - 2.09625, tol * 1000);
-    EXPECT_NEAR(tw.nodes()[14].pos[1], 200.0 + 2.09625, tol * 1000);
-    EXPECT_NEAR(tw.nodes()[15].pos[1], 200.0 + 4.69875, tol * 1000);
+    // from one tip to the other: the tip piece, the inner piece, then the same on the other side
+    EXPECT_NEAR(tw.nodes()[12].pos[1], 200.0 - 4.265, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[13].pos[1], 200.0 - 1.9517804569, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[14].pos[1], 200.0 + 1.9517804569, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[15].pos[1], 200.0 + 4.265, tol * 1000);
+    for (const std::size_t i : {std::size_t(12), std::size_t(15)}) {
+        EXPECT_NEAR(tw.nodes()[i].pos[2], 80.0 - 0.2017441860, tol * 1000) << i << ": the tip piece's centroid";
+        EXPECT_NEAR(tw.nodes()[i].drag_width, 0.2 * 0.3026162791, tol * 100) << i << ": solidity x its mean depth";
+    }
+    for (const std::size_t i : {std::size_t(13), std::size_t(14)}) {
+        EXPECT_NEAR(tw.nodes()[i].pos[2], 80.0 - 0.4706634005, tol * 1000) << i << ": the inner piece's centroid";
+        EXPECT_NEAR(tw.nodes()[i].drag_width, 0.2 * 0.9077583607, tol * 100) << i;
+    }
+    // the four pieces' areas add up to the face outside the shaft: per side the full-depth strip from 0.795 to 0.84 m
+    // plus the triangle from 0.84 to 6 m, d0 (0.045 + 5.16 / 2) = 3.15 m^2, 6.3 m^2 in all: 50.4 % of the 12.492 m^2
+    // rectangle the model took before
+    Real face = 0.0;
+    for (std::size_t i = 12; i < 16; ++i) { face += tw.nodes()[i].drag_width * tw.nodes()[i].length / 0.2; }
+    EXPECT_NEAR(face, 6.3, tol * 1000);
     // the shaft's and the peak's nodes take the direction factor, with the cross-arm's face normal
     EXPECT_NEAR(tw.nodes()[0].diagonal_gain, 0.15, tol) << "0.75 x solidity 0.2";
     EXPECT_EQ(tw.nodes()[0].face, (P3{{0.0, 1.0, 0.0}}));
     EXPECT_NEAR(tw.nodes()[11].diagonal_gain, 0.15, tol);
-    // the old forms: the cross-arm along its whole length at its height, no direction factor
+    // the old forms: the cross-arm along its whole length at its height, the face's depth all along, no direction factor
     t.arm_outside_shaft = false;
     t.diagonal_wind_factor = false;
     const Tower old("L1_t1", t, {{100.0, 200.0, 50.0}}, 30.0, {{0.0, 1.0, 0.0}});
@@ -247,6 +276,7 @@ TEST(Tower, TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine)
     EXPECT_NEAR(old.nodes()[13].pos[1], 200.0 - 1.5, tol * 1000);
     EXPECT_NEAR(old.nodes()[12].pos[2], 80.0, tol * 100);
     EXPECT_NEAR(old.nodes()[12].length, 3.0, tol * 10);
+    for (std::size_t i = 12; i < 16; ++i) { EXPECT_NEAR(old.nodes()[i].drag_width, 0.2 * 1.2, tol * 10) << i; }
     EXPECT_EQ(old.nodes()[0].diagonal_gain, 0.0);
 }
 
@@ -258,22 +288,34 @@ TEST(Tower, InAUniformWindTheDragAndBaseMomentAreTheHandValues)
     // wind along x, across the arm (along y): body and arm both loaded
     blow(tw, [&](Real) { return P3{{U, 0.0, 0.0}}; });
     const Real body = q * cf * phi * 0.5 * (t.base_width + t.top_width) * H;    // exact: the width is linear
-    // the cross-arm's two parts outside the shaft, at the middle of its face, where the shaft is w(za) wide
+    // the cross-arm's two parts outside the shaft, from the shaft's half width w(za) / 2 at the middle of the face's
+    // depth at the shaft, za = H - d0 / 2, to the tips; the face is d0 deep out to the shaft's half width s0 at the
+    // arm's bottom, H - d0, and tapers to the tip beyond, so each part's area is d0 (s0 - w(za)/2) + d0 (L/2 - s0) / 2,
+    // 3.15 m^2, and the drag on it q cf phi times that, which the nodes' mean depths give exactly
     const Real za = H - 0.5 * t.arm_depth;
     const Real wza = t.base_width + (t.top_width - t.base_width) * za / H;
-    const Real armF = q * cf * phi * t.arm_depth * (t.arm_length - wza);
+    const Real s0 = 0.5 * (t.base_width + (t.top_width - t.base_width) * (H - t.arm_depth) / H);
+    const Real taper = 0.5 * t.arm_length - s0;
+    const Real area1 = t.arm_depth * ((s0 - 0.5 * wza) + 0.5 * taper);
+    const Real armF = q * cf * phi * 2.0 * area1;
     const auto F = tw.total_force();
     RecordProperty("body_drag_N", std::to_string(body));
     RecordProperty("arm_drag_N", std::to_string(armF));
     EXPECT_NEAR(F[0], body + armF, 1.0e-6 * (body + armF) + tol);
     EXPECT_NEAR(F[1], 0.0, tol); EXPECT_NEAR(F[2], 0.0, tol);
-    // the base moment: the body's q cf phi int w(z) z dz, with w linear, and the arm's force times
-    // its height. The midpoint sum over n segments is exact on z and short by H^3 / (12 n^2) on z^2.
+    EXPECT_NEAR(armF / (q * cf * phi * t.arm_depth * (t.arm_length - wza)), 0.5043227666, 100 * tol)
+        << "50.4 % of the rectangle's drag the model took before";
+    // the base moment: the body's q cf phi int w(z) z dz, with w linear, and the arm's q cf phi int d (H - d/2) ds
+    // over both parts, int d^2 ds = d0^2 (s0 - w(za)/2) + d0^2 taper / 3 per part, which the nodes at their pieces'
+    // centroids give exactly. The midpoint sum over n segments is exact on z and short by H^3 / (12 n^2) on z^2.
     const Real n = t.segments;
     const Real body_m = q * cf * phi * (t.base_width * H * H / 2.0 +
                                         (t.top_width - t.base_width) / H * (H * H * H / 3.0 - H * H * H / (12.0 * n * n)));
+    const Real d2_1 = t.arm_depth * t.arm_depth * ((s0 - 0.5 * wza) + taper / 3.0);
+    const Real arm_m = q * cf * phi * (2.0 * H * area1 - d2_1);
+    EXPECT_NEAR(arm_m / armF, 29.5965714286, 1.0e4 * tol) << "the arm's drag acts 0.4034 m below the cross-arm";
     const auto M = tw.base_moment();
-    EXPECT_NEAR(M[1], body_m + armF * za, 1.0e-6 * (body_m + armF * za) + tol);
+    EXPECT_NEAR(M[1], body_m + arm_m, 1.0e-6 * (body_m + arm_m) + tol);
     EXPECT_NEAR(M[0], 0.0, 1.0e-6 * M[1] + tol);
     // wind along the arm: only the body carries it
     blow(tw, [&](Real) { return P3{{0.0, U, 0.0}}; });
@@ -314,11 +356,21 @@ TEST(Tower, InALogLawWindTheDragIsTheFineIntegral)
         drag += k * w * u(z) * u(z) * H / N;
         mom += k * w * u(z) * u(z) * z * H / N;
     }
+    // the cross-arm's two tapering parts outside the shaft, each point of the face at its own height, by a fine sum
     const Real za = H - 0.5 * t.arm_depth;
-    const Real arm = k * t.arm_depth * (t.arm_length - (t.base_width + (t.top_width - t.base_width) * za / H)) * u(za) * u(za);
+    const Real inner = 0.5 * (t.base_width + (t.top_width - t.base_width) * za / H);
+    const Real s0 = 0.5 * (t.base_width + (t.top_width - t.base_width) * (H - t.arm_depth) / H);
+    auto d = [&](Real s) { return (s <= s0) ? t.arm_depth : t.arm_depth * (0.5 * t.arm_length - s) / (0.5 * t.arm_length - s0); };
+    Real arm = 0.0, arm_m = 0.0;
+    for (int i = 0; i < N; ++i) {
+        const Real s = inner + (i + 0.5) * (0.5 * t.arm_length - inner) / N, ds = (0.5 * t.arm_length - inner) / N;
+        const Real zc = H - 0.5 * d(s);
+        arm += 2.0 * k * d(s) * u(zc) * u(zc) * ds;
+        arm_m += 2.0 * k * d(s) * u(zc) * u(zc) * zc * ds;
+    }
     // ten segments resolve the log law's curvature near the ground to about 1 %
     EXPECT_NEAR(tw.total_force()[0] / (drag + arm), 1.0, 0.01);
-    EXPECT_NEAR(tw.base_moment()[1] / (mom + arm * za), 1.0, 0.01);
+    EXPECT_NEAR(tw.base_moment()[1] / (mom + arm_m), 1.0, 0.01);
 }
 
 namespace {

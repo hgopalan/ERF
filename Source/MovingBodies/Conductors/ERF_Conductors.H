@@ -277,10 +277,13 @@ private:
      * uvw[i] (the wind at line i's kinematics points, its nodes at pos[i]; k, per node of every line in order)
      * and to tuvw (the wind at every tower's drag nodes in order, at tpos; tk, k there). The gust acts along
      * the mean horizontal wind of the span, string or tower, none where that is zero; sigma_u = c sqrt(k) is
-     * taken from the mean k over each span's nodes and over each tower's drag nodes. event: g sigma_u times
+     * taken from the mean k over each span's nodes, and over each tower's drag nodes weighted by each node's
+     * share of the fluctuating load, its face area times the horizontal wind on it (the area alone in still
+     * air), so the tower's is the structure's, whatever the nodes' number and layout. event: g sigma_u times
      * the shape at the node's phase at the step's middle; random: sigma_u sqrt(B) z, z stepped by dt with
-     * T = L_u / U from the root-mean-square horizontal wind over the span's (the owner span's) or tower's
-     * nodes. A string takes the mean amplitude (event) or the mean gust (random) of the two spans beside it.
+     * T = L_u / U from the root-mean-square horizontal wind over the span's (the owner span's) nodes or the
+     * tower's load-weighted one, L_u at the span's height or the tower's load-weighted mean node height.
+     * A string takes the mean amplitude (event) or the mean gust (random) of the two spans beside it.
      * The gust at each span's middle node and at each tower's highest drag node goes to m_gust_series.
      */
     void add_gusts (double time, double dt, const std::vector<std::vector<amrex::Real>>& pos,

@@ -5889,8 +5889,8 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 |                                                           |                                                          | arm's face (at least |                          |
 |                                                           |                                                          | top_width)           |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.arm_depth**                       | the depth of the cross-arm's face (m)                    | Real >= 0 (0:        | top_width                |
-|                                                           |                                                          | top_width); with     |                          |
+| **erf.conductors.<type>.arm_depth**                       | the depth of the cross-arm's face at the body (m); it    | Real >= 0 (0:        | top_width                |
+|                                                           | tapers linearly to 0 at the tips                         | top_width); with     |                          |
 |                                                           |                                                          | arm_outside_shaft    |                          |
 |                                                           |                                                          | under twice the      |                          |
 |                                                           |                                                          | cross-arm's height   |                          |
@@ -5909,11 +5909,12 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 |                                                           | diagonal (false: none)                                   |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.arm_outside_shaft**               | the cross-arm's drag nodes on its two parts outside the  | Boolean; true needs  | true                     |
-|                                                           | body, from the body's half width at their height to the  | arm_length > the     |                          |
-|                                                           | tips, at the middle of its face, half the face's depth   | body's width there   |                          |
-|                                                           | (arm_depth, or top_width when that is 0) below the       | (> top_width)        |                          |
-|                                                           | cross-arm (false: along its whole length at the          |                      |                          |
-|                                                           | cross-arm's height)                                      |                      |                          |
+|                                                           | body, from the body's half width at the middle of the    | arm_length > the     |                          |
+|                                                           | face's depth at the body (arm_depth, or top_width when   | body's width there   |                          |
+|                                                           | that is 0, below the cross-arm) to the tips, each at the | (> top_width)        |                          |
+|                                                           | centroid of its piece of the tapering face (false, the   |                      |                          |
+|                                                           | earlier layout: along its whole length at the cross-arm's|                      |                          |
+|                                                           | height, the face's depth all along)                      |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.weight**                          | the tower's own weight on its foundation (N)             | Real >= 0            | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+

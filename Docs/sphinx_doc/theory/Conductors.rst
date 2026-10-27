@@ -452,10 +452,17 @@ loaded by the wind (``erf.conductors.tower_types``, a block of its own per
 type). A tower stands on the terrain under its suspension point: a square
 lattice body tapering linearly from ``base_width`` at the ground to
 ``top_width`` at the cross-arm (with an optional ``peak`` above it at the top
-width), and a lattice cross-arm of ``arm_length`` and face depth
-``arm_depth`` centred on the body at the height the conductor hangs from,
-across the line (normal to the mean horizontal direction of the spans either
-side). The towers carry the wind's drag on their members and the pull of the
+width), and a lattice cross-arm of ``arm_length`` centred on the body at the
+height the conductor hangs from, across the line (normal to the mean
+horizontal direction of the spans either side), whose face is ``arm_depth``
+deep out to the body's corners at the cross-arm's bottom and tapers linearly to
+nothing at the tips: a truss of chords from the body's corners at the
+cross-arm's top and bottom converging on each tip, the shape of the generated
+frame's cross-arm (:doc:`TowerFrame`), with about half the area of a rectangle
+of the same depth. Its
+drag nodes stand at the centroids of their pieces of that face and carry each
+piece's mean depth, so the drag and its moment on the face are the exact
+integrals. The towers carry the wind's drag on their members and the pull of the
 line hanging from them, and stand on a foundation of four footings; they are
 rigid unless their type has a ``frequency`` (see `Moving towers`_) or a frame
 (``frame_file`` or ``frame_panels``; see :doc:`TowerFrame`).
@@ -476,12 +483,14 @@ together.
 Each member is cut into drag nodes at the middle of equal segments:
 ``segments`` up the body to the cross-arm, as many on the ``peak`` as fit at
 that spacing (at least one), and four on the arm: two on each of its parts
-outside the body, at the middle of its face, half its depth below the cross-arm,
-from the body's half width at that height to the tip, so that only the body's
-nodes carry the wind where the arm passes through it (``arm_outside_shaft``, the
-default, which needs ``arm_length`` longer than the body is wide there; ``false``
-puts the four along the whole arm at the cross-arm's height, which counts that
-part twice). A node stands for a
+outside the body, from the body's half width at the middle of the face's depth
+at the body (half ``arm_depth`` below the cross-arm) to the tip, each at the
+centroid of its piece of the tapering face with the piece's mean depth as its
+width, so that only the body's nodes carry the wind where the arm passes through
+it (``arm_outside_shaft``, the default, which needs ``arm_length`` longer than
+the body is wide there; ``false`` is the earlier layout: the four along the
+whole arm at the cross-arm's height, ``arm_depth`` deep all along, which counts
+the part within the body twice). A node stands for a
 length :math:`\ell` (m) of member with axis :math:`\mathbf{e}` (a unit
 vector), and the wind :math:`\mathbf{U}` (m/s) loads it as a slender member
 does, by the flow normal to it, relative to the node's own velocity
@@ -569,10 +578,14 @@ solidity 0.2 carries exactly :math:`p\, C_f \sigma (b_0 + b_t) z_a / 2` on its
 body, :math:`p = \rho U^2 / 2` the dynamic pressure, :math:`b_0` and
 :math:`b_t` the base and top widths and :math:`z_a` the cross-arm height (the
 width is linear, so the segments' midpoint sum is exact), and
-:math:`p\, C_f \sigma d L_a` on its cross-arm, :math:`d` the ``arm_depth`` and
-:math:`L_a` the ``arm_length``; the base moment equals the hand integral up to
-the midpoint sum's known :math:`z_a^3/(12 n^2)` on the quadratic part,
-:math:`n` the ``segments``; wind along the cross-arm loads only the body; in a log-law
+:math:`p\, C_f \sigma\, d\, [(s_0 - s_i) + (L_a/2 - s_0)/2]` on each part of its
+cross-arm outside the body, :math:`d` the ``arm_depth``, :math:`L_a` the
+``arm_length``, :math:`s_i` the body's half width at the middle of the face's
+depth and :math:`s_0` its half width at the cross-arm's bottom, where the
+taper starts (the closed integral of the face: for the test tower 3.15 m\ :sup:`2`
+a side, 50.4 % of the rectangle the model took before); the base moment equals the hand
+integral up to the midpoint sum's known :math:`z_a^3/(12 n^2)` on the body's
+quadratic part, :math:`n` the ``segments``, the cross-arm's part exact; wind along the cross-arm loads only the body; in a log-law
 wind ten segments give the drag and base moment of a 20 000-point integral
 within 1 %. The legs' reactions are in equilibrium with the loads for any
 orientation, face-on and diagonal pulls give the hand values, and each
@@ -585,9 +598,10 @@ swung :math:`\theta` across the line, sees the normal wind
 :math:`U\cos\theta`, along :math:`(\cos\theta, \sin\theta)` in the plane
 across the line, so its drag :math:`q_i L_i \cos^2\theta` lifts as well as
 pushes.) A tower next to a dead end differs: the span from the dead end
-drops to the string's bottom, and the lower end takes less of its weight. On the terrain test case the hilltop tower in a 25 m/s wind
-carries 25.6 kN, against 25.1 kN from :math:`p\, C_f \sigma` times its face
-at that speed.
+drops to the string's bottom, and the lower end takes less of its weight. On
+the terrain test case the hilltop tower carries 20.9 kN of drag, 22.1 kN with
+the rectangular cross-arm of earlier versions: the difference is the drag on
+half the cross-arm's face outside the body, which the taper removes.
 
 Moving towers
 -------------
@@ -755,8 +769,9 @@ to the frame's nodes, so the coupling above runs unchanged, and the footings'
 loads come from the frame's support reactions. On the frame-towers test case
 (the moving-towers lines on a 76-member frame with a first natural frequency of
 4.22 Hz) the coupling converges in three or four iterations per coupling step
-with the real library, the hilltop tower carries the base shear of the one-mode
-tower (23.1 kN in both) and its cross-arm moves 4.4 mm, the frame being stiffer.
+with the real library, the hilltop tower carries a base shear of 21.4 kN against
+the one-mode tower's 21.7 kN, and its cross-arm moves 3.4 mm against the
+one-mode tower's 26 mm, the frame being stiffer.
 
 A tower type can instead have ERF generate its frame from its dimensions
 (``erf.conductors.<type>.frame_panels`` with the angles of its legs and its
@@ -795,7 +810,9 @@ it barely moves (2 degrees), and the transformers' horizontal loads settle
 between 10.8 kN (three lines from different sides) and 22.1 kN, under their
 25 kN allowable. The lattice towers (6 m base, 1.5 m top, solidity 0.2, 12 m
 cross-arm) carry 18.7 to 20.6 kN of wind drag on the hilltops, 10.5 to 15 kN on
-the raised towers and about 7 kN on the 30 m towers on flat ground. With the
+the raised towers and about 7 kN on the 30 m towers on flat ground (with the
+rectangular cross-arm of earlier versions; the tapering cross-arm lowers a
+tower's drag by 5 to 7 %, as the regression decks show). With the
 line's pull and a 60 kN tower weight on 6 m footings, the towers on the hills
 and the raised ones lift a footing by 11 to 22 kN (the allowable is 50 kN),
 their worst legs carrying 42 to 53 kN in compression against 29 kN on flat
@@ -1022,7 +1039,12 @@ zero; the vertical wind is left alone); a negative gust larger than a low wind
 reverses it. The gust acts on the lines and towers only: these types cannot be
 used with ``drag_on_flow``, which would put the gust's drag into the RANS flow.
 Every step :math:`\sigma_u = c \sqrt{k}` is taken from the mean :math:`k` over
-each span's nodes and over each tower's drag nodes. An insulator string takes
+each span's nodes, and over each tower's drag nodes weighted by each node's
+share of the tower's fluctuating load, the face area it stands for (its drag
+width times its length) times the horizontal wind on it (the drag's
+fluctuation is :math:`2 q C_f A U u'`; the area alone in still air), so that
+a tower's turbulence is its structure's and does not follow the number or
+the layout of its drag nodes. An insulator string takes
 the mean amplitude (``event``) or the mean gust (``random``) of the two spans
 beside it; with independent random gusts on those spans its fluctuation is
 the smaller, which matters little for a string a few metres long next to spans
@@ -1054,8 +1076,9 @@ the factor gives 1.34.
 
 ``random`` gives every span and every tower an Ornstein-Uhlenbeck process
 :math:`z` of unit variance and integral time scale :math:`T = L_u / U`,
-:math:`U` the root-mean-square horizontal wind over its nodes, stepped exactly
-over each step :math:`\Delta t`,
+:math:`U` the root-mean-square horizontal wind over its nodes (a tower's
+weighted by its drag nodes' load shares), stepped exactly over each step
+:math:`\Delta t`,
 
 .. math::
 
@@ -1065,7 +1088,11 @@ over each step :math:`\Delta t`,
 with :math:`\xi` standard normal. :math:`L_u` is ``gust_integral_length``, or
 the integral length of IEC 61400-1's Kaimal spectrum, :math:`8.1 \Lambda_1`
 with :math:`\Lambda_1 = 0.7 z` below 60 m and 42 m above, at the span's
-attachment height or the tower's mean drag-node height. :math:`B`, the part of
+attachment height or the tower's load-weighted mean drag-node height, where
+its fluctuating load centres (about half the height of the test towers, whose
+body tapers from 6 m to 1.5 m; ASCE 74 takes the exposure's turbulence at two
+thirds of a structure's height, a proxy for the same centre on a prismatic
+structure). :math:`B`, the part of
 the point fluctuation's variance the whole structure feels, is the span's
 :math:`B` above, and for a tower ASCE 74's
 :math:`B_t = 1 / (1 + 0.375 h / L_s)`, :math:`h` its height (the cross-arm's
