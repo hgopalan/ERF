@@ -6,4 +6,4 @@ FILE = inputs_base
 erf.fire.moisture_live_model = "fixed"
 erf.restart = chk_legacy00080
 max_step = 160
-erf.fire_plot_int = 160
+erf.fire.plot_int = 160

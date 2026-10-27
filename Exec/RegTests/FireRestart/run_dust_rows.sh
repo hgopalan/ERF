@@ -27,7 +27,7 @@ shift || true
 
 rm -rf chk00000 chk00020 chk00040 chk00010 chk00030 plt_dust_rows_* dust_rows.dat dust_rows0.dat dust_rows_straight.dat dust_rows_expo.dat \
        dust_naaqs_expo.csv dust_naaqs_straight.csv dust_rows_bins.dat run_dust_rows_*.log *_chk.csv *_chk.dat *_restart.csv *_restart.dat
-common="erf.dust.dust_plot_int=10 erf.dust.dust_plot_prefix=plt_dust_rows_ erf.fire_plot_int=-1 erf.plot_int_1=-1"
+common="erf.dust.dust_plot_int=10 erf.dust.dust_plot_prefix=plt_dust_rows_ erf.fire.plot_int=-1 erf.plot_int_1=-1"
 run () {
     leg=$1; shift
     ${MPIRUN:-} "$EXE" "$@" $common > "run_dust_rows_$leg.log" 2>&1 \

@@ -52,7 +52,7 @@ run_one () {
             fi ;;
         fire_mrf_unstable|fire_mrf_unstable_boost)
             deck=$FIRE/inputs_fire_abl_mrf_unstable; sounding=$FIRE/mrf_sounding_unstable; every=400
-            extra=(stop_time=512 erf.fixed_dt=0.32 erf.fire_plot_int=-1)
+            extra=(stop_time=512 erf.fixed_dt=0.32 erf.fire.plot_int=-1)
             if [ "$case" = fire_mrf_unstable_boost ]; then
                 extra+=(erf.pbl_mrf_fire_thermal_excess=true)
             fi ;;

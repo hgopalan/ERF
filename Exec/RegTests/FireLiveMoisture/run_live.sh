@@ -26,7 +26,7 @@ for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -d "plt_fire_$v" ]; then continue; fi
     rm -rf plt_fire_$v; mkdir -p plt_fire_$v
     if [ "$v" = "legacy_chk" ]; then rm -rf chk_legacy?????; fi
-    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire_plot_file=plt_fire_$v/plt_fire_ "$@" > "run_$v.log" 2>&1 || { echo "run $v failed (see run_$v.log)"; exit 1; }
+    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.plot_file=plt_fire_$v/plt_fire_ "$@" > "run_$v.log" 2>&1 || { echo "run $v failed (see run_$v.log)"; exit 1; }
 done
 
 python3 check_live.py plt_fire_legacy plt_fire_legacy_key plt_fire_fixed 0.90 \

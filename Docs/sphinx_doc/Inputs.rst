@@ -6274,11 +6274,11 @@ Diagnostics and output
 | **erf.fire.suppression.log**                   | Event log (applied, completed, expired, hold_failed,       | String                         | "suppression_log.csv"  |
 |                                                | burnout, reread)                                           |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire_plot_file**                         | Fire plotfile prefix                                       | String                         | ``plt_fire_``          |
+| **erf.fire.plot_file**                         | Fire plotfile prefix                                       | String                         | ``plt_fire_``          |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire_plot_int**                          | Steps between fire plotfiles; < 0 disables                 | Integer                        | -1                     |
+| **erf.fire.plot_int**                          | Steps between fire plotfiles; < 0 disables                 | Integer                        | -1                     |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire_plot_per**                          | Seconds between fire plotfiles; < 0 disables               | Real                           | -1.0                   |
+| **erf.fire.plot_per**                          | Seconds between fire plotfiles; < 0 disables               | Real                           | -1.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 

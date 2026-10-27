@@ -5,7 +5,7 @@
                                   [--atm-prefix plt_1_]
 
 With no plotfile the last fire plotfile in the directory is used (plt_fire_NNNNN,
-or plt_fire_<name>_NNNNN for a deck that sets erf.fire_plot_file); with no
+or plt_fire_<name>_NNNNN for a deck that sets erf.fire.plot_file); with no
 --stats every fire_stats*.csv present is checked. Each check prints PASS or FAIL
 and the script exits 1 if any fails, so it can follow the run in CTest:
 

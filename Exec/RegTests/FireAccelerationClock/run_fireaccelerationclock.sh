@@ -13,7 +13,7 @@ VARIANTS="farsite_off farsite_legacy farsite_front levelset_off levelset_legacy 
 
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi
-    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire_plot_file="plt_fire_${v}_" "$@" \
+    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.plot_file="plt_fire_${v}_" "$@" \
         > "run_$v.log" 2>&1 || { echo "run $v failed (see run_$v.log)"; exit 1; }
 done
 

@@ -6,6 +6,7 @@
 #include <ERF_FirePrerequisites.H>
 #include <ERF_FireGrid.H>
 #include <ERF_FireWindExtract.H>
+#include <ERF_FireSurfaceHeight.H>
 #include <ERF_TerrainSlope.H>
 #include <ERF_HybridRos.H>
 #include <ERF_FireTerrainReader.H>

@@ -164,7 +164,7 @@ def deck(case, solver, wind=None):
               (f'erf.fire.fire_atm_feedback = {HEAT:.4f}   # coupled; WRF: burnt mass x (1 - M/(1+M)) x cmbcnst' if case > 1
                else 'erf.fire.fire_atm_feedback = 0.0     # uncoupled (WRF fire_atm_feedback = 0)'),
               'erf.fire.write_fire_stats_csv = true', f'erf.fire.fire_stats_csv_file = "fire_stats_{name}.csv"',
-              f'erf.fire_plot_file = "plt_fire_{name}_"', 'erf.fire_plot_per = 60.0']
+              f'erf.fire.plot_file = "plt_fire_{name}_"', 'erf.fire.plot_per = 60.0']
     open(os.path.join(HERE, f'inputs_{name}'), 'w').write('\n'.join(lines) + '\n')
     return name, zf
 

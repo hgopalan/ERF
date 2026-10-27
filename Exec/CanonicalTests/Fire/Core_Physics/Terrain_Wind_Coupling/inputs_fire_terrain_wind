@@ -102,8 +102,8 @@ erf.plot_file_1 = plt3d_terrain_wind
 erf.plot_int_1 = 400
 erf.plot_vars_1 = theta x_velocity y_velocity z_velocity z_phys
 
-erf.fire_plot_file = plt_fire_
-erf.fire_plot_int = 400
+erf.fire.plot_file = plt_fire_
+erf.fire.plot_int = 400
 
 # ============================================================================
 # FIRE MODULE

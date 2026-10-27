@@ -6,7 +6,7 @@ erf.init_type = "uniform"
 erf.use_gravity = false
 max_step = 200
 stop_time = 100.0
-erf.fire_plot_int = 40
+erf.fire.plot_int = 40
 
 erf.fire.ros_model = "prescribed"
 erf.fire.prescribed.ros = 1.0

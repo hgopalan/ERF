@@ -7,4 +7,4 @@ FILE = inputs_fire_phase10_firebreak
 # earlier behaviour can be reproduced against inputs_fire_phase10_firebreak.
 erf.fire.firebreak.use_mask = false
 erf.fire.fire_stats_csv_file = "fire_stats_phase10_firebreak_sentinel.csv"
-erf.fire_plot_file = plt_fire_sentinel_
+erf.fire.plot_file = plt_fire_sentinel_

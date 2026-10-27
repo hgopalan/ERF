@@ -23,7 +23,7 @@ runlog="run_poll_${m}.log"
 rm -rf "${plt}"* "$log" "$runlog"
 printf '# written empty by run_poll.sh; the line is appended while the run polls\n' > "$actions"
 
-${MPIRUN:-} "$EXE" inputs_poll erf.fire.propagation_method="$m" erf.fire_plot_file="$plt" \
+${MPIRUN:-} "$EXE" inputs_poll erf.fire.propagation_method="$m" erf.fire.plot_file="$plt" \
     erf.fire.suppression.log="$log" erf.fire.suppression.file="$actions" "$@" > "$runlog" 2>&1 &
 pid=$!
 

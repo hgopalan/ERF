@@ -5,7 +5,7 @@ FILE = inputs_base
 # Huygens gives Snell's law, sin(theta2) / R2 = sin(theta1) / R1: theta2 = 57.70 degrees.
 max_step = 800
 stop_time = 400.0
-erf.fire_plot_int = 400
+erf.fire.plot_int = 400
 
 erf.fire.prescribed.by_fuel = 1 0.5 2 1
 erf.fire.fuel_map.file = "fuel_halves.asc"

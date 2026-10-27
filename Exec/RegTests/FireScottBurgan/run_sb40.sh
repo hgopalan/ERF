@@ -20,7 +20,7 @@ VARIANTS="anderson anderson_key sb_gr2 sb_map sb_map_crosswalk anderson_map"
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi
     rm -rf plt_fire_$v; mkdir -p plt_fire_$v
-    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire_plot_file=plt_fire_$v/plt_fire_ "$@" > "run_$v.log" 2>&1 || { echo "run $v failed (see run_$v.log)"; exit 1; }
+    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.plot_file=plt_fire_$v/plt_fire_ "$@" > "run_$v.log" 2>&1 || { echo "run $v failed (see run_$v.log)"; exit 1; }
 done
 
 cells() { grep 'active fire cells' "run_$1.log" | awk '{print $NF}'; }

@@ -5,4 +5,4 @@ erf.fire.ignition.polygon_file = "line_0.csv"
 erf.fire.prescribed_wind_x = 4.005
 erf.fire.prescribed_wind_y = 0.0
 erf.fire.directional_split_hamiltonian = false
-erf.fire_plot_file = "plt_fire_baseline_0_"
+erf.fire.plot_file = "plt_fire_baseline_0_"

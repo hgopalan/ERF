@@ -14,7 +14,7 @@
  * suppression and structure ignition.
  */
 
-#ifdef ERF_ENABLE_FIRE
+#ifdef ERF_USE_FIRE
 
 #include <ERF_FireParams.H>
 #include <ERF_FireGrid.H>
@@ -29,6 +29,6 @@
 #include <ERF_FireIgnition.H>
 #include <ERF_FireLayer.H>
 
-#endif  // ERF_ENABLE_FIRE
+#endif  // ERF_USE_FIRE
 
 #endif  // ERF_FIRE_H

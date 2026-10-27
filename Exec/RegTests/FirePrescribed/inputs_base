@@ -55,4 +55,4 @@ erf.fire.moisture_dynamic = false
 erf.fire.use_waf = false
 erf.fire.use_terrain_wind = false
 erf.fire.write_fire_stats_csv = false
-erf.fire_plot_file = "plt_fire_"
+erf.fire.plot_file = "plt_fire_"

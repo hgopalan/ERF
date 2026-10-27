@@ -74,8 +74,8 @@ erf.check_file = fire_chk
 erf.check_int = -1
 
 # Plot files (2D fire variables on fire grid)
-erf.fire_plot_file = plt_fire_
-erf.fire_plot_int  = 100
+erf.fire.plot_file = plt_fire_
+erf.fire.plot_int  = 100
 
 
 # Plot files (3D atmospheric variables): the plume, about every 300 s at the

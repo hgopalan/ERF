@@ -45,7 +45,7 @@ amr.v = 0
 erf.sum_interval = -1
 erf.check_int = -1
 erf.plot_int_1 = -1
-erf.fire_plot_int = -1          # no plotfiles needed -- fire_stats_csv is enough
+erf.fire.plot_int = -1          # no plotfiles needed -- fire_stats_csv is enough
 
 erf.fire.enable = true
 erf.fire.fire_debug = false

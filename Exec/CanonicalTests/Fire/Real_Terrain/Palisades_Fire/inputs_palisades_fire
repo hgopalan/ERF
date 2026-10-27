@@ -107,8 +107,8 @@ erf.plot_file_1 = plt3d_palisades
 erf.plot_int_1  = 4000            # every 20 min
 erf.plot_vars_1 = theta x_velocity y_velocity z_velocity z_phys
 
-erf.fire_plot_file = plt_fire_
-erf.fire_plot_int  = 400          # one animation frame every 2 min
+erf.fire.plot_file = plt_fire_
+erf.fire.plot_int  = 400          # one animation frame every 2 min
 
 # ============================================================ fire
 erf.fire.enable = true

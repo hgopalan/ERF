@@ -9,4 +9,4 @@ erf.fire.suppression.log = suppression_poll.csv
 erf.fire.suppression.poll_interval = 5
 max_step = 80
 stop_time = 40.0
-erf.fire_plot_int = 80
+erf.fire.plot_int = 80

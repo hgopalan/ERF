@@ -45,7 +45,7 @@ erf.v = 0
 amr.v = 0
 erf.check_int = -1
 erf.plot_int_1 = -1
-erf.fire_plot_int = 150               # about every 33 s (the acoustic step is 0.09 s)
+erf.fire.plot_int = 150               # about every 33 s (the acoustic step is 0.09 s)
 
 erf.fire.enable = true
 erf.fire.grid_ratio = 5               # 10 m fire cells

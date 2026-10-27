@@ -1,0 +1,57 @@
+# The native fire engine directory. ERF builds it when FIRE_HOME lists this
+# directory (Exec/Make.ERF puts it on VPATH and the include path).
+CEXE_sources += ERF_NativeFireEngine.cpp
+CEXE_sources += ERF_FireEnginePrerequisites.cpp
+CEXE_sources += ERF_FireWindAdjust.cpp
+CEXE_sources += ERF_FireTerrainReader.cpp
+CEXE_sources += ERF_TerrainSlope.cpp
+CEXE_sources += ERF_Rothermel.cpp
+CEXE_sources += ERF_FireLayer.cpp
+CEXE_sources += ERF_FireCheckpoint.cpp
+CEXE_sources += ERF_FireSuppression.cpp
+CEXE_sources += ERF_Fire.cpp
+CEXE_sources += ERF_FirePlotfile.cpp
+CEXE_sources += ERF_StructureIgnition.cpp
+CEXE_sources += ERF_CustomFuel.cpp
+
+CEXE_headers += ERF_Fire.H
+CEXE_headers += ERF_FireParams.H
+CEXE_headers += ERF_FireSuppression.H
+CEXE_headers += ERF_FireEnginePrerequisites.H
+CEXE_headers += ERF_FireWindAdjust.H
+CEXE_headers += ERF_FireTerrainReader.H
+CEXE_headers += ERF_TerrainSlope.H
+CEXE_headers += ERF_Rothermel.H
+CEXE_headers += ERF_FireLayer.H
+CEXE_headers += ERF_FarsiteEllipse.H
+CEXE_headers += ERF_NumericalSchemes.H
+CEXE_headers += ERF_Reinitialize.H
+CEXE_headers += ERF_LevelSetAdvection.H
+CEXE_headers += ERF_FireIgnition.H
+CEXE_headers += ERF_IgnitionSchedule.H
+CEXE_headers += ERF_PolygonIgnition.H
+CEXE_headers += ERF_FuelMoisture.H
+CEXE_headers += ERF_MoistureExtinction.H
+CEXE_headers += ERF_FirePlotfile.H
+CEXE_headers += ERF_FirePlotfileCatalog.H
+CEXE_headers += ERF_FireHeatFlux.H
+CEXE_headers += ERF_FireDiagnostics.H
+CEXE_headers += ERF_FireStatsOutput.H
+CEXE_headers += ERF_AlbiniSpotting.H
+CEXE_headers += ERF_ScottSpottingTable.H
+CEXE_headers += ERF_CrownFire.H
+CEXE_headers += ERF_FuelMap.H
+CEXE_headers += ERF_LcpReader.H
+CEXE_headers += ERF_FireBreak.H
+CEXE_headers += ERF_FireBoundaryGuard.H
+CEXE_headers += ERF_FuelBlending.H
+CEXE_headers += ERF_FireAcceleration.H
+CEXE_headers += ERF_BalbiModel.H
+CEXE_headers += ERF_CheneyGouldModel.H
+CEXE_headers += ERF_MacArthurModel.H
+CEXE_headers += ERF_BehaveModel.H
+CEXE_headers += ERF_FuelWindHeight.H
+CEXE_headers += ERF_StructureIgnition.H
+CEXE_headers += ERF_CustomFuel.H
+CEXE_headers += ERF_FuelModels.H
+

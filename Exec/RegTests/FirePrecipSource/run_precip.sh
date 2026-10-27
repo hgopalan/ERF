@@ -20,7 +20,7 @@ for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi
     [ "$v" = "atmosphere_chk" ] && rm -rf chk00027
     rm -rf plt_fire_$v plt_$v fire_stats_$v.csv; mkdir -p plt_fire_$v plt_$v
-    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire_plot_file=plt_fire_$v/plt_fire_ erf.plot_file_1=plt_$v/plt "$@" \
+    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.plot_file=plt_fire_$v/plt_fire_ erf.plot_file_1=plt_$v/plt "$@" \
         > "run_$v.log" 2>&1 || { echo "run $v failed (see run_$v.log)"; tail -n 30 "run_$v.log"; exit 1; }
 done
 

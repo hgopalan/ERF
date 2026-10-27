@@ -8,7 +8,7 @@ set -u
 EXE=${1:?usage: run_compare.sh /path/to/erf_exec [extra args]}
 shift || true
 for d in baseline weno5z weno5z_front lowvisc; do
-    "$EXE" inputs_fire_levelset_$d erf.fire_plot_int=50 "$@" > run_$d.log 2>&1
+    "$EXE" inputs_fire_levelset_$d erf.fire.plot_int=50 "$@" > run_$d.log 2>&1
     echo "$d: exit $?"
 done
 python3 - <<'PY'

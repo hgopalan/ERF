@@ -104,8 +104,8 @@ erf.plot_file_1 = plt3d_marshall
 erf.plot_int_1  = 2000            # every 10 min
 erf.plot_vars_1 = theta x_velocity y_velocity z_velocity z_phys
 
-erf.fire_plot_file = plt_fire_
-erf.fire_plot_int  = 100          # one animation frame every 30 s
+erf.fire.plot_file = plt_fire_
+erf.fire.plot_int  = 100          # one animation frame every 30 s
 
 # ============================================================================
 # FIRE MODULE

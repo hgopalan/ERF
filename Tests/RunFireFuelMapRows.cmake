@@ -38,8 +38,8 @@ endif()
 separate_arguments(_options UNIX_COMMAND "${RUNTIME_OPTIONS}")
 
 execute_process(
-    COMMAND ${_launch} ${TEST_EXE} ${INPUT} max_step=0 erf.fire_plot_int=1
-            erf.fire_plot_file=plt_fire_ erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1
+    COMMAND ${_launch} ${TEST_EXE} ${INPUT} max_step=0 erf.fire.plot_int=1
+            erf.fire.plot_file=plt_fire_ erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1
             ${_options}
     WORKING_DIRECTORY "${WORKING_DIRECTORY}"
     OUTPUT_FILE "${WORKING_DIRECTORY}/run.log"

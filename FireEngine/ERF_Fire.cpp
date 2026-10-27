@@ -1,6 +1,6 @@
 #include "ERF_Fire.H"
 
-#ifdef ERF_ENABLE_FIRE
+#ifdef ERF_USE_FIRE
 #include <ERF_FireLayer.H>
 #endif
 
