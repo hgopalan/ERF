@@ -7,5 +7,5 @@ FILE = inputs_base
 # so a finite line's head falls toward the Wulff-shape tip rate rather than
 # tracking Rothermel's head rate. See README.md.
 erf.fire.directional_wind_coupling = "projection"
-erf.fire_plot_file           = "plt_fire_projection_"
+erf.fire.plot_file           = "plt_fire_projection_"
 erf.fire.fire_stats_csv_file = "fire_stats_projection.csv"

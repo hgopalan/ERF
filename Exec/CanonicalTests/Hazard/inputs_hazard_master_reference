@@ -114,7 +114,7 @@ erf.dust.visibility_diag_file = "visibility_diag.csv"
 # ============================================================================
 # OUTPUT
 # ============================================================================
-erf.fire_plot_int = -1           # fire-grid plotfiles (plt_fire_*), -1 = off
+erf.fire.plot_int = -1           # fire-grid plotfiles (plt_fire_*), -1 = off
 erf.dust.dust_plot_int = -1      # dust-grid plotfiles, -1 = off
 erf.dust.dust_debug = false      # per-step dust diagnostics
 erf.fire.fire_debug = false      # per-step fire diagnostics

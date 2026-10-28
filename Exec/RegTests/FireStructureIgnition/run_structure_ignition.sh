@@ -34,7 +34,7 @@ if [ "${SKIP_RUN:-0}" != "1" ]; then
     must_run off       inputs_off
     must_run on        inputs_on erf.check_int=20 erf.check_file=chk_on
     must_run radiation inputs_radiation
-    must_run restart   inputs_on erf.restart=chk_on00020 erf.fire_plot_file=plt_fire_restart_ \
+    must_run restart   inputs_on erf.restart=chk_on00020 erf.fire.plot_file=plt_fire_restart_ \
                        erf.fire.exposure.file=exposure_restart.csv erf.fire.fire_stats_csv_file=fire_stats_restart.csv
 fi
 

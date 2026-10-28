@@ -12,7 +12,7 @@ FILE = inputs_subdivision
 # (6 MJ/m2, 50 brands, 1000 kW/m for 60 s) no house ignites in this case:
 # the short-grass fire leaves at most 3.1 MJ/m2 at a wall, peaks at 773 kW/m
 # and drops fewer than 50 brands on any footprint (README, 2026-09-16).
-erf.fire_plot_file = "plt_fire_ignition_"
+erf.fire.plot_file = "plt_fire_ignition_"
 erf.fire.fire_stats_csv_file = "fire_stats_ignition.csv"
 erf.fire.exposure.file = "exposure_ignition.csv"
 erf.fire.structures.ignition.enable = true

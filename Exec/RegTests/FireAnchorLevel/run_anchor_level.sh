@@ -22,7 +22,7 @@ PY=${PYTHON:-python3}
 
 run () {   # variant deck [extra erf args...]
     v=$1; deck=$2; shift 2
-    ${MPIRUN:-} "$EXE" "$deck" erf.fire_plot_file="plt_fire_${v}_" erf.plot_file_1="plt_atm_${v}_" \
+    ${MPIRUN:-} "$EXE" "$deck" erf.fire.plot_file="plt_fire_${v}_" erf.plot_file_1="plt_atm_${v}_" \
         erf.fire.fire_stats_csv_file="fire_stats_${v}.csv" "$@" > "run_${v}.log" 2>&1
 }
 

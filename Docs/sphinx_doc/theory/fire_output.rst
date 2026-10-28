@@ -45,8 +45,8 @@ Fire plotfiles
 --------------
 
 The fire grid has its own plotfile stream, separate from the atmospheric
-plotfiles, written to ``erf.fire_plot_file`` (default ``plt_fire_``) every
-``erf.fire_plot_int`` steps or every ``erf.fire_plot_per`` seconds. Each is
+plotfiles, written to ``erf.fire.plot_file`` (default ``plt_fire_``) every
+``erf.fire.plot_int`` steps or every ``erf.fire.plot_per`` seconds. Each is
 a single-level AMReX plotfile on the fire grid, whose domain is the region
 the fire grid covers (the refined region when the fire runs on a finer level),
 with a small JSON sidecar giving the grid ratio, the atmospheric level of the

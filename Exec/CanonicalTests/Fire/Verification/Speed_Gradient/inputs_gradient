@@ -5,7 +5,7 @@ FILE = inputs_base
 # gradient, and the arrival time has the closed form of a constant velocity gradient.
 max_step = 300
 stop_time = 150.0
-erf.fire_plot_int = 100
+erf.fire.plot_int = 100
 
 erf.fire.prescribed.ros = 1.0
 erf.fire.prescribed.gradient = 0.004 0.0

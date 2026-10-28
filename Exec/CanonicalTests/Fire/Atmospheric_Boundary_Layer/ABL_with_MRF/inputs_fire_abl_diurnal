@@ -91,8 +91,8 @@ erf.fire.write_fire_stats_csv = true
 erf.fire.fire_stats_csv_file = "fire_stats_abl_diurnal.csv"
 
 # Plot files
-erf.fire_plot_file = plt_fire_abl_diurnal_
-erf.fire_plot_int = 20      # = max_step, so the checker sees the final state
+erf.fire.plot_file = plt_fire_abl_diurnal_
+erf.fire.plot_int = 20      # = max_step, so the checker sees the final state
 
 # Geostrophic wind: the Coriolis term is balanced by this large-scale forcing
 # (erf.abl_driver_type selects it; without it erf.abl_geo_wind is never read)

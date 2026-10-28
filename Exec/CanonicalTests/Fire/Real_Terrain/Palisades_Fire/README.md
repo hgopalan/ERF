@@ -111,7 +111,7 @@ writes `palisades_fire_map.gif` and `.mp4` over the same window as
 `make_movie.py`; `--basemap` takes any RGB GeoTIFF instead.
 
 ## Expected Results
-From a 30-minute run (`stop_time = 1800`, 9000 steps, `erf.fire_plot_int = 200`)
+From a 30-minute run (`stop_time = 1800`, 9000 steps, `erf.fire.plot_int = 200`)
 on ten ranks, and the same deck with grass instead of chaparral:
 
 | fuel | head ROS | burned at 30 min | perimeter |

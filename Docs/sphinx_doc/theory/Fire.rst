@@ -268,7 +268,7 @@ the ground of each column), ``ERF_FireUtils`` and ``ERF_FirePrecip`` (the
 near-surface temperature, humidity and rain), ``ERF_FireAtmCoupling`` (the
 area average and the heat injection) and ``ERF_FireSmokeEmission``.
 
-``Source/Fire`` holds the native engine. Its entry points are
+``FireEngine`` holds the native engine. Its entry points are
 ``ERF_FireLayer.H`` and ``ERF_FireLayer.cpp`` (the ``FireLayer`` class that
 owns the fields and runs a step) and ``ERF_FireParams.H`` (every
 ``erf.fire.*`` input, read once from ParmParse, including the coupling

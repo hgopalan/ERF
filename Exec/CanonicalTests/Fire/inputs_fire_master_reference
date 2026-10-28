@@ -1114,9 +1114,9 @@ erf.fire.accel.tau_wind = 60.0
 # ============================================================================
 # FIRE PLOTFILES (read under erf., not erf.fire.)
 # ============================================================================
-erf.fire_plot_file = "plt_fire_"   # prefix of the fire-grid plotfiles
-erf.fire_plot_int = -1              # steps between fire plotfiles (-1 = off)
-erf.fire_plot_per = -1.0            # seconds between fire plotfiles (-1 = off)
+erf.fire.plot_file = "plt_fire_"   # prefix of the fire-grid plotfiles
+erf.fire.plot_int = -1              # steps between fire plotfiles (-1 = off)
+erf.fire.plot_per = -1.0            # seconds between fire plotfiles (-1 = off)
 
 # ============================================================================
 # FIRE-DUST COUPLING (read under erf.; needs ERF_ENABLE_DUST and erf.dust.enable)

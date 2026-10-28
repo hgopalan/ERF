@@ -3,7 +3,7 @@ FILE = inputs_base
 # The subdivision: houses as non-burnable structures with the level set
 # extrapolated into them, streets non-burnable through the fuel map, lawns
 # grass, per-structure exposure and seeded ember spotting. Passive atmosphere.
-erf.fire_plot_file = "plt_fire_subdivision_"
+erf.fire.plot_file = "plt_fire_subdivision_"
 erf.fire.fire_stats_csv_file = "fire_stats_subdivision.csv"
 erf.fire.fuel_map.file = "fuel_map_subdivision.asc"
 erf.fire.fuel_map.format = "ascii"

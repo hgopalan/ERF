@@ -99,5 +99,5 @@ erf.fire.inject_latent = true
 erf.fire.fire_atm_feedback = 0.0     # uncoupled (WRF fire_atm_feedback = 0)
 erf.fire.write_fire_stats_csv = true
 erf.fire.fire_stats_csv_file = "fire_stats_case1_anelastic.csv"
-erf.fire_plot_file = "plt_fire_case1_anelastic_"
-erf.fire_plot_per = 60.0
+erf.fire.plot_file = "plt_fire_case1_anelastic_"
+erf.fire.plot_per = 60.0

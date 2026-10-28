@@ -19,7 +19,7 @@ PY=${PYTHON:-python3}
 run () {
     tag=$1; shift
     rm -rf "plt_fire_${tag}_"*
-    ${MPIRUN:-} "$EXE" inputs erf.fire_plot_file="plt_fire_${tag}_" "$@" < /dev/null \
+    ${MPIRUN:-} "$EXE" inputs erf.fire.plot_file="plt_fire_${tag}_" "$@" < /dev/null \
         > "run_${tag}.log" 2>&1 || { echo "run $tag failed (see run_${tag}.log)"; tail -n 30 "run_${tag}.log"; exit 1; }
 }
 

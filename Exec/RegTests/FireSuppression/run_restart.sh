@@ -18,7 +18,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 rm -rf chk00023 plt_restart_*_${m}_* suppression_restart_*_${m}.csv
 for leg in straight chk restart; do
     ${MPIRUN:-} "$EXE" "inputs_restart_$leg" erf.fire.propagation_method="$m" \
-        erf.fire_plot_file="plt_restart_${leg}_${m}_" erf.fire.suppression.log="suppression_restart_${leg}_${m}.csv" \
+        erf.fire.plot_file="plt_restart_${leg}_${m}_" erf.fire.suppression.log="suppression_restart_${leg}_${m}.csv" \
         "$@" > "run_restart_${leg}_${m}.log" 2>&1 || { echo "  restart/$m: the $leg run failed"; tail -20 "run_restart_${leg}_${m}.log"; exit 1; }
 done
 grep -q "Suppression: restored 1 action" "run_restart_restart_${m}.log" \

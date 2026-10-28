@@ -68,7 +68,7 @@ erf.check_int = -1
 erf.plot_file_1 = plt
 erf.plot_int_1 = 1
 erf.plot_vars_1 = density theta qv qc qp rain_accum
-erf.fire_plot_int = 40
+erf.fire.plot_int = 40
 
 erf.fire.enable = true
 erf.fire.fire_debug = true            # the [FIRE DEBUG] rain-rate lines

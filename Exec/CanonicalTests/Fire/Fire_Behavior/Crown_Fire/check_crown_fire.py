@@ -4,7 +4,7 @@
     python3 check_crown_fire.py [plt_fire_NNNNN] [--prefix P] [--stats fire_stats.csv]
 
 With no plotfile the highest step of the plt_fire*NNNNN plotfiles in the
-directory is used (decks may set their own erf.fire_plot_file prefix). When
+directory is used (decks may set their own erf.fire.plot_file prefix). When
 plotfiles of more than one prefix are present, name the plotfile or the
 prefix (--prefix plt_fire_phase9_crown_rothermel1991_): the check refuses to guess between
 prefixes. Decks that share a prefix overwrite each other's plotfiles, so run

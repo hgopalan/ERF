@@ -43,7 +43,7 @@ the front reaches the fire after about 150 s.
 
 The full-length run is 600 s:
 
-    mpiexec -n 4 erf_exec inputs max_step=2400 erf.plot_int_1=120 erf.fire_plot_int=120 erf.dust.dust_plot_int=120
+    mpiexec -n 4 erf_exec inputs max_step=2400 erf.plot_int_1=120 erf.fire.plot_int=120 erf.dust.dust_plot_int=120
 
 It took 12 to 21 min of wall time on 4 ranks of a shared machine and writes
 about 1.1 GB (21 atmosphere, fire and dust plotfiles each).

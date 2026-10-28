@@ -43,7 +43,7 @@ rm -rf parity_one parity_four
 mkdir -p parity_one parity_four
 for f in inputs input_sounding; do cp "$f" parity_one/; cp "$f" parity_four/; done
 
-common="amr.n_cell=24 24 30 max_step=20 erf.dust.dust_plot_int=20 erf.dust.dust_plot_prefix=plt_par_ erf.fire_plot_int=-1 erf.plot_int_1=-1 erf.check_int=-1 amrex.call_addr2line=0"
+common="amr.n_cell=24 24 30 max_step=20 erf.dust.dust_plot_int=20 erf.dust.dust_plot_prefix=plt_par_ erf.fire.plot_int=-1 erf.plot_int_1=-1 erf.check_int=-1 amrex.call_addr2line=0"
 # the receptor and site reductions are among the paths under test
 extras="erf.dust.msha_receptor_names=r1 erf.dust.msha_receptor_x=900.0 erf.dust.msha_receptor_y=1100.0 erf.dust.site_names=pit erf.dust.site_x_lo=400.0 erf.dust.site_y_lo=600.0 erf.dust.site_x_hi=1400.0 erf.dust.site_y_hi=1600.0 erf.dust.cm_fractions=0.002"
 

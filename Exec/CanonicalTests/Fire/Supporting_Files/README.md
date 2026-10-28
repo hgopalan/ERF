@@ -258,7 +258,7 @@ ERF writes separate plot files for atmospheric and fire variables due to their d
 **Fire 2D Variables** (fire grid - 10m spacing, 5× refined):
 - Directory: `plt_fire_XXXXX` (timestep numbered)
 - Variables: fire physics on 10m fire cells
-- Configuration: `erf.fire_plot_file`, `erf.fire_plot_int`
+- Configuration: `erf.fire.plot_file`, `erf.fire.plot_int`
 
 **Important**: Fire variables use separate dedicated fire plot output parameters because the fire grid (10m cells) is 5× finer than the atmospheric grid (50m cells).
 
@@ -267,8 +267,8 @@ ERF writes separate plot files for atmospheric and fire variables due to their d
 All fire test cases output 2D fire-specific variables on the fire grid:
 
 **Fire Output Configuration**:
-- Parameter: `erf.fire_plot_file = plt_fire_` (output file prefix)
-- Parameter: `erf.fire_plot_int = 100` (output interval in timesteps)
+- Parameter: `erf.fire.plot_file = plt_fire_` (output file prefix)
+- Parameter: `erf.fire.plot_int = 100` (output interval in timesteps)
 - Output directory: `plt_fire_XXXXX` (timestep-numbered directories)
 
 **Fire variables on 10m fire grid**:

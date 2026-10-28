@@ -35,7 +35,7 @@ coupled to ERF the same way.
   [W/m²], averaged over its step. It writes its own checkpoint and fire
   plotfile, and offers the level set, the reference wind and the heat release
   to the other surface models (the dust layer reads them). :cpp:`erf.fire.engine` selects it; the only
-  engine so far is ``"native"``, ERF's own model (``Source/Fire``, the
+  engine so far is ``"native"``, ERF's own model (``FireEngine``, the
   ``FireLayer`` class), which every other section of the fire pages
   describes.
 
@@ -76,7 +76,7 @@ To add an engine:
 #. Read the model's inputs under its own prefix (``erf.fire.<engine>.*``),
    so they never mix with another engine's keys.
 #. Add the engine's name to the names :cpp:`erf.fire.engine` accepts (the
-   ``one_of`` check of ``engine`` in ``Source/Fire/ERF_FireParams.H``), and a
+   ``one_of`` check of ``engine`` in ``FireEngine/ERF_FireParams.H``), and a
    branch that creates the engine to the selector in ``ERF::initializeFire``.
 #. Run the ``FireCoupler`` unit tests (``Tests/Unit/Fire/ERF_GTestFireCoupler.cpp``,
    whose stand-in engine is the smallest engine that works) and the coupled
@@ -87,7 +87,7 @@ To add an engine:
 
 The engine owns its fire physics and its own state, including its checkpoint
 and plotfile; the coupling layer does the rest, as described above. The
-native engine (``Source/Fire``, ``FireLayer``) is the complete example.
+native engine (``FireEngine``, ``FireLayer``) is the complete example.
 
 Wind extraction
 ---------------

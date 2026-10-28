@@ -678,7 +678,7 @@ endif()
 if(ERF_TEST_PYTHON)
   add_test(NAME FirePlotfileDoc_MatchesCatalog
       COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py
-              --catalog ${PROJECT_SOURCE_DIR}/Source/Fire/ERF_FirePlotfileCatalog.H
+              --catalog ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FirePlotfileCatalog.H
               --doc ${PROJECT_SOURCE_DIR}/Docs/sphinx_doc/theory/fire_output.rst)
   add_test(NAME FirePlotfileDoc_SelfTest
       COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py --self-test)
@@ -1409,7 +1409,7 @@ function(add_test_fire TEST_NAME SUITE_DIR INPUT_FILE NSTEPS)
     string(SUBSTRING "${_step}" ${_start} 5 _step)
     set(PLTFILE "plt_fire_${_step}")
 
-    set(RUNTIME_OPTIONS "max_step=${NSTEPS} erf.fire_plot_int=${NSTEPS} erf.fire_plot_file=plt_fire_ erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 ${ADD_TEST_FIRE_RUNTIME_OPTIONS}")
+    set(RUNTIME_OPTIONS "max_step=${NSTEPS} erf.fire.plot_int=${NSTEPS} erf.fire.plot_file=plt_fire_ erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 ${ADD_TEST_FIRE_RUNTIME_OPTIONS}")
     set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
     # the fire and dust CSVs are appended to (a restart keeps its earlier leg), so a
     # rerun in the same directory starts from a clean slate
@@ -1570,7 +1570,7 @@ function(add_test_fire_restart_abort TEST_NAME SUITE_DIR INPUT_FILE WRITE_NRANKS
     resolve_test_exe("" "erf_exec" TEST_EXE)
     set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
     set(write_log "${CURRENT_TEST_BINARY_DIR}/write.log")
-    set(common "erf.plot_int_1=-1 erf.plot_int_2=-1 erf.fire_plot_int=-1 amrex.call_addr2line=0")
+    set(common "erf.plot_int_1=-1 erf.plot_int_2=-1 erf.fire.plot_int=-1 amrex.call_addr2line=0")
     set(test_command sh -c "rm -rf ${CURRENT_TEST_BINARY_DIR}/chk_abort* && ${MPI_WRITE} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=1 erf.check_int=1 erf.check_file=chk_abort ${common} > ${write_log} 2>&1 && ${MPI_RESTART} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=2 erf.restart=chk_abort00001 erf.check_int=-1 ${common} ${RESTART_OPTIONS} 2>&1 | tee ${test_log}")
     add_test(${TEST_NAME} ${test_command})
     set_tests_properties(${TEST_NAME}

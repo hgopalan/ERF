@@ -25,7 +25,7 @@ for v in ${VARIANTS:-line_early line_late drop_hold drop_slow hold burnout}; do
         log="suppression_${v}_${m}.csv"
         if [ "${SKIP_RUN:-0}" != "1" ] || [ ! -d "${plt}00040" ]; then
             rm -rf "${plt}"* "$log"
-            ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.propagation_method="$m" erf.fire_plot_file="$plt" \
+            ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.propagation_method="$m" erf.fire.plot_file="$plt" \
                 erf.fire.suppression.log="$log" "$@" > "run_${v}_${m}.log" 2>&1 \
                 || { echo "run $v/$m failed (see run_${v}_${m}.log)"; status=1; continue; }
         fi

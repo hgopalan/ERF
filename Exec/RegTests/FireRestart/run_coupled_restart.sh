@@ -40,12 +40,12 @@ if [ ! -x "$FCOMPARE" ]; then
 fi
 
 rm -rf chk_cpl* plt_cpl_* plt_fire_cpl_* fire_stats*
-common="erf.moisture_model=Kessler amr.blocking_factor_x=4 amr.blocking_factor_y=4 amr.max_grid_size_x=8 amr.max_grid_size_y=8 stop_time=1000.0 erf.plot_int_1=40 erf.fire_plot_int=40 amrex.call_addr2line=0"
+common="erf.moisture_model=Kessler amr.blocking_factor_x=4 amr.blocking_factor_y=4 amr.max_grid_size_x=8 amr.max_grid_size_y=8 stop_time=1000.0 erf.plot_int_1=40 erf.fire.plot_int=40 amrex.call_addr2line=0"
 plotvars="erf.plot_vars_1=density x_velocity y_velocity z_velocity theta qv pressure"
 leg() { # name, then extra inputs
     name=$1; shift
     ${MPIRUN:-} "$EXE" inputs_coupled_straight $common "$plotvars" \
-        erf.plot_file_1="plt_cpl_${name}_" erf.fire_plot_file="plt_fire_cpl_${name}_" "$@" \
+        erf.plot_file_1="plt_cpl_${name}_" erf.fire.plot_file="plt_fire_cpl_${name}_" "$@" \
         > "run_cpl_${name}.log" 2>&1 \
         || { echo "  coupled restart: the $name run failed"; tail -20 "run_cpl_${name}.log"; exit 1; }
 }

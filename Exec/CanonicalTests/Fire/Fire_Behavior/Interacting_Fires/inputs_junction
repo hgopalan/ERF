@@ -4,7 +4,7 @@ FILE = inputs_base
 # opening downwind towards +x, as one 20 m wide polyline. The two inner fronts
 # meet on the bisector and their meeting point runs along it, downwind, twice
 # as fast as the inner fronts themselves.
-erf.fire_plot_file = "plt_fire_junction_"
+erf.fire.plot_file = "plt_fire_junction_"
 erf.fire.ignition_r = 0.0             # no disc of its own
 erf.fire.ignition.polygon_file = "junction_v60.csv"
 erf.fire.ignition.polygon_type = "polyline"

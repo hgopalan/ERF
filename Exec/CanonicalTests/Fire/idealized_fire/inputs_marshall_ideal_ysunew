@@ -130,8 +130,8 @@ erf.plot2d_file_1 = plt2d_marshall
 erf.plot2d_per_1  = 60.0
 erf.plot2d_vars_1 = pblh u_star t_star
 
-erf.fire_plot_file = plt_fire_
-erf.fire_plot_per  = 30.0
+erf.fire.plot_file = plt_fire_
+erf.fire.plot_per  = 30.0
 
 # ============================================================================
 # FIRE MODULE

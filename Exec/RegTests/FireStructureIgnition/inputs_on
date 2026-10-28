@@ -6,7 +6,7 @@ FILE = inputs_base
 # run, not the documented defaults: the heat-load threshold is one fiftieth of
 # the default and the growth time one three-hundredth, and the fuel load is
 # small enough that A burns out before the end (see the README).
-erf.fire_plot_file = "plt_fire_on_"
+erf.fire.plot_file = "plt_fire_on_"
 erf.fire.fire_stats_csv_file = "fire_stats_on.csv"
 erf.fire.exposure.file = "exposure_on.csv"
 erf.fire.structures.ignition.enable = true

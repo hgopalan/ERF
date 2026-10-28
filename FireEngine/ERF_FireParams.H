@@ -1193,8 +1193,9 @@ struct FireParams
        pp.query("fire_stats_csv_file", fire_stats_csv_file);
 
        // Phase 6: fire-atmosphere coupling parameters
+       // erf.fire.engine is checked by ERF's fire-engine registry, which
+       // creates this engine only when the deck selects "native"
        pp.query("engine", engine);
-       one_of("engine", engine, {"native"});
        pp.query("heat_flux_alfg", heat_flux_alfg);
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);

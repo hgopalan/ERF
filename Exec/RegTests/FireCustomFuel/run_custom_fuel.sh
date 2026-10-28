@@ -22,7 +22,7 @@ BAD_VARIANTS="bad_code bad_missing bad_depth bad_heat bad_burnout bad_undeclared
 for v in $RUN_VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi
     rm -rf plt_fire_$v; mkdir -p plt_fire_$v
-    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire_plot_file=plt_fire_$v/plt_fire_ "$@" > "run_$v.log" 2>&1 \
+    ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.plot_file=plt_fire_$v/plt_fire_ "$@" > "run_$v.log" 2>&1 \
         || { echo "run $v failed (see run_$v.log)"; exit 1; }
 done
 
@@ -32,7 +32,7 @@ done
 if [ "${SKIP_RUN:-0}" != "1" ] || [ ! -f run_custom_map_onebox.log ]; then
     rm -rf plt_fire_custom_map_onebox; mkdir -p plt_fire_custom_map_onebox
     "$EXE" inputs_custom_map amr.max_grid_size=64 amr.max_grid_size_z=32 \
-        erf.fire_plot_file=plt_fire_custom_map_onebox/plt_fire_ "$@" \
+        erf.fire.plot_file=plt_fire_custom_map_onebox/plt_fire_ "$@" \
         > run_custom_map_onebox.log 2>&1 \
         || { echo "run custom_map_onebox failed (see run_custom_map_onebox.log)"; exit 1; }
 fi
@@ -51,7 +51,7 @@ for m in $MODELS; do
     for v in anderson1 custom_heavy; do
         if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_model_${m}_$v.log" ]; then continue; fi
         ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.ros_model=$m stop_time=10.0 \
-            erf.fire_plot_int=-1 "$@" > "run_model_${m}_$v.log" 2>&1 \
+            erf.fire.plot_int=-1 "$@" > "run_model_${m}_$v.log" 2>&1 \
             || { echo "run $m/$v failed (see run_model_${m}_$v.log)"; exit 1; }
     done
 done

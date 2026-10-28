@@ -5383,7 +5383,7 @@ Fire Model
 These inputs configure the fire model described in :ref:`sec:Fire`. Every
 key is read once at startup from the ``erf.fire`` prefix (the three plotfile
 keys from ``erf``). Defaults are those of the parameter struct in
-``Source/Fire/ERF_FireParams.H``; the reference deck
+``FireEngine/ERF_FireParams.H``; the reference deck
 ``Exec/CanonicalTests/Fire/inputs_fire_master_reference`` lists every key with
 a comment but is a configured case, so its values are not all defaults. Keys
 marked "read but not consumed" are accepted for compatibility and have no
@@ -5400,7 +5400,7 @@ Master control
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.engine**                            | Fire engine behind the shared fire-atmosphere coupling     | "native"                       | "native"               |
 |                                                | (Source/FireCoupling); "native" is ERF's own model         |                                |                        |
-|                                                | (Source/Fire). Any other value aborts                      |                                |                        |
+|                                                | (FireEngine). Any other value aborts                      |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fire_debug**                        | Print per-step fire diagnostics to stdout                  | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -6274,11 +6274,11 @@ Diagnostics and output
 | **erf.fire.suppression.log**                   | Event log (applied, completed, expired, hold_failed,       | String                         | "suppression_log.csv"  |
 |                                                | burnout, reread)                                           |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire_plot_file**                         | Fire plotfile prefix                                       | String                         | ``plt_fire_``          |
+| **erf.fire.plot_file**                         | Fire plotfile prefix                                       | String                         | ``plt_fire_``          |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire_plot_int**                          | Steps between fire plotfiles; < 0 disables                 | Integer                        | -1                     |
+| **erf.fire.plot_int**                          | Steps between fire plotfiles; < 0 disables                 | Integer                        | -1                     |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire_plot_per**                          | Seconds between fire plotfiles; < 0 disables               | Real                           | -1.0                   |
+| **erf.fire.plot_per**                          | Seconds between fire plotfiles; < 0 disables               | Real                           | -1.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 

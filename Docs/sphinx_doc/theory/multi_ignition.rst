@@ -381,15 +381,15 @@ Implementation Files
 
 **Header files:**
 
-- ``Source/Fire/ERF_IgnitionSchedule.H``: Schedule loading and application
-- ``Source/Fire/ERF_PolygonIgnition.H``: Polygon and polyline initialization
+- ``FireEngine/ERF_IgnitionSchedule.H``: Schedule loading and application
+- ``FireEngine/ERF_PolygonIgnition.H``: Polygon and polyline initialization
 
 **Modified files:**
 
-- ``Source/Fire/ERF_FireParams.H``: Added ``IgnitionParams`` struct
-- ``Source/Fire/ERF_FireLayer.H``: Added private members for schedule state
-- ``Source/Fire/ERF_FireLayer.cpp``: Initialization and advance logic for scheduled ignitions
-- ``Source/Fire/Make.package``: Added header files to build system
+- ``FireEngine/ERF_FireParams.H``: Added ``IgnitionParams`` struct
+- ``FireEngine/ERF_FireLayer.H``: Added private members for schedule state
+- ``FireEngine/ERF_FireLayer.cpp``: Initialization and advance logic for scheduled ignitions
+- ``FireEngine/Make.package``: Added header files to build system
 
 **Test files:**
 

@@ -102,5 +102,5 @@ erf.fire.inject_latent = true
 erf.fire.fire_atm_feedback = 0.9259   # coupled; WRF: burnt mass x (1 - M/(1+M)) x cmbcnst
 erf.fire.write_fire_stats_csv = true
 erf.fire.fire_stats_csv_file = "fire_stats_case2_anelastic.csv"
-erf.fire_plot_file = "plt_fire_case2_anelastic_"
-erf.fire_plot_per = 60.0
+erf.fire.plot_file = "plt_fire_case2_anelastic_"
+erf.fire.plot_per = 60.0

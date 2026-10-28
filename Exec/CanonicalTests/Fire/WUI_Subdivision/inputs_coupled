@@ -4,7 +4,7 @@ FILE = inputs_subdivision
 # buildings, the fire's wind read from the open columns beside them, and the
 # fire's heat fed back to the atmosphere with the additive source placed in the
 # open part of each column. The full two-way case.
-erf.fire_plot_file = "plt_fire_coupled_"
+erf.fire.plot_file = "plt_fire_coupled_"
 erf.fire.fire_stats_csv_file = "fire_stats_coupled.csv"
 erf.fire.exposure.file = "exposure_coupled.csv"
 erf.buildings_type = ImmersedForcing

@@ -45,7 +45,7 @@ amr.v = 0
 erf.sum_interval = -1
 erf.check_int = -1
 erf.plot_int_1 = -1
-erf.fire_plot_int = 40      # the last step's fire plotfile is what the check reads
+erf.fire.plot_int = 40      # the last step's fire plotfile is what the check reads
 
 erf.fire.enable = true
 erf.fire.grid_ratio = 5               # 2 m fire cells
