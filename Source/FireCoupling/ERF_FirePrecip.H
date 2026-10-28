@@ -10,7 +10,8 @@
 /**
  * @file ERF_FirePrecip.H
  * @brief Rain per column for the fuel moisture model from the microphysics
- *        surface precipitation accumulators (erf.fire.precip_source = atmosphere).
+ *        surface precipitation accumulators, for an engine that reads the rain
+ *        (FireEngine::wants_surface_precip).
  *
  * Every Eulerian microphysics scheme with precipitation keeps a cumulative
  * surface accumulator per atmospheric column (Kessler's rain_accum, SAM's and

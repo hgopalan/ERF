@@ -14,8 +14,9 @@
 //      rho, rhotheta, rhoKE
 #define NDRY       3
 
-// Phase 4 (Smoke): Passive tracer emitted from fire heat flux [kg/m^3]
-#ifdef ERF_ENABLE_FIRE
+// Smoke: a passive tracer the fire coupling emits from the fire's heat [kg/m^3],
+// present in builds with the fire coupling (ERF_USE_FIRE)
+#ifdef ERF_USE_FIRE
 #define NSCALARS_SMOKE 1
 #else
 #define NSCALARS_SMOKE 0
@@ -58,40 +59,22 @@
 
 #define RhoScalar_comp (RhoKE_comp+1)
 
-// Phase 10 (Dust): First passive advected scalar component index
-// Used for total dust mass density [kg/m^3] on 3D atmospheric grid.
-// Phase 11 expands to n_size_bins slots when DustParams::transport_bins_separately = true.
-//
-// Scalar slot layout (consecutive, starting at RhoScalar_comp = NDRY):
-//   [RhoScalar_comp]          always present (base passive scalar)
-//   [RhoScalar_comp+1]        RhoAdv_comp  (dust)  -- only when ERF_USE_DUST
-//   [RhoScalar_comp+1 or +2]  RhoSmoke_comp (smoke) -- only when ERF_ENABLE_FIRE
-//   [RhoQ1_comp ...]          moisture variables
+// Scalar slots (consecutive, starting at RhoScalar_comp = NDRY):
+//   [RhoScalar_comp]     always present (base passive scalar)
+//   [RhoAdv_comp]        dust, only with ERF_USE_DUST
+//   [RhoSmoke_comp]      smoke, only with ERF_USE_FIRE (after the dust slot when both are built)
+//   [RhoQ1_comp ...]     moisture variables
 //
 // NSCALARS counts: 1 (base) + 1 (dust, if enabled) + NSCALARS_SMOKE (smoke, if fire enabled)
 #ifdef ERF_USE_DUST
 #define RhoAdv_comp    (RhoScalar_comp+1)
 #else
-#define RhoAdv_comp    RhoScalar_comp   // unused alias — keep for compile compatibility
+#define RhoAdv_comp    RhoScalar_comp   // unused alias, kept for compile compatibility
 #endif
-
-// Phase 4 (Smoke): Passive tracer from fire smoke emission [kg/m^3]
-// Injected at k=0 proportional to fire heat flux when ERF_ENABLE_FIRE is defined.
-#ifdef ERF_ENABLE_FIRE
-#  ifdef ERF_USE_DUST
-#    define RhoSmoke_comp  (RhoAdv_comp+1)
-#    define RhoQ1_comp     (RhoAdv_comp+2)
-#  else
-#    define RhoSmoke_comp  (RhoScalar_comp+1)
-#    define RhoQ1_comp     (RhoScalar_comp+2)
-#  endif
-#else
-#  ifdef ERF_USE_DUST
-#    define RhoQ1_comp     (RhoAdv_comp+1)
-#  else
-#    define RhoQ1_comp     (RhoScalar_comp+1)
-#  endif
+#ifdef ERF_USE_FIRE
+#define RhoSmoke_comp  (RhoAdv_comp+1)  // RhoScalar_comp+1 without dust, +2 with it
 #endif
+#define RhoQ1_comp     (RhoScalar_comp+NSCALARS)
 #define RhoQ2_comp     (RhoQ1_comp+1)
 #define RhoQ3_comp     (RhoQ1_comp+2)
 #define RhoQ4_comp     (RhoQ1_comp+3)
@@ -329,6 +312,9 @@ namespace EddyDiff {
         RANS_Rt,
         RANS_cmu,
         RANS_cmu_prime,
+        // k-eqn RANS: nu_t over its realizability cap C_r k / S (erf.rans_realizability);
+        // above 1 the cap is active, 0 when the cap is off
+        RANS_cap_ratio,
         NumDiffs
     };
 }

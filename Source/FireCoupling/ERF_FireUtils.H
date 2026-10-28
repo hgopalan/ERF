@@ -106,11 +106,9 @@ void compute_rh_from_conservative(amrex::MultiFab& RH_out,
  * @brief Air temperature [K] at k = 0 from the conserved state.
  *
  * T = theta * (p / p_0)^(R_d / c_p), with p from RhoTheta and qv as in
- * compute_rh_from_conservative. The fuel-moisture curves (Van Wagner's E_d,
- * E_w, the time-lag temperature factor, the stick diffusivity), Balbi's
- * ambient temperature and the threshold ignition all take an air temperature;
- * until 2026-10 they were handed the potential temperature of the first cell,
- * which at Marshall (840 hPa) is 14-16 K above the air temperature.
+ * compute_rh_from_conservative. Fuel-moisture curves and ignition criteria take
+ * an air temperature, not the potential temperature of the first cell, which at
+ * 840 hPa is 14-16 K above it.
  *
  * @param[out] T_out  2D MultiFab (one cell in z) on the level's boxes
  * @param[in]  S_atm  Conserved state (Rho, RhoTheta, RhoQ1 when moist)
@@ -157,6 +155,29 @@ void fire_copy_k0_plane(amrex::MultiFab& dst_2d, const amrex::MultiFab& src_3d)
             d(iv[0], iv[1], 0) = s(iv[0], iv[1], 0);
         });
     }
+}
+
+/**
+ * @brief Copy a MultiFab between device and host-accessible memory, for an
+ *        engine whose fire physics runs on the host
+ *
+ * The memory contract of ERF_FireEngine.H: the coupling's fields are in the
+ * default arena (device memory on a GPU build) and are only valid during the
+ * call that hands them over; an engine's returned fields must be readable
+ * there too. dst and src have the same BoxArray and DistributionMapping;
+ * ncomp components and nghost ghost cells are copied from component 0. dst
+ * belongs to the caller (allocate a host copy once with
+ * amrex::MFInfo().SetArena(amrex::The_Pinned_Arena()), or The_Managed_Arena(),
+ * and reuse it). The copy completes before the call returns: the GPU stream is
+ * synchronised, so the host may read dst, or the device read it, right away.
+ * On a CPU build it is a plain copy.
+ */
+inline
+void fire_host_copy(amrex::MultiFab& dst, const amrex::MultiFab& src, int ncomp = 1, int nghost = 0)
+{
+    AMREX_ALWAYS_ASSERT(dst.boxArray() == src.boxArray() && dst.DistributionMap() == src.DistributionMap());
+    amrex::MultiFab::Copy(dst, src, 0, 0, ncomp, nghost);
+    amrex::Gpu::streamSynchronize();
 }
 
 #endif  // ERF_FIRE_UTILS_H

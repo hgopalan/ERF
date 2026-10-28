@@ -86,7 +86,7 @@ def write_deck(tmp, name, text):
     return path
 
 def shadow_root(tmp, mutate):
-    """A copy of ROOT in which Source/Fire/ERF_CustomFuel.cpp is the only real
+    """A copy of ROOT in which FireEngine/ERF_CustomFuel.cpp is the only real
     file -- everything the checker reads is symlinked -- so the source can be
     mutated without touching the tree."""
     root = tempfile.mkdtemp(prefix="shadow", dir=tmp)

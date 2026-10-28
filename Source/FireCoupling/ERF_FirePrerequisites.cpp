@@ -61,28 +61,29 @@ int fire_anchor_level(int anchor_level, int finest_level)
     return lev;
 }
 
-void verify_fire_precip_source(const std::string& precip_source,
+void verify_fire_precip_source(const std::string& engine_name,
                                const SurfacePrecipAccumulationSources& sources)
 {
-    if (precip_source != "atmosphere") { return; }
     if (surface_precip_has_any_source(sources)) { return; }
     std::string moisture_model = "None";
     ParmParse pp_erf("erf");
     pp_erf.query("moisture_model", moisture_model);
-    Abort("[FIRE] erf.fire.precip_source = atmosphere takes the rain of every column from the microphysics "
-          "surface precipitation accumulators, but erf.moisture_model = \"" + moisture_model + "\" provides "
-          "none (Kessler, SAM, Morrison, WSM6 and WDM6 with precipitation do; Kessler_NoRain, SatAdj, "
-          "MoistNoCondensation and None do not). Choose one of those, or set erf.fire.precip_source = uniform.");
+    Abort("[FIRE] The fire engine \"" + engine_name + "\" takes the rain of every column from the "
+          "microphysics surface precipitation accumulators, but erf.moisture_model = \"" + moisture_model
+          + "\" provides none (Kessler, SAM, Morrison, WSM6 and WDM6 with precipitation do; Kessler_NoRain, "
+          "SatAdj, MoistNoCondensation and None do not). Choose one of those, or set the engine's inputs so "
+          "it does not read the rain.");
 }
 
 void verify_fire_prerequisites(const ERF& erf,
                                int lev,
                                const SurfaceLayer* surface_layer,
-                               int grid_ratio)
+                               int grid_ratio,
+                               bool needs_surface_layer)
 {
-    // Check 1: Surface layer BC type is "surface_layer"
+    // Check 1: Surface layer BC type is "surface_layer", for an engine that reads it
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-        surface_layer != nullptr,
+        !needs_surface_layer || surface_layer != nullptr,
         "fire module requires SurfaceLayer. "
         "Check: phys_bc_type[zlo] == surface_layer AND erf.most.z0 is set");
 
@@ -104,17 +105,6 @@ void verify_fire_prerequisites(const ERF& erf,
                   + " is built once from that level's boxes, so the refinement must not change, but "
                   "erf.regrid_int = " + std::to_string(regrid_int) + " regrids it. Use static refinement "
                   "boxes with erf.regrid_int = -1, or set erf.fire.anchor_level = 0.");
-        }
-
-        // Check 4: the dust layer and the fire-dust coupling live on level 0 and
-        // share the fire grid's index space; they cannot follow a finer fire grid.
-        ParmParse pp_dust("erf.dust");
-        bool dust_enable = false;
-        pp_dust.query("enable", dust_enable);
-        if (dust_enable) {
-            Abort("[FIRE] The dust layer and the fire-dust coupling run on level 0, so they cannot "
-                  "run with the fire grid on level " + std::to_string(lev) + " (erf.dust.enable = true). "
-                  "Set erf.fire.anchor_level = 0, or turn the dust layer off.");
         }
     }
 
@@ -196,7 +186,7 @@ void verify_fire_prerequisites(const ERF& erf,
     // A fire cell maps back to its atmospheric cell by i_a = i_f / C + atm_lo,
     // with atm_lo the lower corner of the fire region in the level's index space
     // (FireGrid::atm_lo), in ERF_FireGrid.H, ERF_FireAtmCoupling.H,
-    // ERF_FireWindExtract.cpp, ERF_FireSurfaceHeight.cpp and ERF_TerrainSlope.cpp; create_fire_grid() takes
+    // ERF_FireWindExtract.cpp, ERF_FireSurfaceHeight.cpp and the engine's own maps; create_fire_grid() takes
     // the region's physical position from ProbLo plus its index offset from the
     // domain's corner. Every AMReX level has a zero-based domain, so this
     // asserts the convention rather than relying on it silently.

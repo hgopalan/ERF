@@ -24,7 +24,7 @@ chk*
 tmp_build_dir
 .ccls-cache
 *.ex
-AMReX_buildInfo.*.cpp
+AMReX_buildInfo*.cpp
 cmake-build*
 cmake_build*
 cmake*ser*
@@ -92,3 +92,6 @@ Backtrace.*
 
 # LLM/session working notes (merge status, plans, checklists); kept locally only
 Notes/
+# Build trees next to the source (build/, build-cuda/, ...), at any depth
+build/
+build-*/

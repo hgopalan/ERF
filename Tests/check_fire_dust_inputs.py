@@ -57,7 +57,7 @@ def read(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
 
-FAMILIES = ("erf.fire.", "erf.dust.", "erf.fire_dust_", "erf.fire_plot_",
+FAMILIES = ("erf.fire.", "erf.dust.", "erf.fire_dust_", "erf.fire.plot_",
             "erf.mrf_fire_", "erf.pbl_mrf_fire_", "erf.dust_mrf_Sc_t")
 
 def in_family(k):
@@ -73,7 +73,7 @@ def norm(k):
 
 # ---------------------------------------------------------------- code reads
 def custom_fuel_keys():
-    """erf.fire.custom_fuel.*, read by Source/Fire/ERF_CustomFuel.cpp.
+    """erf.fire.custom_fuel.*, read by FireEngine/ERF_CustomFuel.cpp.
 
     Only custom_fuel.codes is a string literal there; the per-fuel properties are
     queried through a prefix built at run time from the fuel code, so grepping for
@@ -83,7 +83,7 @@ def custom_fuel_keys():
     or Inputs.rst following) still fails this test.  Both spots are asserted: a
     rewrite that stops matching them stops the test rather than passing it.
     """
-    src = os.path.join(ROOT, "Source/Fire/ERF_CustomFuel.cpp")
+    src = os.path.join(ROOT, "FireEngine/ERF_CustomFuel.cpp")
     s = read(src)
     keys = set()
     for m in re.finditer(r'\bpp\.(?:query|queryarr|contains)\s*\(\s*"([^"]+)"', s):
@@ -114,7 +114,7 @@ def custom_fuel_keys():
 
 def code_keys():
     keys = set()
-    s = read(os.path.join(ROOT, "Source/Fire/ERF_FireParams.H"))
+    s = read(os.path.join(ROOT, "FireEngine/ERF_FireParams.H"))
     for m in re.finditer(r'\bpp\.(?:query|queryarr|contains)\s*\(\s*"([^"]+)"', s):
         keys.add("erf.fire." + m.group(1))
     for m in re.finditer(r'\bpp_erf\.(?:query|queryarr)\s*\(\s*"([^"]+)"', s):
@@ -128,6 +128,13 @@ def code_keys():
     s = read(os.path.join(ROOT, "Source/ERF.cpp"))
     for m in re.finditer(r'\bpp\.query\s*\(\s*"(fire_[A-Za-z0-9_]+)"', s):
         keys.add("erf." + m.group(1))
+    # the coupling keys ERF reads itself (Source/FireCoupling, erf-model/ERF#4798)
+    s_c = read(os.path.join(ROOT, "Source/FireCoupling/ERF_FireCouplingParams.cpp"))
+    for m in re.finditer(r'\bpp\.(?:query|queryarr)\s*\(\s*"([^"]+)"', s_c):
+        keys.add("erf.fire." + m.group(1))
+    # the fire plotfile keys, read under erf.fire by ERF.cpp (as upstream ERF does)
+    for m in re.finditer(r'\bpp_fire\.query\s*\(\s*"(plot_[A-Za-z0-9_]+)"', s):
+        keys.add("erf.fire." + m.group(1))
     keys |= custom_fuel_keys()
     s = read(os.path.join(ROOT, "Source/DataStructs/ERF_TurbStruct.H"))
     for m in re.finditer(r'query_one_or_per_level\s*\(\s*pp,\s*"([^"]+)"', s):

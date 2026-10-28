@@ -115,6 +115,8 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestMultiScalarSlots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestSurfaceLayerStress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestSurfaceLayer.cpp
+    # Motivation: the roughness inverted from surface fluxes must stay inside its bounds.
+    ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestInvertedRoughness.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestMOSTAverage.cpp
     # Motivation: the MOST reference height must use the true stretched cell
     # centers, and a query on a mesh face must be found rather than abort.
@@ -148,10 +150,17 @@ target_sources(${erf_exe_name}
     # Motivation: the ABL warm bubble (prob.bubble_*) must follow WRF's cos^2 form on each
     # cell's own height, and a compressible bubble must be made at constant pressure.
     ${CMAKE_CURRENT_SOURCE_DIR}/Prob/ERF_GTestABLWarmBubble.cpp
+    # Motivation: RICO's moisture source must be continuous at prob.moisture_source_cutoff and
+    # default to RICO's 2980 m (erf-model/ERF#4626).
+    ${CMAKE_CURRENT_SOURCE_DIR}/Prob/ERF_GTestRICOMoistureSource.cpp
     # Motivation: production scalar diffusion must use the exact low/high
     # physical-face stencil in every rotated Cartesian direction.
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestStateDiffusionDirichlet.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestTKEBuoyancySource.cpp
+    # Motivation: the YSUNew PBL height must interpolate a bulk Richardson crossing at the top
+    # cell, give a column with no crossing the top of the scan, and give a surface cell already
+    # above Ribcr the floor without dividing 0 by 0 (erf-model/ERF#4458).
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestPBLRibCrossing.cpp
     # Motivation: reusable scalar diffusion must honor explicit scalar, coefficient,
     # flux, and tendency components while preserving ERF's N/S/T mapped discretizations.
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestScalarDiffusion.cpp
@@ -166,6 +175,12 @@ target_sources(${erf_exe_name}
     # the implicit vertical solves on the interior faces and take the same compact term out of
     # the explicit fluxes, and nothing on the bottom and top faces.
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestTerrainImplicitMetric.cpp
+    # Motivation: the implicit vertical momentum solve must close a no-slip z wall with the
+    # second-order one-sided gradient the explicit strain uses, or the steady state of a
+    # wall-bounded flow (PoiseuilleFlow) drifts at the wall cells.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestImplicitWallStencil.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LinearSolvers/ERF_GTestTerrainPoisson.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LinearSolvers/ERF_GTestTerrainMLMG.cpp
     # Motivation: the opt-in WRF Smagorinsky-2D limits must reproduce WRF's smag2d_km numbers
     # (slope factor, deformation threshold, cap and their order), limit K_h before the scalar
     # diffusivities are derived from it, and the diffusive time-step rates must follow their
@@ -174,7 +189,16 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestSmag2DLimiters.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Diagnostics/ERF_GTestSurfaceFluxDiagnostics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Diagnostics/ERF_GTestSeaLevelPressure.cpp
+    # Motivation: a Noah-MP 2 m tile with zero weight must not reject the bundle, and a
+    # station must leave -999 neighbours out of its interpolation rather than average them.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diagnostics/ERF_GTestSurfaceMissingValues.cpp
+    # Motivation: the stable-side z/L in the 2 m profile must stay bounded for a very
+    # small positive Obukhov length.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diagnostics/ERF_GTestNearSurfaceStability.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestCanopyBiophysics.cpp
+    # Motivation: the k-eqn RANS canopy terms must keep the kynema-sgf
+    # formulas, cap L only inside the forest and never remove more than k.
+    ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestCanopyTurbulence.cpp
     # Motivation: buoyancy dispatch must preserve selector semantics, active
     # anelastic formulations, and neutral dry type-4 primitive-theta behavior.
     ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestBuoyancy.cpp
@@ -194,6 +218,10 @@ target_sources(${erf_exe_name}
     # at its own height (roof interface, wall mean of its cell's two), on a level of several
     # boxes whose columns all differ.
     ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestIBSEBTwoStreamFaces.cpp
+    # Motivation: the building faces took the air temperature and the Exner function of
+    # their fluid cell without its water vapour (erf-model/ERF#4481); they now match the
+    # two-stream column's equation of state for the same moist cell.
+    ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestIBSEBMoistAir.cpp
     # Motivation: observation nudging must read a station file exactly, relax
     # to the closed-form target with the right weight, sigma band and rate cap,
     # and put its sources on the right faces over flat, fitted and immersed
@@ -209,6 +237,11 @@ target_sources(${erf_exe_name}
     # see the two-stream columns' sun: the same zenith, a morning sun in the
     # east, and the start date read the same way.
     ${CMAKE_CURRENT_SOURCE_DIR}/Radiation/ERF_GTestIBSEBTwoStreamSun.cpp
+    # Motivation: the building faces' solar declination and equation of time
+    # must be Spencer's (1971) published series on his 365-day angle, which
+    # puts the June-solstice sun near 23.44 deg, and the date must advance
+    # at 00:00 UTC in a run of several days.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Radiation/ERF_GTestIBSEBSolarDeclination.cpp
     # Motivation: the surface energy balance must take H and LE from a land
     # model, else from the surface layer's applied flux in W/m^2, else from
     # the scalar defaults; LE stays at its default without a moisture model.
@@ -244,11 +277,24 @@ target_sources(${erf_exe_name}
     # first plane and leaving a time.dat that erf.input_bndry_planes cannot read.
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestWriteBndryPlanes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestEpochTime.cpp
+    # Motivation: SLM's initial soil state from a met_em file must interpolate the source
+    # dataset's soil layers in depth to the Noah layers, and the monthly vegetation to the
+    # start date the way real.exe does, across the year's end and in leap years.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Initialization/ERF_GTestMetgridLandUtils.cpp
+    # Motivation: erf.metgrid_force_sfc_k must drop the same origin levels whether or not the
+    # column has origin levels below the surface (erf-model/ERF#4607).
+    ${CMAKE_CURRENT_SOURCE_DIR}/Initialization/ERF_GTestMetgridForceSfc.cpp
     # Motivation: a station placed by latitude/longitude must land where the
     # lat/lon arrays put it on a rotated grid and on a grid across 180 degrees.
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestLatLonMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestGridUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestJoinBoxesStackedInZ.cpp
+    # Motivation: erf.initial_dz without a stretching ratio must solve for the ratio that
+    # closes the grid on prob_hi, and an explicit ratio must not be solved for.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestInitZLevels.cpp
+    # Motivation: a malformed, mis-ordered or too small terrain file must stop the run with
+    # the problem named, and steep terrain next to an inflow or outflow face must be reported.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestTerrainFileChecks.cpp
     # Motivation: a BTF fine level's mesh must not depend on how its grids are split in z.
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestTerrainFineColumns.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngScalar.cpp
@@ -324,6 +370,7 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireBoxParity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireAtmInjection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireCoupler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestRothermelCellMoisture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestEmberDrift.cpp
   )
@@ -349,6 +396,7 @@ if(ERF_DIM STREQUAL "3")
 endif()
 if(ERF_ENABLE_NETCDF)
   target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestNCInterface.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestTerrainNetCDF.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestForestDragNetCDF.cpp
   )
@@ -390,6 +438,8 @@ if(ERF_ENABLE_NOAHMP)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/LandSurfaceModel/Noah-MP/ERF_GTestNoahMPResultPolicy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LandSurfaceModel/Noah-MP/ERF_GTestNoahMPLevelDriver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LandSurfaceModel/Noah-MP/ERF_GTestNoahMPSnowFields.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LandSurfaceModel/Noah-MP/ERF_GTestNoahMPCheckpointLayout.cpp
   )
 endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
@@ -408,7 +458,7 @@ erf_register_gtest_suite(${erf_exe_name}
 # 2026 audit BehaveTransfer.WindowReachesState died here with SIGILL in the
 # BEHAVE live-weight 0/0 of a fuel without live load).
 if(ERF_ENABLE_FIRE)
-  set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:FireModelReferences.*:FireDefaults.*:BehaveNetLoad.*:CheneyGould98.*:MacArthurCap.*:FarsiteShape.*:FireHeatBudget.*:ByramIntensity.*:ArrivalStamp.*:FbpSlopeVector.*:PerimeterCount.*:FuelBlendingParity.*:CrownFront.*:ExnerTendency.*:SmokeInjection.*:RothermelCellMoisture.*:EmberDrift.*:FireBreak.*:ReactionVelocityFormula.*:WrfBmstCompat.*:FireModelSummary.*:FireCoupler.*")
+  set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:FireModelReferences.*:FireDefaults.*:BehaveNetLoad.*:CheneyGould98.*:MacArthurCap.*:FarsiteShape.*:FireHeatBudget.*:ByramIntensity.*:ArrivalStamp.*:FbpSlopeVector.*:PerimeterCount.*:FuelBlendingParity.*:CrownFront.*:ExnerTendency.*:SmokeInjection.*:RothermelCellMoisture.*:EmberDrift.*:FireBreak.*:ReactionVelocityFormula.*:WrfBmstCompat.*:FireModelSummary.*:FireCoupler.*:FireRegistry.*:HeatInjection.*")
   if(ERF_ENABLE_DUST)
     string(APPEND _fire_gtest_suites ":DustColumn.*:DustThreshold.*:DustWind.*:DustBudget.*:DustDiagnostics.*")
   endif()
@@ -605,6 +655,23 @@ if(TARGET erf_exec AND ERF_DIM STREQUAL "3" AND
         -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}
         -P ${PROJECT_SOURCE_DIR}/Tests/test_files/SBM/RunM3RestartEquivalence.cmake)
     set_tests_properties(SBM_M3_StaticTerrain_Restart_Equivalence PROPERTIES
+      LABELS "integration;sbm"
+      RUN_SERIAL TRUE
+      TIMEOUT 180)
+
+    # The same across a restart that re-makes the level-0 grids (issue 4225): the spectrum
+    # is read on the checkpoint's 2x2 grids and redistributed onto the restart's 4x4, and
+    # the run must continue as the straight run did.
+    add_test(NAME SBM_M3_StaticTerrain_RegridOnRestart
+      COMMAND ${CMAKE_COMMAND}
+        -DERF_EXECUTABLE=$<TARGET_FILE:erf_exec>
+        -DCOMPARE_EXECUTABLE=$<TARGET_FILE:erf_sbm_checkpoint_compare>
+        -DINPUT_FILE=${PROJECT_SOURCE_DIR}/Tests/test_files/SBM/inputs_periodic_static_terrain
+        -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}
+        "-DRESTART_ARGS=erf.regrid_level_0_on_restart=1|amr.max_grid_size_x=2|amr.max_grid_size_y=2"
+        -DALLOW_DIFF_GRIDS=ON
+        -P ${PROJECT_SOURCE_DIR}/Tests/test_files/SBM/RunM3RestartEquivalence.cmake)
+    set_tests_properties(SBM_M3_StaticTerrain_RegridOnRestart PROPERTIES
       LABELS "integration;sbm"
       RUN_SERIAL TRUE
       TIMEOUT 180)

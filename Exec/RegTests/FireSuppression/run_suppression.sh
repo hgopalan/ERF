@@ -16,7 +16,7 @@ EXE=${1:?usage: run_suppression.sh /path/to/erf_exec [extra args]}
 shift || true
 PYTHON=${PYTHON:-python3}
 here=$(cd "$(dirname "$0")" && pwd)
-[ -f erf_plotfile.py ] || cp "$here/../../CanonicalTests/Canonical_RANS/erf_plotfile.py" .
+[ -f erf_plotfile.py ] || cp "$here/../../Tools/erf_plotfile.py" .
 
 status=0
 for v in ${VARIANTS:-line_early line_late drop_hold drop_slow hold burnout}; do

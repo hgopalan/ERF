@@ -191,7 +191,8 @@ option(ERF_ENABLE_NOAHMP "Enable Noah-MP" OFF)
 
 #Other parameterizations
 option(ERF_ENABLE_WINDFARM "Enable wind farm parameterizations" OFF)
-option(ERF_ENABLE_FIRE "Enable wildfire spread module" ON)
+option(ERF_ENABLE_FIRE "Enable the fire coupling (the atmosphere side) and the native fire engine in FireEngine/" ON)
+set(ERF_FIRE_ENGINE_DIRS "" CACHE STRING "Further fire engine directories (each with ERFFireEngine.cmake) to compile in; needs ERF_ENABLE_FIRE")
 option(ERF_ENABLE_WSM6_FORT "Enable WSM6 Fortran bridge calls" OFF)
 option(ERF_ENABLE_DUST "Enable the ERF-Dust 2D surface emission module" OFF)
 option(ERF_ENABLE_WDM6_FORT "Enable WDM6 Fortran bridge calls" OFF)
@@ -437,6 +438,8 @@ if(ERF_ENABLE_EKAT)
   set(EKAT_ENABLE_TESTS OFF CACHE BOOL "ekat enable tests")
   set(EKAT_ENABLE_KOKKOS ON CACHE BOOL "ekat enable kokkos")
   set(EKAT_ENABLE_LOGGING ON CACHE BOOL "ekat enable spdlog")
+  # Kokkos deprecation used inside EKAT or RRTMGP is theirs to fix
+  set(Kokkos_ENABLE_DEPRECATION_WARNINGS OFF CACHE BOOL "kokkos deprecation warnings")
   set(EKAT_BIN ${PROJECT_BINARY_DIR}/Submodules/ekat)
 
   # Force use of internal spdlog from EKAT

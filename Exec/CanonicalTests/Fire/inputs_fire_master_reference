@@ -895,6 +895,11 @@ erf.fire.heat_tendency_density = false
 # WRF-SFIRE's form) injects Pi times the flux, 4.5 % short at 850 hPa
 erf.fire.heat_tendency_exner = false
 
+# Where the sensible heat goes: "exponential" spreads it over the column with
+# the e-folding height heat_flux_alfg (WRF-SFIRE); "bottom_cell" puts all of
+# it in the lowest cell (the LSFIRE placement). Not with heat_open_fraction.
+erf.fire.heat_profile = "exponential"
+
 # ============================================================================
 # TERRAIN FILE (Optional)
 # ============================================================================

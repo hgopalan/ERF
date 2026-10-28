@@ -3,14 +3,28 @@ name: ERF CI (cuda)
 on:
   push:
     branches: [development, ERF-Fire]
-    paths-ignore:
-      - Docs/**
-      - README.rst
-      - license.txt
+    paths:
+      - '**'
+      - '!Docs/**'
+      - '!**.md'
+      - '!**.rst'
+      - '!license.txt'
+      - '!.github/workflows/**'
+      - '.github/workflows/cuda-ci.yml'
+      - '.github/actions/**'
 
   pull_request:
     branches: [development, ERF-Fire]
     types: [opened, synchronize, reopened]
+    paths:
+      - '**'
+      - '!Docs/**'
+      - '!**.md'
+      - '!**.rst'
+      - '!license.txt'
+      - '!.github/workflows/**'
+      - '.github/workflows/cuda-ci.yml'
+      - '.github/actions/**'
   workflow_dispatch:
 
 concurrency:
@@ -90,13 +104,14 @@ jobs:
             -DERF_ENABLE_MPI:BOOL=ON \
             -DERF_ENABLE_CUDA:BOOL=ON \
             -DERF_ENABLE_PARTICLES:BOOL=${{matrix.particles}} \
+            -DERF_ENABLE_FIRE:BOOL=ON \
             -DERF_PRECISION:STRING=${{matrix.mesh_precision}} \
             -DERF_PARTICLES_PRECISION:STRING=${{matrix.particles_precision}} \
             -DERF_ENABLE_DUST:BOOL=ON \
             -DERF_TEST_NRANKS:STRING=2 \
             -DERF_ENABLE_UNIT_TESTS:BOOL=ON .
           echo "Building with $(nproc) processes"
-          cmake --build build-${{matrix.cuda_pkg}} --parallel $(nproc) \
+          cmake --build build-${{matrix.cuda_pkg}} --parallel "$(nproc)" \
           2>&1 | tee -a ${{runner.workspace}}/build-${{matrix.cuda_pkg}}-output.txt;
 
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -122,7 +137,7 @@ jobs:
           build_log="${{runner.workspace}}/build-${{matrix.cuda_pkg}}-output.txt"
           diagnostics="${{runner.workspace}}/build-${{matrix.cuda_pkg}}-diagnostics.txt"
           grep -Ei "warning:|warning #|error:|error #" "$build_log" \
-            | grep -Ev "Submodules/(amrex|googletest)" \
+            | grep -Ev "Submodules/(amrex|AMReX|googletest)" \
             | grep -Ev "lto-wrapper: warning:" \
             | sort -fu > "$diagnostics" || true
           cat "$diagnostics"

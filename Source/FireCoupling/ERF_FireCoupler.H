@@ -2,6 +2,8 @@
 #define ERF_FIRE_COUPLER_H
 
 #include <memory>
+#include <string>
+#include <vector>
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
@@ -38,7 +40,7 @@ class FireCoupler
 {
 public:
     /**
-     * @param[in] params  The coupling inputs (FireParams::coupling_params())
+     * @param[in] params  The coupling inputs (FireCouplingParams::read())
      * @param[in] engine  The fire engine erf.fire.engine selects
      */
     FireCoupler (const FireCouplingParams& params, std::unique_ptr<FireEngine> engine);
@@ -53,8 +55,9 @@ public:
      *
      * @param[in] erf            ERF instance (public AmrCore accessors only)
      * @param[in] lev            The level the fire grid refines (fire_anchor_level)
-     * @param[in] surface_layer  The bottom surface layer, or nullptr (aborts)
-     * @param[in] z_phys_nd_atm  Nodal height of level lev [m], or nullptr on flat terrain
+     * @param[in] surface_layer  The bottom surface layer, or nullptr (aborts when
+     *                           the engine needs one, FireEngine::needs_surface_layer)
+     * @param[in] z_phys_nd_atm  Nodal height of level lev [m] (ERF always passes it)
      */
     void initialize (const ERF& erf,
                      int lev,
@@ -121,7 +124,9 @@ public:
      * @param[in,out] cc_source     Cell-centred sources of the level
      * @param[in]     S_old         Conserved state at the start of the step (density)
      * @param[in]     z_phys_cc     Cell-centre height [m]
-     * @param[in]     z_phys_nd     Nodal height [m], or nullptr on flat terrain (smoke)
+     * @param[in]     z_phys_nd     Nodal height [m] (ERF always passes it): the cell
+     *                              thickness and roof datum of the heat, and the
+     *                              smoke cell's thickness
      * @param[in]     geom          Geometry of the level
      * @param[in]     has_moisture  The vapour source exists
      * @param[in]     step          Step of the level, for the debug output
@@ -164,6 +169,26 @@ public:
      */
     void read_checkpoint (const std::string& restart_chkfile, int max_level, int step);
 
+    /// Fire fields the ERF plotfile can carry (FireEngine::plot_var_names(), read at construction,
+    /// before ERF reads erf.plot_vars_*).
+    const std::vector<std::string>& plot_var_names () const { return m_plot_var_names; }
+
+    /**
+     * @brief Fill component dcomp of an ERF plotfile MultiFab of level lev
+     *        with the fire field name
+     *
+     * On the fire grid's level, the k = 0 cell of each column holds the mean
+     * of the engine's field (FireEngine::plot_var) over the fire cells under
+     * it; every other cell, every other level and a field the engine returns
+     * as nullptr hold zero.
+     *
+     * @param[in]  name  One of plot_var_names()
+     * @param[out] dst   Cell-centred MultiFab on the boxes of level lev
+     * @param[in]  dcomp Component of dst to fill
+     * @param[in]  lev   The level dst belongs to
+     */
+    void fill_plot_var (const std::string& name, amrex::MultiFab& dst, int dcomp, int lev) const;
+
     /// The level the fire grid refines (erf.fire.anchor_level, resolved at initialize).
     int level () const { return m_lev; }
 
@@ -180,8 +205,9 @@ public:
     /**
      * @brief Sensible heat flux [W/m2] of the previous fire step on the
      *        atmospheric columns of the fire grid's level, with 5 ghost columns
-     *        (the halo the MRF fire thermal excess reads); zero outside the fire
-     *        region. Allocated at initialize, so never null afterwards.
+     *        (for a reader that samples a halo around each tile, such as a
+     *        boundary-layer scheme taking the fire's heat into its mixing); zero
+     *        outside the fire region. Allocated at initialize, so never null afterwards.
      */
     const amrex::MultiFab* get_Q_atm_prev () const { return m_Q_atm_prev.get(); }
     /// Latent heat flux [W/m2] of the previous fire step, laid out as get_Q_atm_prev().
@@ -200,11 +226,13 @@ private:
     // The engine's fluxes averaged onto the atmospheric columns of the fire
     // grid's level (one slab per box of that level), held from the previous
     // step for injection at every stage of the next (one-step explicit lag).
-    // Their ghost columns hold the neighbouring box's value for the MRF fire
-    // thermal excess, which reads a halo around every tile; outside the refined
-    // region of a finer level they hold zero.
+    // Their ghost columns hold the neighbouring box's value for a reader that
+    // samples a halo around every tile; outside the refined region of a finer
+    // level they hold zero.
     std::unique_ptr<amrex::MultiFab> m_Q_atm_prev;      ///< sensible [W/m2]
     std::unique_ptr<amrex::MultiFab> m_Q_lat_atm_prev;  ///< latent   [W/m2]
+
+    std::vector<std::string> m_plot_var_names;  ///< FireEngine::plot_var_names(), read at construction
 };
 
 #endif

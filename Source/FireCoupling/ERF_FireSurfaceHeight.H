@@ -13,8 +13,7 @@
  * wind sampler (ERF_FireWindExtract.H) measures its sampling height from, for
  * the column holding each fire cell and for the four columns of its bilinear
  * stencil. Terrain slopes, which a fire engine may take from its own
- * fire-resolved terrain, are the engine's (ERF_TerrainSlope.H for the native
- * engine).
+ * fire-resolved terrain, are the engine's.
  */
 
 /**
@@ -37,8 +36,7 @@
  * @param[in]  geom_atm        Geometry of the level the fire grid refines
  * @param[in]  fg              Fire grid structure
  *
- * Called once by the fire engine at initialisation (FireLayer::initialize for
- * the native engine); terrain is static.
+ * Called once by the fire engine at initialisation; terrain is static.
  */
 void compute_fire_surface_height(
     amrex::MultiFab& fire_surface_z,
@@ -66,8 +64,7 @@ void compute_fire_surface_height(
  * @param[in]  geom_atm         Geometry of the level the fire grid refines
  * @param[in]  fg               Fire grid structure
  *
- * Called once by the fire engine at initialisation (FireLayer::initialize for
- * the native engine); terrain is static.
+ * Called once by the fire engine at initialisation; terrain is static.
  */
 void compute_fire_column_grounds(
     amrex::MultiFab& fire_col_ground,

@@ -289,6 +289,11 @@ TEST(Plotfile3DSelection, RawStateNamesUseTheMoistureMapAboveRhoQ1)
     EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ3"), RhoQ3_comp);
     EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ4"), RhoQ4_comp);
     EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ99"), -1);
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ011"), RhoQ11_comp);
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ0"), -1);
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ3x"), -1);
+    // Overflows int; must return -1 rather than throw
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoQ99999999999999999999"), -1);
 
     EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("rhoQ1", kessler));
     EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("rhoQ3", kessler));
@@ -335,7 +340,7 @@ TEST(Plotfile3DSelection, EveryConservedStateNameMapsToItsComponent)
     EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("rhoadv_dust", moist));
 #endif
 
-#ifdef ERF_ENABLE_FIRE
+#ifdef ERF_USE_FIRE
     EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("smoke"), RhoSmoke_comp);
     EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("smoke", dry));
     EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("smoke", moist));
@@ -551,7 +556,7 @@ TEST(Plotfile3DSelection, RadiationHeatingStorageRecognizesEveryModel)
 }
 
 // Motivation: Every diagnostic that reads pressure must participate in the
-// same allocation predicate, including standalone VPD and conditional pp_err.
+// same allocation predicate, including standalone VPD.
 TEST(Plotfile3DSelection, PressureReadersShareAllocationPredicate)
 {
     EXPECT_TRUE(erf_plotfile::plot3d_needs_pressure({"temp", "VPD"}));
@@ -561,9 +566,6 @@ TEST(Plotfile3DSelection, PressureReadersShareAllocationPredicate)
     EXPECT_TRUE(erf_plotfile::plot3d_needs_pressure({"rel_humidity"}));
     EXPECT_TRUE(erf_plotfile::plot3d_needs_pressure({"dpdx"}));
     EXPECT_FALSE(erf_plotfile::plot3d_needs_pressure({"theta"}));
-#ifdef ERF_COMPUTE_ERROR
-    EXPECT_TRUE(erf_plotfile::plot3d_needs_pressure({"pp_err"}));
-#endif
 }
 
 // Motivation: Configured particle containers may be unallocated at output

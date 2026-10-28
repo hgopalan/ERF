@@ -13,7 +13,7 @@ shift || true
 PYTHON=${PYTHON:-python3}
 m=${METHOD:-levelset}
 here=$(cd "$(dirname "$0")" && pwd)
-[ -f erf_plotfile.py ] || cp "$here/../../CanonicalTests/Canonical_RANS/erf_plotfile.py" .
+[ -f erf_plotfile.py ] || cp "$here/../../Tools/erf_plotfile.py" .
 
 rm -rf chk00023 plt_restart_*_${m}_* suppression_restart_*_${m}.csv
 for leg in straight chk restart; do

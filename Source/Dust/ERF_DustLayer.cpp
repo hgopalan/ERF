@@ -779,7 +779,7 @@ DustLayer::advance(
   // burned-area reduction so u*_t is recomputed from the current crust.
   // Must run BEFORE recompute_dust_ustar_t so the updated crust is used.
   // -----------------------------------------------------------------------
-#if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
+#if defined(ERF_USE_FIRE) && defined(ERF_USE_DUST)
   if (m_fire_dust_coupling && m_fire_dust_coupling->enabled
       && dust_crust_index)
   {
@@ -884,7 +884,7 @@ DustLayer::advance(
   // diagnostics read it (it used to be applied by ERF after advance() returned).
   // Only the fire sets m_loft_heat, and ERF_DustFireLofting.cpp is compiled with
   // the fire module only: a dust build without fire failed to link here.
-#if defined(ERF_ENABLE_FIRE)
+#if defined(ERF_USE_FIRE)
   if (m_loft_heat) {
     apply_fire_lofting_to_emission_flux(*dust_emission_flux, *m_loft_heat,
                                         m_params.n_size_bins, m_loft_k,

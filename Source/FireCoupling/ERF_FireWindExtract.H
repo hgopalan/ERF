@@ -14,11 +14,9 @@
  * columns at a height above ground (a uniform height, or one per fire cell
  * that the fire engine supplies), interpolated linearly in height and
  * bilinearly or nearest between the surrounding columns, with an optional
- * two-height log-law resampling (erf.fire.wind_sample_ht); no MOST
- * reconstruction is involved. A fire engine may read its wind through it (the
- * native engine does). What the engine does with the wind afterwards
- * (wind adjustment factors, terrain corrections) is in the engine
- * (ERF_FireWindAdjust.H for the native engine).
+ * two-height log-law resampling; no MOST reconstruction is involved. A fire
+ * engine may read its wind through it. What the engine does with the wind
+ * afterwards (wind adjustment factors, terrain corrections) is the engine's.
  */
 
 
@@ -31,9 +29,8 @@
  * linearly interpolates to the target height above terrain.
  *
  * When z_ref_cell_mf is non-null, each fire cell is sampled at its own height
- * from that field (the native engine fills it with the per-fuel wind height of
- * the cell's fuel model, following the WRF-SFIRE fcwh convention) instead of
- * the global z_ref.
+ * from that field (for example a per-fuel wind height, as in the WRF-SFIRE
+ * fcwh convention) instead of the global z_ref.
  *
  * @param[out] fire_wind_ref   u,v at z_ref on fire grid [m/s]
  * @param[out] fire_wind_extract_z_mf  Wind extraction height z_target [m]
@@ -45,12 +42,10 @@
  * @param[in]  nz              Number of vertical levels
  * @param[in]  z_ref_cell_mf   Height above ground [m] to sample each fire cell
  *                             at, on the fire grid; nullptr = the global z_ref
- * @param[in]  below_first_log Target below the lowest cell centre: false (default,
- *                             erf.fire.wind_below_first_cell = "clamp") takes the
- *                             lowest centre's wind as it is; true ("log") scales it
+ * @param[in]  below_first_log Target below the lowest cell centre: false takes the
+ *                             lowest centre's wind as it is; true scales it
  *                             with a neutral log profile of roughness z0_log,
- *                             U(z) = U(z_1) ln(z/z0)/ln(z_1/z0); the clamp is
- *                             the behaviour before 2026-10
+ *                             U(z) = U(z_1) ln(z/z0)/ln(z_1/z0)
  *
  * Algorithm per fire cell (i_f, j_f):
  * 1. Map to atmospheric column: i_a = i_f / C, j_a = j_f / C
@@ -91,7 +86,7 @@
  * columns are all closed keeps the plain weights; it is inside a footprint
  * and masked anyway.
  *
- * With z_sample > 0 (erf.fire.wind_sample_ht) every column is sampled at
+ * With z_sample > 0 (an engine input) every column is sampled at
  * z_sample above its ground instead of at the target height, and the result
  * is brought down to the target height with a neutral log profile of
  * roughness z0_log: U(z_ref) = U(z_sample) ln(z_ref / z0) / ln(z_sample / z0).
@@ -118,5 +113,35 @@ void fill_fire_wind_from_interpolation(
     amrex::Real            z_sample       = 0.0,
     amrex::Real            z0_log         = 0.1,
     bool                   below_first_log = false);
+
+/**
+ * @brief The wind at the lowest cell centre of each atmospheric column, and
+ *        its height above that column's ground
+ *
+ * For an engine that drives its fire with the k = 0 wind of the atmospheric
+ * columns rather than a wind interpolated to a height (LSFIRE does). The face
+ * velocities are averaged to the k = 0 cell centre; the height is that centre
+ * minus the column's ground, the mean of its four k = 0 nodes (the ground
+ * compute_fire_surface_height uses), or minus the domain floor without nodal
+ * heights.
+ *
+ * @param[out] u_k0, v_k0  Wind [m/s] on the k = 0 slabs of the level (one per box of
+ *                         the level, the BoxArray of FireForcing::T_k0), with any
+ *                         ghost cells: those are filled with FillBoundary
+ * @param[out] h_k0        Height of that wind above the column's ground [m], laid out as u_k0
+ * @param[in]  xvel, yvel  Face velocities of the level (FireForcing::xvel, yvel)
+ * @param[in]  z_phys_cc   Cell-centre height of the level [m]
+ * @param[in]  z_phys_nd   Nodal height of the level [m], or nullptr (flat floor)
+ * @param[in]  geom        Geometry of the level
+ */
+void extract_fire_wind_k0(
+    amrex::MultiFab&       u_k0,
+    amrex::MultiFab&       v_k0,
+    amrex::MultiFab&       h_k0,
+    const amrex::MultiFab& xvel,
+    const amrex::MultiFab& yvel,
+    const amrex::MultiFab& z_phys_cc,
+    const amrex::MultiFab* z_phys_nd,
+    const amrex::Geometry& geom);
 
 #endif

@@ -71,6 +71,12 @@ FireCoupler::FireCoupler (const FireCouplingParams& params, std::unique_ptr<Fire
     : m_params(params), m_engine(std::move(engine))
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_engine != nullptr, "[FIRE] FireCoupler needs a fire engine");
+    m_plot_var_names = m_engine->plot_var_names();
+    if (!m_plot_var_names.empty()) {
+        amrex::Print() << "[FIRE] " << m_engine->name()
+                       << ": the following additional variables are available to plot:\n";
+        for (const auto& n : m_plot_var_names) { amrex::Print() << "    " << n << "\n"; }
+    }
 }
 
 void
@@ -80,7 +86,8 @@ FireCoupler::initialize (const ERF& erf,
                          const MultiFab* z_phys_nd_atm)
 {
     // The ERF configuration a fire grid needs, then the engine's own inputs
-    verify_fire_prerequisites(erf, lev, surface_layer, m_params.grid_ratio);
+    verify_fire_prerequisites(erf, lev, surface_layer, m_params.grid_ratio,
+                              m_engine->needs_surface_layer());
     m_engine->verify_prerequisites(erf, lev);
 
     FireGrid fg = create_fire_grid(erf.boxArray(lev), erf.DistributionMap(lev),
@@ -96,8 +103,8 @@ FireCoupler::initialize (const ERF& erf,
     if (m_params.heat_open_fraction && m_params.injects_flux() &&
         (!m_engine->heat_open_fraction_atm() || !m_engine->roof_height_atm())) {
         amrex::Print() << "[FIRE] WARNING: erf.fire.heat_open_fraction = true, but the fire engine ("
-                       << m_engine->name() << ") reports no open fraction (for the native engine, a"
-                       << " structure height map); the heat is placed as if every column were open\n";
+                       << m_engine->name() << ") reports no open fraction;"
+                       << " the heat is placed as if every column were open\n";
     }
 }
 
@@ -113,11 +120,9 @@ FireCoupler::set_fire_grid (int lev, const FireGrid& fg,
     const int nz = geom_atm.Domain().length(2);
 
     // The lagged fluxes live on the k = 0 slabs of the level's boxes, with the
-    // level's owners. Ghost columns for the MRF fire thermal excess, which reads
-    // the fluxes in the halo around every tile. ERF's state carries
-    // ComputeGhostCells() + 1 columns, at most 5, and ComputeDiffusivityMRF
-    // keeps its halo within the state's and checks these fluxes against it;
-    // update_flux_buffer() fills them.
+    // level's owners. Ghost columns for a reader that samples the fluxes in the
+    // halo around every tile: 5, the most ERF's state carries
+    // (ComputeGhostCells() + 1); update_flux_buffer() fills them.
     BoxArray ba_atm_2d = ba_atm;
     ba_atm_2d.coarsen(IntVect(1, 1, nz));
     const IntVect ng_flux(5, 5, 0);
@@ -137,8 +142,8 @@ FireCoupler::advance (Real time, Real dt,
                       const Geometry& geom,
                       const SurfacePrecipAccumulationSources& precip_sources)
 {
-    // Air temperature and RH at k=0 for the fuel moisture update, derived
-    // from the pre-dycore state. This is used in both lagged and synchronous
+    // Air temperature and RH at k=0 (an engine may drive a fuel moisture
+    // model with them), derived from the pre-dycore state. This is used in both lagged and synchronous
     // modes: the moisture ODE uses time-averaged T, and the change in T from
     // fire heating within one atmospheric step is small relative to the
     // moisture time lag. The temperature is theta * Exner(p) (the moisture
@@ -151,9 +156,9 @@ FireCoupler::advance (Real time, Real dt,
     compute_rh_from_conservative(RH_atm_k0, S_old, geom);
 
     // Surface precipitation accumulation of every column after this step's
-    // microphysics, for an engine that takes the rain per column (the native
-    // engine with erf.fire.precip_source = atmosphere); the engine differences
-    // it against the accumulation it saw at its previous step.
+    // microphysics, for an engine that takes the rain per column
+    // (FireEngine::wants_surface_precip); the engine differences it against the
+    // accumulation it saw at its previous step.
     std::unique_ptr<MultiFab> precip_accum_k0;
     if (m_engine->wants_surface_precip()) {
         precip_accum_k0 = std::make_unique<MultiFab>(ba2d, S_old.DistributionMap(), 1, 0);
@@ -177,12 +182,50 @@ FireCoupler::advance (Real time, Real dt,
                               post_dycore ? yvel_new : yvel_old,
                               z_phys_cc, T_atm_k0, RH_atm_k0, precip_accum_k0.get()};
     m_engine->advance(forcing);
+    if (m_params.fire_debug) {
+        const Real area = m_engine->burned_area();   // every rank: it may reduce over the fire grid
+        if (area >= 0.0_rt) {
+            amrex::Print() << "[FIRE DEBUG] Burned area at t=" << time + dt << ": " << area << " m2" << std::endl;
+        }
+    }
 
     // Store the fire flux of this step for injection at the next step via the
     // Runge-Kutta source term (add_sources). This applies in both lagged and
     // synchronous modes; in passive mode the buffer keeps its zero unless the
     // smoke tracer needs it.
     update_flux_buffer(geom);
+}
+
+void
+FireCoupler::fill_plot_var (const std::string& name, MultiFab& dst, int dcomp, int lev) const
+{
+    dst.setVal(0.0_rt, dcomp, 1, 0);
+    if (lev != m_lev || !m_Q_atm_prev) { return; }
+    const MultiFab* fire_field = m_engine->plot_var(name);
+    if (!fire_field) { return; }
+
+    // The column means, on the k = 0 slabs the lagged fluxes use
+    MultiFab col(m_Q_atm_prev->boxArray(), m_Q_atm_prev->DistributionMap(), 1, 0);
+    col.setVal(0.0_rt);
+    coarsen_fire_flux_to_atm(col, *fire_field, m_geom_atm, m_fg);
+
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dst.boxArray().size() == col.boxArray().size() &&
+                                     dst.DistributionMap() == col.DistributionMap(),
+                                     "[FIRE] fill_plot_var: the plotfile MultiFab is not on the fire grid's level");
+    const int k0 = m_geom_atm.Domain().smallEnd(2);
+    for (MFIter mfi(dst); mfi.isValid(); ++mfi) {
+        Box bx = mfi.validbox();
+        if (bx.smallEnd(2) > k0) { continue; }
+        bx.setSmall(2, k0);
+        bx.setBig(2, k0);
+        const auto d = dst.array(mfi);
+        const auto c = col.const_array(mfi);
+        const int kc = col.boxArray()[mfi.index()].smallEnd(2);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+        {
+            d(i, j, k, dcomp) = c(i, j, kc);
+        });
+    }
 }
 
 void
@@ -198,17 +241,16 @@ FireCoupler::update_flux_buffer (const Geometry& geom_atm)
     if (!m_Q_atm_prev) { return; }
     FireFluxes fluxes;
     m_engine->fill_fluxes(fluxes);
-    if (!fluxes.sensible) {
-        // No flux this step: last step's must not be injected again
+    if (fluxes.sensible) {
+        coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fluxes.sensible, geom_atm, m_fg);
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Sensible flux to the atmosphere: max " << m_Q_atm_prev->max(0)
+                           << " W/m2" << fluxes.debug_note << std::endl;
+        }
+    } else {
+        // Clear the stale sensible flux without discarding independent latent
+        // feedback reported by the engine during this same step.
         m_Q_atm_prev->setVal(0.0_rt);
-        m_Q_lat_atm_prev->setVal(0.0_rt);
-        return;
-    }
-
-    coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fluxes.sensible, geom_atm, m_fg);
-    if (m_params.fire_debug) {
-        amrex::Print() << "[FIRE DEBUG] Sensible flux to the atmosphere: max " << m_Q_atm_prev->max(0)
-                       << " W/m2" << fluxes.debug_note << std::endl;
     }
 
     if (m_params.inject_latent && fluxes.latent) {
@@ -220,8 +262,8 @@ FireCoupler::update_flux_buffer (const Geometry& geom_atm)
         m_Q_lat_atm_prev->setVal(0.0_rt);
     }
 
-    // The MRF fire thermal excess reads these fluxes in the halo columns around
-    // every tile; give them the neighbouring box's value (and the edge column's
+    // A reader may sample these fluxes in the halo columns around every tile;
+    // give them the neighbouring box's value (and the edge column's
     // outside a non-periodic face), so a column sees the same flux whichever box
     // holds it. On a finer level the columns outside the refined region have no
     // fire grid and keep the zero they were allocated with.
@@ -258,6 +300,7 @@ FireCoupler::add_sources (MultiFab& cc_source,
             *m_Q_atm_prev,
             Q_lat_ptr,
             z_phys_cc,
+            z_phys_nd,
             S_old,
             geom,
             m_params.heat_flux_alfg,
@@ -269,7 +312,8 @@ FireCoupler::add_sources (MultiFab& cc_source,
             m_engine->roof_height_atm(),
             m_params.heat_open_fraction,
             m_params.heat_tendency_density,
-            m_params.heat_tendency_exner);
+            m_params.heat_tendency_exner,
+            m_params.heat_in_bottom_cell());
     }
 
     // The smoke tracer, after the heat: proportional to the fuel burnt, which
@@ -324,14 +368,13 @@ void
 FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level, int step)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_Q_atm_prev, "[FIRE] FireCoupler: set_fire_grid() before the checkpoint");
-    // The engine first: the native engine aborts on a checkpoint whose fire grid
-    // sits on another level or region, naming its own fields
+    // The engine first: it may check, naming its own fields, that the
+    // checkpoint's fire grid sits on this level and region
     m_engine->read_checkpoint(restart_chkfile, max_level, step);
 
     // The lagged fluxes, on the level of the fire grid. A checkpoint without them
-    // (no fire state at all, or written before the fluxes were checkpointed): the
-    // buffers keep their zero, said once.
-    // decided on the I/O rank and broadcast, so every rank takes the same branch
+    // (written with no fire running): the buffers keep their zero, said once.
+    // Decided on the I/O rank and broadcast, so every rank takes the same branch
     // into the collective reads below
     int chk_lev = -1;
     if (ParallelDescriptor::IOProcessor()) {
@@ -348,8 +391,8 @@ FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level,
         return;
     }
     // Whatever the engine: the fluxes belong to this run's fire grid, on its
-    // level and over its region (the native engine has already checked its own
-    // fields, so this is the backstop for any other engine)
+    // level and over its region (an engine may have checked its own fields
+    // already; this check holds whatever the engine)
     const Box chk_region = VisMF(MultiFabFileFullPrefix(chk_lev, restart_chkfile, "Level_", "FireQAtmPrev"))
                                .boxArray().minimalBox();
     if (const std::string why = checkpoint_mismatch(chk_lev, chk_region); !why.empty()) {
@@ -358,15 +401,19 @@ FireCoupler::read_checkpoint (const std::string& restart_chkfile, int max_level,
     for (const auto& [mf, name] : {std::pair<MultiFab*, const char*>{m_Q_atm_prev.get(), "FireQAtmPrev"},
                                    std::pair<MultiFab*, const char*>{m_Q_lat_atm_prev.get(), "FireQLatAtmPrev"}}) {
         if (mf == nullptr) { continue; }
+        // decided on one rank and broadcast, so every rank takes the same
+        // path into the collective read below
         const std::string header = restart_chkfile + "/Level_" + std::to_string(m_lev) + "/" + name + "_H";
-        if (!amrex::FileExists(header)) {
+        int has_field = 0;
+        if (ParallelDescriptor::IOProcessor()) { has_field = amrex::FileExists(header) ? 1 : 0; }
+        ParallelDescriptor::Bcast(&has_field, 1, ParallelDescriptor::IOProcessorNumber());
+        if (has_field == 0) {
             amrex::Print() << "[FIRE] Checkpoint has no " << name << "; keeping the initialized values.\n";
             continue;
         }
         VisMF::Read(*mf, MultiFabFileFullPrefix(m_lev, restart_chkfile, "Level_", name));
-        // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
-        // valid cells (a checkpoint written before the fluxes had ghosts holds none),
-        // so refill the ghosts the way update_flux_buffer() does.
+        // VisMF restores the valid cells (a checkpoint may hold no ghost
+        // columns), so refill the ghosts the way update_flux_buffer() does.
         fire_fill_boundary(*mf, m_geom_atm);
     }
 }

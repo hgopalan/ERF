@@ -8,8 +8,8 @@ void compute_fire_surface_height(
     const Geometry& geom_atm,
     const FireGrid& fg)
 {
-    // Flat terrain: ERF never allocates z_phys_nd, and the ground is the floor
-    // of the domain.
+    // Without nodal heights (callers other than ERF, which always passes
+    // them): a flat ground at the floor of the domain.
     if (z_phys_nd == nullptr) {
         fire_surface_z.setVal(geom_atm.ProbLo(2));
         return;
@@ -33,7 +33,7 @@ void compute_fire_surface_height(
             const int i_n_lo = i_f / C + atm_nlo_x;
             const int j_n_lo = j_f / C + atm_nlo_y;
 
-            zs(i_f, j_f, 0) = 0.25 * (z_nd(i_n_lo,     j_n_lo,     0)
+            zs(i_f, j_f, 0) = Real(0.25) * (z_nd(i_n_lo,     j_n_lo,     0)
                                     + z_nd(i_n_lo + 1, j_n_lo,     0)
                                     + z_nd(i_n_lo,     j_n_lo + 1, 0)
                                     + z_nd(i_n_lo + 1, j_n_lo + 1, 0));
@@ -67,8 +67,8 @@ void compute_fire_column_grounds(
             const int j_f = iv[1];
 
             // Lower-left column of the bilinear stencil, in atmospheric indices
-            const Real gx = (Real(i_f) + 0.5) / Real(C) - 0.5;
-            const Real gy = (Real(j_f) + 0.5) / Real(C) - 0.5;
+            const Real gx = (Real(i_f) + Real(0.5)) / Real(C) - Real(0.5);
+            const Real gy = (Real(j_f) + Real(0.5)) / Real(C) - Real(0.5);
             const int i0 = static_cast<int>(std::floor(gx));
             const int j0 = static_cast<int>(std::floor(gy));
 
@@ -80,7 +80,7 @@ void compute_fire_column_grounds(
                 const int i_n = ia + atm_nlo_x;
                 const int j_n = ja + atm_nlo_y;
 
-                zg(i_f, j_f, 0, c) = 0.25 * (z_nd(i_n,     j_n,     0)
+                zg(i_f, j_f, 0, c) = Real(0.25) * (z_nd(i_n,     j_n,     0)
                                            + z_nd(i_n + 1, j_n,     0)
                                            + z_nd(i_n,     j_n + 1, 0)
                                            + z_nd(i_n + 1, j_n + 1, 0));

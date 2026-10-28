@@ -1,4 +1,10 @@
 
+    // On a mesh other than ConstantDz, heights come from z_cc and the vertical levels,
+    //    not from geomdata's prob_lo[2], prob_hi[2] and CellSize(2)
+    const bool use_z_phys = use_physical_z();
+    const Real phys_z_lo  = phys_zlo(geomdata, lev);
+    const Real phys_z_hi  = phys_zhi(geomdata, lev);
+
     ParmParse pp_prob("prob");
 
     Real rho_0 = zero; pp_prob.query("rho_0", rho_0);
@@ -40,12 +46,12 @@
         const Real* dx = geomdata.CellSize();
         const Real x = prob_lo[0] + (i + myhalf) * dx[0];
         const Real y = prob_lo[1] + (j + myhalf) * dx[1];
-        const Real z = prob_lo[2] + (k + myhalf) * dx[2];
+        const Real z = use_z_phys ? z_cc(i,j,k) : prob_lo[2] + (k + myhalf) * dx[2];
 
         // Define a point (xc,yc,zc) at the center of the domain
         const Real xc = myhalf * (prob_lo[0] + prob_hi[0]);
         const Real yc = myhalf * (prob_lo[1] + prob_hi[1]);
-        const Real zc = myhalf * (prob_lo[2] + prob_hi[2]);
+        const Real zc = myhalf * (phys_z_lo + phys_z_hi);
 
         const Real r  = std::sqrt((x-xc)*(x-xc) + (y-yc)*(y-yc) + (z-zc)*(z-zc));
 
@@ -54,7 +60,7 @@
             Real rand_double = amrex::Random(engine); // Between zero and one
             state_pert(i, j, k, RhoTheta_comp) = (rand_double*two - one)*T_0_Pert_Mag;
         }
-        if ((z <= pert_ref_height) && (Q_0_Pert_Mag != zero)) {
+        if (use_moisture && (z <= pert_ref_height) && (Q_0_Pert_Mag != zero)) {
             Real rand_double = amrex::Random(engine); // Between zero and one
             state_pert(i, j, k, RhoQ1_comp) = (rand_double*two - one)*Q_0_Pert_Mag;
         }
@@ -72,7 +78,7 @@
 
             Real rhotheta  = state(i,j,k,RhoTheta_comp);
             Real rho       = state(i,j,k,Rho_comp);
-            Real qv        = state(i,j,k,RhoQ1_comp) / rho;
+            Real qv        = (use_moisture) ? state(i,j,k,RhoQ1_comp) / rho : zero;
             Real Told      = getTgivenRandRTh(rho,rhotheta,qv);
             Real P         = getPgivenRTh(rhotheta,qv);
 

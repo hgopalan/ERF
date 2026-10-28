@@ -25,11 +25,11 @@
 #include "ERF_FireCoupler.H"
 #include "ERF_FireEngine.H"
 #include "ERF_FireGrid.H"
-#include "ERF_FireParams.H"
+#include "ERF_FireCouplingParams.H"
 
 /**
  * @file ERF_GTestFireCoupler.cpp
- * @brief The shared fire coupling with an engine that is not the native one
+ * @brief The shared fire coupling with a stand-in engine
  *
  * A stand-in engine plugs into FireCoupler through the FireEngine interface
  * alone and reports a sensible flux linear in x, a uniform latent flux and a
@@ -48,6 +48,13 @@
  *   and vapour sources only;
  * - passive coupling injects no heat (and, without smoke, asks for no flux),
  *   and inject_latent = false drops a latent flux the engine reports;
+ * - with erf.fire.heat_open_fraction and an engine that reports an open
+ *   fraction f and a roof height H above the ground, the column still receives
+ *   f Q (1 - e^{-z_top/alfg}), and every cell below the roof receives
+ *   f L / (L - (1 - f) B) times what it receives without the option, every cell
+ *   above it L / (L - (1 - f) B) times (L = 1 - e^{-z_top/alfg}, B the plain
+ *   profile's share in the cells under the roof, 1 - e^{-2 dz/alfg} for a roof
+ *   two cells high, the profile measured from the first cell centre);
  * - the erf.fire.* coupling keys reach FireCouplingParams unchanged;
  * - a checkpoint restores the lagged fluxes bit for bit, ghosts refilled
  *   (also from a checkpoint written without ghost columns), after the
@@ -69,7 +76,7 @@ constexpr Real RHO = 1.15;                 // air density [kg/m3]
 constexpr Real FEEDBACK = 0.5;             // erf.fire.fire_atm_feedback
 constexpr Real EMISSION = 0.02;            // erf.fire.smoke_emission_factor
 constexpr Real BACKGROUND = 7.0;           // every other source of the cell
-constexpr Real Cp_fire = 1004.64, L_V = 2.501e6;   // the coupling's c_p and L_v
+constexpr Real Cp_fire = Cp_d, L_V = L_v;   // ERF dry-air c_p and latent heat, as the coupling uses
 /// Relative round-off tolerance of the build precision
 constexpr double REL = (sizeof(Real) == 8) ? 1.0e-9 : 1.0e-4;
 
@@ -99,7 +106,7 @@ void fill_zcc (MultiFab& zcc)
     }
 }
 
-/// An engine that is not FireLayer: fixed flux fields, and a record of what it was handed.
+/// A stand-in engine: fixed flux fields, and a record of what it was handed.
 class StandInEngine : public FireEngine
 {
 public:
@@ -138,6 +145,8 @@ public:
     }
     Real smoke_heat_per_kg () const override { return HEAT_PER_KG; }
     bool wants_surface_precip () const override { return wants_precip; }
+    const MultiFab* heat_open_fraction_atm () const override { return open_fraction.get(); }
+    const MultiFab* roof_height_atm () const override { return roof_height.get(); }
     void start_run (Real, int, int) override {}
     void write_checkpoint (const std::string&) const override { ++n_write_chk; }
     void read_checkpoint (const std::string&, int, int step) override
@@ -149,6 +158,7 @@ public:
     void write_plotfile (const std::string&, Real, int) const override {}
 
     std::unique_ptr<MultiFab> sensible, latent;
+    std::unique_ptr<MultiFab> open_fraction, roof_height;   ///< on the level's k = 0 slabs, when the test sets them
     bool report_latent = true;
     bool report_sensible = true;
     bool wants_precip  = false;
@@ -241,11 +251,12 @@ void step (FireCoupler& cpl, Level& lev)
 }
 
 /// The cell sources after add_sources on a uniform background
-std::unique_ptr<MultiFab> sources (FireCoupler& cpl, Level& lev, Real background = BACKGROUND)
+std::unique_ptr<MultiFab> sources (FireCoupler& cpl, Level& lev, Real background = BACKGROUND,
+                                   const MultiFab* znd = nullptr)
 {
     auto src = std::make_unique<MultiFab>(lev.ba, lev.dm, NVAR_max, 0);
     src->setVal(background);
-    cpl.add_sources(*src, lev.S, lev.zcc, nullptr, lev.geom, true, 1);
+    cpl.add_sources(*src, lev.S, lev.zcc, znd, lev.geom, true, 1);
     return src;
 }
 
@@ -321,13 +332,66 @@ void SynchronousCouplingHandsOverTheNewWindAndDropsAVanishedLatentFlux ()
     step(*cpl, *lev);
     EXPECT_EQ(cpl->get_Q_lat_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt);
     EXPECT_GT(cpl->get_Q_atm_prev()->min(0), 0.0_rt) << "the sensible flux still arrives";
-    // and a step with no flux at all clears both
+    // A missing sensible pointer does not cancel an independently valid latent flux.
     eng->report_latent = true;
     step(*cpl, *lev);
     eng->report_sensible = false;
     step(*cpl, *lev);
     EXPECT_EQ(cpl->get_Q_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt) << "no sensible flux this step";
+    EXPECT_NEAR(cpl->get_Q_lat_atm_prev()->max(0), QLAT, REL * QLAT)
+        << "latent flux must remain available without sensible heat";
+    // When the remaining channel disappears too, clear its valid cells and halo.
+    eng->report_latent = false;
+    step(*cpl, *lev);
+    EXPECT_EQ(cpl->get_Q_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt);
     EXPECT_EQ(cpl->get_Q_lat_atm_prev()->norm0(0, 1, IntVect(5, 5, 0)), 0.0_rt);
+}
+
+void LatentOnlyFluxInjectsWaterWithoutHeating ()
+{
+    auto lev = make_level(false);
+    FireCouplingParams p = coupling("lagged", false);
+    p.heat_tendency_density = false; // Use the physical mass-flux conversion.
+    StandInEngine* eng = nullptr;
+    auto cpl = make_coupler(*lev, p, eng);
+
+    eng->report_sensible = false;
+    step(*cpl, *lev);
+    const IntVect ghost(5, 5, 0);
+    EXPECT_EQ(cpl->get_Q_atm_prev()->norm0(0, 1, ghost), 0.0_rt);
+    EXPECT_NEAR(cpl->get_Q_lat_atm_prev()->min(0), QLAT, REL * QLAT);
+    // A nonzero maximum cannot establish that *all* ghost cells were filled:
+    // subtract the uniform expected flux over valid cells and the full halo.
+    const MultiFab& latent_field = *cpl->get_Q_lat_atm_prev();
+    MultiFab latent_residual(latent_field.boxArray(), latent_field.DistributionMap(), 1, ghost);
+    latent_residual.setVal(QLAT);
+    MultiFab::Subtract(latent_residual, latent_field, 0, 0, 1, ghost);
+    EXPECT_LE(latent_residual.norm0(0, 1, ghost), REL * QLAT)
+        << "latent valid and ghost cells must all contain the prescribed flux";
+
+    // Native MultiFab reductions work on CPU/GPU and across MPI ranks.
+    auto src = sources(*cpl, *lev, 0.0_rt);
+    EXPECT_EQ(src->norm0(RhoTheta_comp), 0.0_rt);
+    const Real retained = 1.0_rt - std::exp(-Real(NZ) * DZ / ALFG);
+    const Real expected = Real(NX * NY) * FEEDBACK * (QLAT / L_V) * retained;
+    EXPECT_NEAR(src->sum(RhoQ1_comp) * DZ, expected, REL * expected)
+        << "prescribed latent-only flux must be deposited as water mass";
+
+    // An allocated zero sensible field and a null sensible pointer mean the
+    // same physical heat release: neither should affect vapor deposition.
+    eng->report_sensible = true;
+    eng->sensible->setVal(0.0_rt);
+    step(*cpl, *lev);
+    auto src_zero_sensible = sources(*cpl, *lev, 0.0_rt);
+    EXPECT_EQ(src_zero_sensible->norm0(RhoTheta_comp), 0.0_rt);
+    EXPECT_NEAR(src_zero_sensible->sum(RhoQ1_comp) * DZ, expected, REL * expected);
+
+    eng->report_latent = false;
+    step(*cpl, *lev);
+    auto src_cleared = sources(*cpl, *lev, 0.0_rt);
+    EXPECT_EQ(src_cleared->norm0(RhoTheta_comp), 0.0_rt);
+    EXPECT_EQ(src_cleared->norm0(RhoQ1_comp), 0.0_rt)
+        << "a disappeared latent flux must not be reused in a later timestep";
 }
 
 void TheInjectedHeatIsTheSurfaceFlux ()
@@ -389,6 +453,214 @@ void TheInjectedHeatIsTheSurfaceFlux ()
     for_each_column(*src2, RhoQ1_comp, 0.0_rt, [&] (int i, int, Real sum, const auto&) {
         EXPECT_NEAR(L_V * sum, FEEDBACK * QLAT * frac, REL * QLAT) << "overwritten vapour source, column " << i;
     });
+}
+
+void TheOpenFractionKeepsTheColumnEnergyAndThinsTheCellsUnderTheRoof ()
+{
+    // two cells under the roof: the roof 2 dz above the ground (the height an
+    // engine reports), so cells 0 and 1 carry the open share alone (with the
+    // first-centre datum used before, the roof sat half a cell higher and cut
+    // cell 2)
+    constexpr Real F_OPEN = 0.25;
+    constexpr Real H_ROOF = 2.0 * DZ;
+    auto lev = make_level(false);
+
+    StandInEngine* eng0 = nullptr;
+    auto cpl0 = make_coupler(*lev, coupling("lagged", false), eng0);
+    step(*cpl0, *lev);
+    auto src0 = sources(*cpl0, *lev, 0.0_rt);
+
+    FireCouplingParams p = coupling("lagged", false);
+    p.heat_open_fraction = true;
+    StandInEngine* eng = nullptr;
+    auto cpl = make_coupler(*lev, p, eng);
+    eng->open_fraction = std::make_unique<MultiFab>(lev->ba2d, lev->dm, 1, 1);
+    eng->open_fraction->setVal(F_OPEN);
+    eng->roof_height = std::make_unique<MultiFab>(lev->ba2d, lev->dm, 1, 1);
+    eng->roof_height->setVal(H_ROOF);
+    step(*cpl, *lev);
+    auto src = sources(*cpl, *lev, 0.0_rt);
+
+    const Real frac  = 1.0_rt - std::exp(-Real(NZ) * DZ / ALFG);
+    const Real norm  = frac - (1.0_rt - F_OPEN) * (1.0_rt - std::exp(-2.0_rt * DZ / ALFG));
+    const Real under = F_OPEN * frac / norm;
+    const Real above = frac / norm;
+    for_each_column(*src, RhoTheta_comp, 0.0_rt, [&] (int i, int, Real sum, const auto&) {
+        const Real q = flux_at_column(i);
+        EXPECT_NEAR(Cp_fire * sum, RHO * FEEDBACK * q * frac, REL * q) << "column energy, column " << i;
+    });
+    for_each_column(*src, RhoQ1_comp, 0.0_rt, [&] (int i, int, Real sum, const auto&) {
+        EXPECT_NEAR(L_V * sum, RHO * FEEDBACK * QLAT * frac, REL * QLAT) << "column vapour, column " << i;
+    });
+    for (MFIter mfi(*src); mfi.isValid(); ++mfi) {
+        const auto a = src->const_array(mfi);
+        const auto b = src0->const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+            for (int k : {0, 1}) {
+                EXPECT_NEAR(a(i, 0, k, RhoTheta_comp), under * b(i, 0, k, RhoTheta_comp),
+                            REL * b(i, 0, k, RhoTheta_comp)) << "under the roof, cell " << k;
+            }
+            for (int k : {2, 9}) {
+                EXPECT_NEAR(a(i, 0, k, RhoTheta_comp), above * b(i, 0, k, RhoTheta_comp),
+                            REL * b(i, 0, k, RhoTheta_comp)) << "above the roof, cell " << k;
+            }
+        }
+    }
+
+    // the same weights from the level's nodal heights (k dz, as ERF passes
+    // them), the faces taken from the nodes and not from the centres
+    MultiFab znd(convert(lev->ba, IntVect(1, 1, 1)), lev->dm, 1, 1);
+    for (MFIter mfi(znd); mfi.isValid(); ++mfi) {
+        auto z = znd.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            z(i, j, k) = k * DZ;
+        });
+    }
+    auto src_nd = sources(*cpl, *lev, 0.0_rt, &znd);
+    for (MFIter mfi(*src); mfi.isValid(); ++mfi) {
+        const auto a = src->const_array(mfi);
+        const auto n = src_nd->const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+            for (int k = 0; k < NZ; ++k) {
+                EXPECT_NEAR(n(i, 0, k, RhoTheta_comp), a(i, 0, k, RhoTheta_comp),
+                            REL * std::abs(a(i, 0, 0, RhoTheta_comp))) << "nodal heights, cell " << k;
+            }
+        }
+    }
+
+    // the same column on raised ground that varies from column to column
+    // (37 + 3 i m): the roof is above the ground, so every cell's source is
+    // the flat one (a roof or faces measured from z = 0 would cut other cells)
+    MultiFab znd_g(convert(lev->ba, IntVect(1, 1, 1)), lev->dm, 1, 1);
+    MultiFab zcc_g(lev->ba, lev->dm, 1, 1);
+    for (MFIter mfi(znd_g); mfi.isValid(); ++mfi) {
+        auto z = znd_g.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            z(i, j, k) = 37.0_rt + 3.0_rt * i + k * DZ;
+        });
+    }
+    for (MFIter mfi(zcc_g); mfi.isValid(); ++mfi) {
+        auto z = zcc_g.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            z(i, j, k) = 37.0_rt + 3.0_rt * (i + 0.5_rt) + (k + 0.5_rt) * DZ;
+        });
+    }
+    auto src_g = std::make_unique<MultiFab>(lev->ba, lev->dm, NVAR_max, 0);
+    src_g->setVal(0.0_rt);
+    cpl->add_sources(*src_g, lev->S, zcc_g, &znd_g, lev->geom, true, 1);
+    for (MFIter mfi(*src); mfi.isValid(); ++mfi) {
+        const auto a = src->const_array(mfi);
+        const auto g = src_g->const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+            for (int k = 0; k < NZ; ++k) {
+                EXPECT_NEAR(g(i, 0, k, RhoTheta_comp), a(i, 0, k, RhoTheta_comp),
+                            REL * std::abs(a(i, 0, 0, RhoTheta_comp))) << "raised ground, cell " << k;
+            }
+        }
+    }
+}
+
+/// Heights of the stretched test mesh: nodes z = h(i, j) + F(k) (1 + 0.05 i)
+/// with h = 37 + 3 i + 2 j and F stretched by 1.1 per cell up to NZ dz
+Real stretched_F (int k)
+{
+    const Real r = 1.1_rt;
+    const Real d0 = Real(NZ) * DZ * (r - 1.0_rt) / (std::pow(r, Real(NZ)) - 1.0_rt);
+    return d0 * (std::pow(r, Real(k)) - 1.0_rt) / (r - 1.0_rt);
+}
+/// Mean of the four lower (k) nodes of column (i, j): the face the coupling uses
+Real stretched_face (int i, int j, int k)
+{
+    return 37.0_rt + 3.0_rt * (i + 0.5_rt) + 2.0_rt * (j + 0.5_rt)
+         + stretched_F(k) * (1.0_rt + 0.05_rt * (i + 0.5_rt));
+}
+
+void TheOpenShareFollowsTheCellFacesOnAStretchedGrid ()
+{
+    // Nodes stretched by 1.1 per cell (a 0.43 m first cell, under a tenth of
+    // the 10 m mean spacing) on raised ground whose corners differ, and the
+    // roof 0.7 m above the ground, inside cell 1 of every column. Against the
+    // same coupling without the open fraction, each cell's tendency is scaled
+    // by its open share times one factor per column, so the ratio of a cell's
+    // scaling to the top cell's is its share: f below the roof, f + (1 - f)
+    // (z_hi - H) / dz in the cell that holds it (dz its own thickness), 1
+    // above. The column still receives the flux's share.
+    constexpr Real F_OPEN = 0.25, H_ROOF = 0.7;
+    auto lev = make_level(false);
+    MultiFab znd(convert(lev->ba, IntVect(1, 1, 1)), lev->dm, 1, 1), zcc(lev->ba, lev->dm, 1, 1);
+    const Real r = 1.1_rt;
+    const Real d0 = Real(NZ) * DZ * (r - 1.0_rt) / (std::pow(r, Real(NZ)) - 1.0_rt);
+    for (MFIter mfi(znd); mfi.isValid(); ++mfi) {
+        auto z = znd.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real F = d0 * (std::pow(r, Real(k)) - 1.0_rt) / (r - 1.0_rt);
+            z(i, j, k) = 37.0_rt + 3.0_rt * i + 2.0_rt * j + F * (1.0_rt + 0.05_rt * i);
+        });
+    }
+    for (MFIter mfi(zcc); mfi.isValid(); ++mfi) {
+        auto z = zcc.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real Flo = d0 * (std::pow(r, Real(k))     - 1.0_rt) / (r - 1.0_rt);
+            const Real Fhi = d0 * (std::pow(r, Real(k + 1)) - 1.0_rt) / (r - 1.0_rt);
+            z(i, j, k) = 37.0_rt + 3.0_rt * (i + 0.5_rt) + 2.0_rt * (j + 0.5_rt)
+                       + 0.5_rt * (Flo + Fhi) * (1.0_rt + 0.05_rt * (i + 0.5_rt));
+        });
+    }
+
+    StandInEngine* eng0 = nullptr;
+    auto cpl0 = make_coupler(*lev, coupling("lagged", false), eng0);
+    step(*cpl0, *lev);
+    FireCouplingParams p = coupling("lagged", false);
+    p.heat_open_fraction = true;
+    StandInEngine* eng = nullptr;
+    auto cpl = make_coupler(*lev, p, eng);
+    eng->open_fraction = std::make_unique<MultiFab>(lev->ba2d, lev->dm, 1, 1);
+    eng->open_fraction->setVal(F_OPEN);
+    eng->roof_height = std::make_unique<MultiFab>(lev->ba2d, lev->dm, 1, 1);
+    eng->roof_height->setVal(H_ROOF);
+    step(*cpl, *lev);
+    MultiFab src0(lev->ba, lev->dm, NVAR_max, 0), src(lev->ba, lev->dm, NVAR_max, 0);
+    src0.setVal(0.0_rt); src.setVal(0.0_rt);
+    cpl0->add_sources(src0, lev->S, zcc, &znd, lev->geom, true, 1);
+    cpl->add_sources(src, lev->S, zcc, &znd, lev->geom, true, 1);
+
+    const Real tol_share = (sizeof(Real) == 8) ? 1.0e2 * REL : 1.0e-2;
+    for (MFIter mfi(src); mfi.isValid(); ++mfi) {
+        const auto a = src.const_array(mfi, RhoTheta_comp);
+        const auto b = src0.const_array(mfi, RhoTheta_comp);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                const Real g = stretched_face(i, j, 0);
+                ASSERT_LT(stretched_face(i, j, 1) - g, H_ROOF) << "cell 0 lies under the roof";
+                ASSERT_GT(stretched_face(i, j, 2) - g, H_ROOF) << "the roof lies inside cell 1";
+                const Real top = a(i, j, NZ - 1) / b(i, j, NZ - 1);
+                for (int k = 0; k < 4; ++k) {
+                    const Real zlo = stretched_face(i, j, k) - g, zhi = stretched_face(i, j, k + 1) - g;
+                    Real share = 1.0_rt;
+                    if (zhi <= H_ROOF)     { share = F_OPEN; }
+                    else if (zlo < H_ROOF) { share = F_OPEN + (1.0_rt - F_OPEN) * (zhi - H_ROOF) / (zhi - zlo); }
+                    EXPECT_NEAR(a(i, j, k) / b(i, j, k) / top, share, tol_share)
+                        << "open share of cell " << k << ", column " << i << "," << j;
+                }
+                // the column total: the profile measured from the first centre,
+                // closed one mean spacing above the top centre
+                const Real zc0   = 0.5_rt * (stretched_face(i, j, 0) + stretched_face(i, j, 1));
+                const Real zctop = 0.5_rt * (stretched_face(i, j, NZ - 1) + stretched_face(i, j, NZ));
+                const Real frac  = 1.0_rt - std::exp(-((zctop - zc0) + DZ) / ALFG);
+                Real sum = 0.0_rt;
+                for (int k = 0; k < NZ; ++k) {
+                    sum += Cp_fire * a(i, j, k) * (stretched_face(i, j, k + 1) - stretched_face(i, j, k));
+                }
+                const Real q = flux_at_column(i);
+                const Real tol_sum = (sizeof(Real) == 8) ? 1.0e3 * REL * q : 1.0e-3 * q;
+                EXPECT_NEAR(sum, RHO * FEEDBACK * q * frac, tol_sum) << "column energy, column " << i;
+            }
+        }
+    }
 }
 
 void PassiveCouplingInjectsNoHeat ()
@@ -569,11 +841,10 @@ private:
 
 void TheFireInputsReachTheCoupling ()
 {
-    // the two tendency factors are set opposite ways in two decks, so neither
-    // can stand in for the other
+    // the two tendency factors (and the open-fraction switch) are set opposite
+    // ways in two decks, so none can stand in for the other or for its default
     for (bool density : {true, false}) {
         ScopedKeys deck;
-        deck.add("engine", std::string("native"));
         deck.add("grid_ratio", 4);
         deck.add("anchor_level", 0);
         deck.add("coupling_type", std::string("synchronous"));
@@ -583,11 +854,14 @@ void TheFireInputsReachTheCoupling ()
         deck.add("source_mode", std::string("add"));
         deck.add("heat_tendency_density", density);
         deck.add("heat_tendency_exner", !density);
+        deck.add("heat_open_fraction", density);
         deck.add("smoke_enable", true);
         deck.add("smoke_emission_factor", 0.05);
         deck.add("fire_debug", true);
-        const FireCouplingParams c = FireParams().coupling_params();
-        EXPECT_EQ(c.engine, "native");
+        const FireCouplingParams c = FireCouplingParams::read();
+        // no engine is built into this ERF, so the engine name stays empty
+        EXPECT_FALSE(c.enable);
+        EXPECT_EQ(c.engine, "");
         EXPECT_EQ(c.grid_ratio, 4);
         EXPECT_EQ(c.anchor_level, 0);
         EXPECT_EQ(c.coupling_type, "synchronous");
@@ -597,7 +871,8 @@ void TheFireInputsReachTheCoupling ()
         EXPECT_NEAR(c.fire_atm_feedback, Real(0.25), REL * Real(0.25));
         EXPECT_FALSE(c.inject_latent);
         EXPECT_EQ(c.source_mode, "add");
-        EXPECT_FALSE(c.heat_open_fraction);
+        EXPECT_TRUE(c.source_mode_given);
+        EXPECT_EQ(c.heat_open_fraction, density);
         EXPECT_EQ(c.heat_tendency_density, density);
         EXPECT_EQ(c.heat_tendency_exner, !density);
         EXPECT_TRUE(c.smoke_enable);
@@ -613,8 +888,17 @@ TEST(FireCoupler, SynchronousCouplingHandsOverTheNewWindAndDropsVanishedFluxes)
 {
     SynchronousCouplingHandsOverTheNewWindAndDropsAVanishedLatentFlux();
 }
+TEST(FireCoupler, LatentOnlyFluxInjectsWaterWithoutHeating)        { LatentOnlyFluxInjectsWaterWithoutHeating(); }
 TEST(FireCoupler, TheInjectedHeatIsTheSurfaceFlux)                 { TheInjectedHeatIsTheSurfaceFlux(); }
 TEST(FireCoupler, PassiveCouplingInjectsNoHeat)                    { PassiveCouplingInjectsNoHeat(); }
+TEST(FireCoupler, TheOpenFractionKeepsTheColumnEnergyAndThinsTheCellsUnderTheRoof)
+{
+    TheOpenFractionKeepsTheColumnEnergyAndThinsTheCellsUnderTheRoof();
+}
+TEST(FireCoupler, TheOpenShareFollowsTheCellFacesOnAStretchedGrid)
+{
+    TheOpenShareFollowsTheCellFacesOnAStretchedGrid();
+}
 TEST(FireCoupler, InjectLatentOffDropsTheEnginesLatentFlux)        { InjectLatentOffDropsTheEnginesLatentFlux(); }
 TEST(FireCoupler, TheRainIsHandedOverOnlyWhenAsked)                { TheRainIsHandedOverOnlyWhenAsked(); }
 TEST(FireCoupler, TheFireInputsReachTheCoupling)                   { TheFireInputsReachTheCoupling(); }
