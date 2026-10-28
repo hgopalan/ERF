@@ -348,6 +348,29 @@ make_terrain_fitted_coords (int lev,
     }
 
     //
+    // A node on the high side of a periodic direction is the same node as its image on the
+    // low side, and a box that holds one as valid is not touched by FillBoundary -- so give
+    // both copies one value, or the faces on either side of the node see different metrics
+    // and the mass flux through them differs.  make_terrain_surface_periodic already does
+    // this for a surface built by init_terrain_surface (and that is what the immersed
+    // boundary reads), but not for one that comes from wrfinput, met_em, a restart or the
+    // interpolation from a coarser level; this covers all of them, and the whole column.
+    // The copy kept is that of the lower-numbered box, which for the usual grids (and
+    // always within one box) is the low side, as in make_terrain_surface_periodic.
+    //
+    // Only the lateral periodicity: in a domain that is also periodic in z, the top node of
+    // a column is the image of the bottom one, but its height is not -- syncing them would
+    // give the top node the bottom's height and the top cell a negative thickness.
+    //
+    if (geom.isPeriodic(0) || geom.isPeriodic(1)) {
+        const Box& dom = geom.Domain();
+        const Periodicity lateral_period(IntVect(AMREX_D_DECL(geom.isPeriodic(0) ? dom.length(0) : 0,
+                                                              geom.isPeriodic(1) ? dom.length(1) : 0,
+                                                              0)));
+        z_phys_nd.OverrideSync(lateral_period);
+    }
+
+    //
     // Fill ghost layers and corners (including periodic) -- no matter what level
     //
     z_phys_nd.FillBoundary(geom.periodicity());
@@ -521,9 +544,22 @@ init_fine_terrain_grid (int lev,
         Gpu::copy(Gpu::hostToDevice, z_levels_h.begin(), z_levels_h.end(), z_levels_d.begin());
         auto const& z_lev = z_levels_d.data();
 
+        //
+        // Correct the ghost nodes along with the valid ones.  On a fine level whose
+        // grids do not cover the domain, the lateral ghost nodes have no valid owner
+        // anywhere, so the FillBoundary below cannot bring them up to date: left
+        // uncorrected they would keep the interpolated mesh above the surface while
+        // their k=0 node already holds the fine terrain, and the first layer of such a
+        // column inverts wherever the fine terrain stands more than a layer thickness
+        // above the interpolated one.  Both fields the correction reads are defined on
+        // those nodes -- but only inside the domain, so stop there and leave the nodes
+        // outside it to the clamp below, which is what gives them a mesh at all.
+        //
+        const Box domain_nd = convert(domain, IntVect(1,1,1));
+
         for (MFIter mfi(z_phys_nd, TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
-            const Box& bx = mfi.tilebox();
+            const Box bx = mfi.growntilebox(ngrowVect) & domain_nd;
 
             Array4<Real      > const& z_arr    = z_phys_nd.array(mfi);
             Array4<Real const> const& z_interp = z_phys_interp->const_array(mfi);
@@ -542,8 +578,8 @@ init_fine_terrain_grid (int lev,
             });
         } // mfi
 
-        // The loop above only covers the valid region, so bring the ghost nodes inside
-        // the domain up to date before the fill below reads them
+        // Give every ghost node that does have a valid owner that owner's value, rather
+        // than the one this box computed for itself, before the fill below reads them
         z_phys_nd.FillBoundary(geom.periodicity());
     }
 

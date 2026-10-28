@@ -45,7 +45,7 @@ struct FireGrid
  * @param[in] ba_atm       BoxArray of the atmospheric level
  * @param[in] dm_atm       DistributionMapping of the atmospheric level
  * @param[in] geom_atm     Geometry of the atmospheric level
- * @param[in] C            Refinement factor (grid_ratio from FireParams)
+ * @param[in] C            Refinement factor (erf.fire.grid_ratio)
  *
  * @return FireGrid over the region the boxes cover; its lev is left at 0 for
  *         the caller to set.

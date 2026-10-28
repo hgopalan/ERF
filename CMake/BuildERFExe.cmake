@@ -167,10 +167,6 @@ function(build_erf_lib erf_lib_name)
                               )
   endif()
 
-  if(ERF_ENABLE_IMPLICIT_W)
-    target_compile_definitions(${erf_lib_name} PUBLIC ERF_IMPLICIT_W)
-  endif()
-
   if(ERF_ENABLE_MULTIBLOCK)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_MULTIBLOCK)
   endif()
@@ -212,14 +208,14 @@ function(build_erf_lib erf_lib_name)
     target_sources(${erf_lib_name} PRIVATE
                    ${SRC_DIR}/Initialization/ERF_InitFromWRFInput.cpp
                    ${SRC_DIR}/Initialization/ERF_InitFromMetgrid.cpp
+                   ${SRC_DIR}/Initialization/ERF_InitLandFromMetgrid.cpp
                    ${SRC_DIR}/Initialization/ERF_InitFromNCFile.cpp
                    ${SRC_DIR}/IO/ERF_NCInterface.cpp
                    ${SRC_DIR}/IO/ERF_NCPlotFile.cpp
                    ${SRC_DIR}/IO/ERF_ReadFromMetgrid.cpp
                    ${SRC_DIR}/IO/ERF_ReadFromWRFBdy.cpp
                    ${SRC_DIR}/IO/ERF_ReadFromWRFInput.cpp
-                   ${SRC_DIR}/IO/ERF_ReadFromWRFLow.cpp
-                   ${SRC_DIR}/IO/ERF_NCColumnFile.cpp)
+                   ${SRC_DIR}/IO/ERF_ReadFromWRFLow.cpp)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_NETCDF)
   endif()
 
@@ -444,6 +440,8 @@ function(build_erf_lib erf_lib_name)
     # The fire coupling, atmosphere side, shared by every fire engine
     target_sources(${erf_lib_name} PRIVATE
       ${SRC_DIR}/FireCoupling/ERF_FireCoupler.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireCouplingParams.cpp
+      ${SRC_DIR}/FireCoupling/ERF_FireEngineRegistry.cpp
       ${SRC_DIR}/FireCoupling/ERF_FireGrid.cpp
       ${SRC_DIR}/FireCoupling/ERF_FirePrerequisites.cpp
       ${SRC_DIR}/FireCoupling/ERF_FireWindExtract.cpp
@@ -451,25 +449,31 @@ function(build_erf_lib erf_lib_name)
       ${SRC_DIR}/FireCoupling/ERF_FireSmokeEmission.cpp
     )
     target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/FireCoupling>)
-    # The native fire engine (erf.fire.engine = native)
-    target_sources(${erf_lib_name} PRIVATE
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireEnginePrerequisites.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireWindAdjust.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireTerrainReader.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_TerrainSlope.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_Rothermel.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireLayer.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireCheckpoint.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FireSuppression.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_Fire.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_FirePlotfile.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_StructureIgnition.cpp
-      ${PROJECT_SOURCE_DIR}/FireEngine/ERF_CustomFuel.cpp
-    )
-    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/FireEngine>)
-    # ERF_USE_FIRE is the upstream name (erf-model/ERF#4768), which FireEngine/ tests;
-    # ERF_ENABLE_FIRE stays until the rest of this fork moves to it
-    target_compile_definitions(${erf_lib_name} PUBLIC ERF_ENABLE_FIRE ERF_USE_FIRE)
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_FIRE)
+
+    # Fire engines live in directories that provide ERFFireEngine.cmake defining
+    # erf_fire_engine_add(target). The function is called right after its file is
+    # included, so every engine may use the same name; ERF_FIRE_ENGINE_DIR holds
+    # the engine's directory during the call. This repository carries the native
+    # engine in FireEngine/, which is always compiled in; ERF_FIRE_ENGINE_DIRS
+    # adds further engines (upstream ERF builds every engine this way).
+    set(_fire_engine_dirs "${PROJECT_SOURCE_DIR}/FireEngine" ${ERF_FIRE_ENGINE_DIRS})
+    foreach(_fire_dir IN LISTS _fire_engine_dirs)
+      get_filename_component(_fire_dir "${_fire_dir}" ABSOLUTE)
+      if(NOT EXISTS "${_fire_dir}/ERFFireEngine.cmake")
+        message(FATAL_ERROR "ERF_FIRE_ENGINE_DIRS: ${_fire_dir} has no ERFFireEngine.cmake")
+      endif()
+      set(ERF_FIRE_ENGINE_DIR "${_fire_dir}")
+      include("${_fire_dir}/ERFFireEngine.cmake")
+      if(NOT COMMAND erf_fire_engine_add)
+        message(FATAL_ERROR "${_fire_dir}/ERFFireEngine.cmake does not define erf_fire_engine_add(target)")
+      endif()
+      erf_fire_engine_add(${erf_lib_name})
+      message(STATUS "ERF fire engine directory: ${_fire_dir}")
+    endforeach()
+    unset(_fire_engine_dirs)
+  elseif(ERF_FIRE_ENGINE_DIRS)
+    message(FATAL_ERROR "ERF_FIRE_ENGINE_DIRS is set but ERF_ENABLE_FIRE is OFF")
   endif()
 
   if(ERF_BUILD_LIBRARY_ONLY)
@@ -594,6 +598,7 @@ function(build_erf_lib erf_lib_name)
        ${SRC_DIR}/IO/ERF_ConsoleIO.cpp
        ${SRC_DIR}/IO/ERF_ReadFromERFBdy.cpp
        ${SRC_DIR}/IO/ERF_WriteERFBdy.cpp
+       ${SRC_DIR}/LinearSolvers/ERF_CoarseFineFaces.cpp
        ${SRC_DIR}/LinearSolvers/ERF_PoissonSolve.cpp
        ${SRC_DIR}/LinearSolvers/ERF_PoissonSolve_tb.cpp
        ${SRC_DIR}/LinearSolvers/ERF_PoissonWallDist.cpp
@@ -602,8 +607,10 @@ function(build_erf_lib erf_lib_name)
        ${SRC_DIR}/LinearSolvers/ERF_ImposeBCsOnPhi.cpp
        ${SRC_DIR}/LinearSolvers/ERF_SolveWithEBMLMG.cpp
        ${SRC_DIR}/LinearSolvers/ERF_SolveWithGMRES.cpp
+       ${SRC_DIR}/LinearSolvers/ERF_SolveWithTerrainMLMG.cpp
        ${SRC_DIR}/LinearSolvers/ERF_SolveWithMLMG.cpp
        ${SRC_DIR}/LinearSolvers/ERF_TerrainPoisson.cpp
+       ${SRC_DIR}/Microphysics/ERF_MicrophysicsColumns.cpp
        ${SRC_DIR}/Microphysics/Morrison/ERF_InitMorrison.cpp
        ${SRC_DIR}/Microphysics/Morrison/ERF_AdvanceMorrison.cpp
        ${SRC_DIR}/Microphysics/Morrison/ERF_UpdateMorrison.cpp
@@ -687,6 +694,7 @@ function(build_erf_lib erf_lib_name)
        ${SRC_DIR}/TimeIntegration/ERF_SlowRhsPre.cpp
        ${SRC_DIR}/TimeIntegration/ERF_SlowRhsPost.cpp
        ${SRC_DIR}/TimeIntegration/ERF_Substep_NS.cpp
+       ${SRC_DIR}/TimeIntegration/ERF_CFFluxHistory.cpp
        ${SRC_DIR}/TimeIntegration/ERF_Substep_T.cpp
        ${SRC_DIR}/TimeIntegration/ERF_Substep_MT.cpp
        ${SRC_DIR}/Utils/ERF_AverageDown.cpp
@@ -694,6 +702,7 @@ function(build_erf_lib erf_lib_name)
        ${SRC_DIR}/Utils/ERF_ColumnBands.cpp
        ${SRC_DIR}/Utils/ERF_LatLonMap.cpp
        ${SRC_DIR}/Utils/ERF_TerrainSurfaceSlab.cpp
+       ${SRC_DIR}/Utils/ERF_TerrainFileChecks.cpp
        ${SRC_DIR}/Utils/ERF_ConvertForProjection.cpp
        ${SRC_DIR}/Utils/ERF_EnforceConstraintOnBdy.cpp
        ${SRC_DIR}/Utils/ERF_HurricaneDiagnostics.cpp

@@ -1,10 +1,10 @@
 .. role:: cpp(code)
    :language: c++
 
-.. _sec:FireCoupling:
+.. _sec:FireCouplingNative:
 
-Fire-Atmosphere Coupling
-========================
+Fire-Atmosphere Coupling in the Native Engine
+=============================================
 
 The atmosphere drives the fire through the wind, and the fire drives the
 atmosphere through a surface heat flux. This page covers both directions:

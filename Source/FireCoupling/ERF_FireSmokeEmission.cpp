@@ -1,6 +1,6 @@
 #include <ERF_FireSmokeEmission.H>
 
-#ifdef ERF_ENABLE_FIRE
+#ifdef ERF_USE_FIRE
 
 #include <ERF_IndexDefines.H>
 #include <AMReX_MFIter.H>
@@ -47,19 +47,18 @@ void inject_smoke_from_fire(
         const Real dz  = dx[2];
 
         ParallelFor(bx0, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // Thickness of the k = 0 cell: the mean of its four node pairs on a
-            // terrain-fitted grid (the centre-to-centre spacing used before is
-            // the mean of two cells on a stretched grid, which put a mass
-            // flux x dz_cell / dz_cc into the column instead of flux), the
-            // uniform dz without terrain. The injected mass per column,
-            // src dz_cell, then equals the flux.
+            // Thickness of the k = 0 cell: the mean of its four node pairs
+            // where the nodal heights exist (ERF always passes them), the
+            // uniform dz otherwise. The injected mass per column, src dz_cell,
+            // then equals the flux on any vertical spacing; only a degenerate
+            // cell is floored, as in fire_cell_thickness.
             Real dz_cell = dz;
             if (has_nd) {
                 dz_cell = 0.25_rt * ( (znd(i,  j,  k+1) - znd(i,  j,  k))
                                     + (znd(i+1,j,  k+1) - znd(i+1,j,  k))
                                     + (znd(i,  j+1,k+1) - znd(i,  j+1,k))
                                     + (znd(i+1,j+1,k+1) - znd(i+1,j+1,k)) );
-                dz_cell = amrex::max(dz_cell, dz * 0.1_rt);
+                dz_cell = amrex::max(dz_cell, 1.0e-6_rt * dz);
             }
             amrex::ignore_unused(khi);
             // smoke_flux [kg/m2/s] = ef * Q [W/m2] / hoc [J/kg]
@@ -79,4 +78,4 @@ void inject_smoke_from_fire(
     }
 }
 
-#endif // ERF_ENABLE_FIRE
+#endif // ERF_USE_FIRE

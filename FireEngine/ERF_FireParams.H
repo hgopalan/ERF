@@ -276,7 +276,7 @@ struct FireParams
     // injected flux: without it the heating is short by 1 - Pi, 2-6 % at the
     // surface and 4.5 % at 850 hPa. WRF-SFIRE omits the factor, and so does
     // the default here; true keeps the energy exact.
-    bool              heat_tendency_exner     = false;
+    bool              heat_tendency_exner     = true;   ///< ERF default since erf-model/ERF#4798; the coupler reads FireCouplingParams, this copy feeds the model summary
 
     // Phase 8: Albini (1983) ember spotting parameters
     struct SpottingParams {

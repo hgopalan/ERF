@@ -12,6 +12,8 @@
 #include "ERF_MicrophysicsConstants.H"
 #include "ERF_TerrainMetrics.H"
 #include "Prob/ERF_ProblemDispatch.H"
+#include "Prob/ERF_ProbHeights.H"
+#include "Prob/ERF_MoistPerturbation.H"
 
 using namespace amrex;
 

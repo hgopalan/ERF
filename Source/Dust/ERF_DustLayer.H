@@ -66,7 +66,7 @@
 #include <ERF_DustSTEL.H>
 #endif
 
-#if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
+#if defined(ERF_USE_FIRE) && defined(ERF_USE_DUST)
 #include <ERF_FireDustCoupling.H>
 #endif
 
@@ -198,7 +198,7 @@ public:
      * @param fdc  Pointer to the FireDustCoupling struct (owned by ERF).
      *             Pass nullptr to disable.
      */
-#if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
+#if defined(ERF_USE_FIRE) && defined(ERF_USE_DUST)
     void set_fire_dust_coupling(const FireDustCoupling* fdc) {
         m_fire_dust_coupling = fdc;
     }
@@ -534,7 +534,7 @@ private:
                                                                      ///< Set during initialize from ERF_IndexDefines.H.
 
     DustParams                            m_params{DustParams::DefaultsOnly{}};  ///< set by initialize()
-#if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
+#if defined(ERF_USE_FIRE) && defined(ERF_USE_DUST)
     const FireDustCoupling* m_fire_dust_coupling = nullptr;
 #endif
 

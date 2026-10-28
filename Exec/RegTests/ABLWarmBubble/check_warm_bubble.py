@@ -33,7 +33,7 @@ import os
 import sys
 
 _here = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [_here, os.path.join(_here, "..", "..", "CanonicalTests", "Canonical_RANS")]
+sys.path[:0] = [_here, os.path.join(_here, "..", "..", "Tools")]
 import erf_plotfile  # noqa: E402
 
 THETA0 = 300.0

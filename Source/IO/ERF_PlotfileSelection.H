@@ -117,7 +117,7 @@ plot3d_q_conserved_component_index (const int q)
  *
  * The optional scalars sit between rhoadv_0 and rhoQ1 exactly as in
  * ERF_IndexDefines.H: dust (RhoAdv_comp) under ERF_USE_DUST, then smoke
- * (RhoSmoke_comp) under ERF_ENABLE_FIRE.  Every name here must map to a
+ * (RhoSmoke_comp) under ERF_USE_FIRE.  Every name here must map to a
  * component in plot3d_conserved_component_index, or it can never be plotted.
  */
 inline amrex::Vector<std::string>
@@ -127,7 +127,7 @@ plot3d_conserved_state_names ()
 #ifdef ERF_USE_DUST
     names.push_back("rhoadv_dust");
 #endif
-#ifdef ERF_ENABLE_FIRE
+#ifdef ERF_USE_FIRE
     names.push_back("smoke");
 #endif
     names.insert(names.end(), {
@@ -155,17 +155,21 @@ plot3d_conserved_component_index (const std::string& name)
 #ifdef ERF_USE_DUST
     if (name == "rhoadv_dust") return RhoAdv_comp;
 #endif
-#ifdef ERF_ENABLE_FIRE
+#ifdef ERF_USE_FIRE
     if (name == "smoke") return RhoSmoke_comp;
 #endif
 
     if (name.size() > 4 && name.compare(0, 4, "rhoQ") == 0) {
-        const std::string suffix = name.substr(4);
-        if (!suffix.empty() && std::all_of(suffix.cbegin(), suffix.cend(),
-                                           [] (const char c) { return c >= '0' && c <= '9'; })) {
-            const int q = std::stoi(suffix);
-            return plot3d_q_conserved_component_index(q);
+        // Parse the digits by hand, stopping once past the RhoQ11 limit, so a
+        // long numeric suffix cannot overflow int (std::stoi would throw)
+        int q = 0;
+        for (std::size_t i = 4; i < name.size(); ++i) {
+            const char c = name[i];
+            if (c < '0' || c > '9') return -1;
+            q = 10 * q + (c - '0');
+            if (q > 11) return -1;
         }
+        return plot3d_q_conserved_component_index(q);
     }
 
     return -1;
@@ -200,11 +204,6 @@ plot3d_fixed_unconditional_diagnostic (const std::string& name)
     for (const char* candidate : names) {
         if (name == candidate) return true;
     }
-
-#ifdef ERF_COMPUTE_ERROR
-    if (name == "xvel_err" || name == "yvel_err" || name == "zvel_err" ||
-        name == "pp_err") return true;
-#endif
 
     return false;
 }
@@ -282,7 +281,7 @@ plot3d_fixed_variable_available (const std::string& name,
         name == "Khv" || name == "Khh" || name == "Lturb") {
         return caps.eddy_diffusivity_storage;
     }
-    if (name == "Rt" || name == "cmu" || name == "cmu_prime") {
+    if (name == "Rt" || name == "cmu" || name == "cmu_prime" || name == "cap_ratio") {
         return caps.eddy_diffusivity_storage;
     }
     if (name == "diss") return caps.dissipation_storage;
@@ -304,9 +303,6 @@ plot3d_needs_pressure (const amrex::Vector<std::string>& names)
             name == "rel_humidity") {
             return true;
         }
-#ifdef ERF_COMPUTE_ERROR
-        if (name == "pp_err") return true;
-#endif
     }
     return false;
 }

@@ -21,6 +21,7 @@
 #include "ERF_TurbPertStruct.H"
 #include "ERF_RadStruct.H"
 #include "ERF_ShocTransportStruct.H"
+#include "ERF_CanopyTurbStruct.H"
 
 /**
  * Enum of possible plotfile types.
@@ -101,6 +102,18 @@ AMREX_ENUM(AnelasticType,
  */
 AMREX_ENUM(MeshType,
     ConstantDz, StretchedDz, VariableDz
+);
+
+/**
+ * @brief Linear solver for the anelastic projection on a terrain-fitted mesh.
+ *
+ * gmres_fft is GMRES with ERF's TerrainPoisson operator and an FFT preconditioner (needs the
+ * FFT build).  mlmg and gmres_mlmg use amrex::MLTerrainPoisson (AMReX-Codes/amrex#6030), the
+ * same stencil with zero flux through the Neumann faces, solved by geometric multigrid
+ * alone or as the preconditioner of GMRES; they need no FFT.
+ */
+AMREX_ENUM(TerrainPoissonSolver,
+    gmres_fft, mlmg, gmres_mlmg
 );
 
 /**
@@ -861,11 +874,9 @@ struct SolverChoice {
         std::string terrain_type_temp = "";
         pp.queryAdd("terrain_type", terrain_type_temp);
         if (terrain_type_temp == "Moving") {
-            amrex::Warning("erf.terrain_type = Moving is deprecated; please replace Moving by MovingFittedMesh");
-            terrain_type = TerrainType::MovingFittedMesh;
+            amrex::Error("erf.terrain_type = Moving is no longer supported; please replace Moving by MovingFittedMesh");
         } else if (terrain_type_temp == "Static") {
-            amrex::Warning("erf.terrain_type = Static is deprecated; please replace Static by StaticFittedMesh");
-            terrain_type = TerrainType::StaticFittedMesh;
+            amrex::Error("erf.terrain_type = Static is no longer supported; please replace Static by StaticFittedMesh");
         } else {
             pp.query_enum_case_insensitive("terrain_type",terrain_type);
         }
@@ -946,6 +957,18 @@ struct SolverChoice {
             amrex::Error("erf.flat_terrain requires terrain_type = StaticFittedMesh");
         }
 
+        // Refined levels over moving terrain are not supported: erf_substep_MT does not take the
+        // fluxes through coarse/fine faces from the coarse level (cf_flux_history_active)
+        if (terrain_type == TerrainType::MovingFittedMesh && max_level > 0) {
+            amrex::Error("erf.terrain_type = MovingFittedMesh requires amr.max_level = 0");
+        }
+
+        // Immersed-forcing buildings need the terrain blanking that init_zphys builds, and
+        // init_zphys returns before building it when the terrain is EB
+        if (terrain_type == TerrainType::EB && buildings_type == BuildingsType::ImmersedForcing) {
+            amrex::Error("erf.buildings_type = ImmersedForcing is not supported with erf.terrain_type = EB");
+        }
+
         if ( (moisture_type == MoistureType::SAM                ||
               moisture_type == MoistureType::SAM_NoIce          ||
               moisture_type == MoistureType::SAM_NoPrecip_NoIce   ) &&
@@ -954,24 +977,32 @@ struct SolverChoice {
             amrex::Abort("SAM is not correct with variable dz -- choose another moisture model");
         }
 
+        // queryAdd puts the default in the table, so ask whether the ratio was given first
+        const bool have_stretching_ratio = pp.contains("grid_stretching_ratio");
         pp.queryAdd("grid_stretching_ratio", grid_stretching_ratio);
         if (grid_stretching_ratio != 0) {
             AMREX_ASSERT_WITH_MESSAGE((grid_stretching_ratio >= one),
                                       "The grid stretching ratio must be greater than 1");
         }
-        if (grid_stretching_ratio >= 1) {
+        // erf.initial_dz on its own asks for the stretching ratio to be solved for, so that
+        //    a first layer that thick stretches geometrically to close on prob_hi[2].  An
+        //    explicit erf.grid_stretching_ratio = 0 still means no stretching at all.
+        const bool solve_stretching_ratio = !have_stretching_ratio && pp.contains("initial_dz");
+        if (grid_stretching_ratio >= 1 || solve_stretching_ratio) {
             if (terrain_type == TerrainType::None) {
                 terrain_type = TerrainType::StaticFittedMesh;
             }
             if (mesh_type == MeshType::ConstantDz) {
                 mesh_type = MeshType::StretchedDz;
             }
-            pp.queryAdd("zsurface", zsurf);
-            if (zsurf != zero) {
-                amrex::Print() << "Nominal zsurface height != 0, may result in unexpected behavior"
-                    << std::endl;
-            }
             pp.get("initial_dz", dz0);
+        }
+
+        // The stretched levels start at geometry.prob_lo[2]; erf.zsurface used to set the
+        //    bottom separately, and a flat surface did not follow it (#4442)
+        if (pp.contains("zsurface")) {
+            amrex::Abort("erf.zsurface is no longer supported: a stretched vertical grid now starts "
+                         "at geometry.prob_lo[2], so set the bottom of the domain there instead");
         }
 
         int n_zlevels = pp.countval("terrain_z_levels");
@@ -1118,6 +1149,24 @@ struct SolverChoice {
 
         pp.queryAdd("beta_s", beta_s);
 
+        // Divergence damping coefficient for the forward projection of (rho theta)
+        pp.queryAdd("beta_d", beta_d);
+        if (!(beta_d >= amrex::Real(0.0) && beta_d <= amrex::Real(1.0))) {
+            amrex::Abort("erf.beta_d must lie in [0, 1]; got " + std::to_string(beta_d));
+        }
+
+        // Spatially varying beta_s on the w-faces (implicit substepping only):
+        //    beta_s = max(beta_s_min, min(beta_s_max, h_xi^2 + h_eta^2))
+        pp.queryAdd("use_variable_beta_s", use_variable_beta_s);
+        pp.queryAdd("beta_s_min", beta_s_min);
+        pp.queryAdd("beta_s_max", beta_s_max);
+        if (use_variable_beta_s) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(beta_s_min <= beta_s_max,
+                "erf.beta_s_min must be less than or equal to erf.beta_s_max");
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(beta_s_min >= -one && beta_s_max <= one,
+                "erf.beta_s_min and erf.beta_s_max must lie in [-1, 1]");
+        }
+
         // *******************************************************************************
         // Error check on deprecated input
         // *******************************************************************************
@@ -1136,6 +1185,15 @@ struct SolverChoice {
         }
         pp.queryAdd("poisson_abstol", poisson_abstol);
         pp.queryAdd("poisson_reltol", poisson_reltol);
+        // Solver for the projection on a terrain-fitted mesh: FFT-preconditioned GMRES (default),
+        // or amrex::MLTerrainPoisson with multigrid, alone or under GMRES
+        pp.query_enum_case_insensitive("terrain_poisson_solver", terrain_poisson_solver);
+        if (pp.contains("terrain_poisson_solver") &&
+            (mesh_type != MeshType::VariableDz || terrain_type == TerrainType::EB)) {
+            amrex::Print() << "WARNING: erf.terrain_poisson_solver is ignored: it applies only to the "
+                           << "projection on a terrain-fitted mesh (erf.terrain_type = StaticFittedMesh "
+                           << "or MovingFittedMesh)" << std::endl;
+        }
 #ifdef AMREX_USE_FLOAT
         poisson_abstol = amrex::max(poisson_abstol,amrex::Real(1e-6));
         poisson_reltol = amrex::max(poisson_reltol,amrex::Real(1e-6));
@@ -1175,6 +1233,11 @@ struct SolverChoice {
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
             forest_leaf_theta_fixed <= zero || forest_biophysics_heat,
             "forest_leaf_theta_fixed requires forest_biophysics_heat = true");
+
+        // Canopy terms of the k-eqn RANS model (erf.forest_canopy_*); the
+        // checks that need the forest and the turbulence model are in
+        // ERF::ReadParameters, once both are known
+        canopyTurb.init_params(pp);
 
         // immersed forcing parameters
         pp.queryAdd("if_Cd_momentum", if_Cd_momentum);
@@ -1235,6 +1298,18 @@ struct SolverChoice {
             amrex::Abort("erf.if_Olen = 0 is not an Obukhov length: give a nonzero length [m] (a large |L| is near neutral)");
         }
 
+        // The immersed forcing's "almost fluid" threshold (erf-model/ERF#4226). It is recorded
+        // under eb2.small_volfrac here, in ReadParameters, before ERF::initializeEB runs, so the
+        // EB build (which covers cells below it), the blanking and the forcing kernels all use
+        // the same value, and a deck without the key gets 0.005 rather than AMReX's 1e-14.
+        if (terrain_type == TerrainType::ImmersedForcing || buildings_type == BuildingsType::ImmersedForcing) {
+            amrex::ParmParse pp_eb2("eb2");
+            pp_eb2.queryAdd("small_volfrac", if_small_volfrac);
+            if (!(if_small_volfrac >= zero && if_small_volfrac < one)) {
+                amrex::Abort("eb2.small_volfrac must be in [0, 1) with immersed forcing");
+            }
+        }
+
         // Flag to do MOST rotations with terrain
         pp.queryAdd("use_rotate_surface_flux",use_rotate_surface_flux);
         if (use_rotate_surface_flux) {
@@ -1247,6 +1322,12 @@ struct SolverChoice {
         pp.queryAdd("const_massflux_u", const_massflux_u);
         pp.queryAdd("const_massflux_v", const_massflux_v);
         pp.queryAdd("const_massflux_tau", const_massflux_tau);
+        // The control divides by tau; tau <= 0 gives no source or one that drives the flow
+        //    away from the target
+        if (!(const_massflux_tau > amrex::Real(0))) {
+            amrex::Abort("erf.const_massflux_tau must be > 0 (got " +
+                         std::to_string(const_massflux_tau) + ")");
+        }
         pp.queryAdd("const_massflux_layer_lo", const_massflux_layer_lo);
         pp.queryAdd("const_massflux_layer_hi", const_massflux_layer_hi);
 
@@ -1885,6 +1966,14 @@ struct SolverChoice {
             }
         }
 
+        // Two-way coupling refluxes the diffusive fluxes of the slow scalars, but not on an EB mesh
+        if (coupling_type == CouplingType::TwoWay && terrain_type == TerrainType::EB &&
+            max_level > 0 && l_use_diff) {
+            amrex::Warning("erf.coupling_type = TwoWay with erf.terrain_type = EB does not reflux the "
+                           "diffusive fluxes: diffusion does not conserve the scalars across "
+                           "coarse/fine boundaries");
+        }
+
         // The implicit terrain metric is a change to the vertical implicit solves on a
         // terrain-fitted mesh; refuse it where it could not do anything.  This comes after
         // every block that can turn the implicit solve off.
@@ -2007,9 +2096,6 @@ struct SolverChoice {
                                << ", moisture = " << implicit_moisture_diffusion
                                << ", tke = " << implicit_ke_diffusion
                                << ", momenta = " << implicit_momentum_diffusion;
-#ifdef ERF_IMPLICIT_W
-                amrex::Print() << ", including w";
-#endif
                 if (implicit_terrain_metric) {
                     amrex::Print() << "; terrain metric implicit";
                 }
@@ -2264,8 +2350,18 @@ struct SolverChoice {
     // towards the future time step)
     amrex::Real beta_s = amrex::Real(0.1);
 
+    // if true, beta_s varies on the w-faces as max(beta_s_min, min(beta_s_max, h_xi^2 + h_eta^2))
+    // and beta_s itself is not used (implicit substepping only)
+    bool use_variable_beta_s = false;
+    amrex::Real beta_s_min = amrex::Real(0.1);
+    amrex::Real beta_s_max = amrex::Real(0.8);
+
+    // divergence damping coefficient: how far (rho theta) is projected forward
+    // in the horizontal momentum equations of the acoustic substepping
+    amrex::Real beta_d = amrex::Real(0.1);
+
     // This controls the time-centering of the *vertical* differences in the diffusive term for
-    // theta, u, v (and w if ERF_IMPLICIT_W is set)
+    // theta, u and v
     // 0: fully explicit
     // 1: fully implicit
     amrex::Vector<amrex::Vector<amrex::Real>> vert_implicit_fac; // one value per RK stage
@@ -2282,6 +2378,7 @@ struct SolverChoice {
 
     int         ncorr               = 1;
     std::string wall_dist_type      = "poisson";
+    TerrainPoissonSolver  terrain_poisson_solver  = TerrainPoissonSolver::gmres_fft;
 #ifdef AMREX_USE_FLOAT
     amrex::Real poisson_abstol      = amrex::Real(1e-6);
     amrex::Real poisson_reltol      = amrex::Real(1e-6);
@@ -2326,6 +2423,7 @@ struct SolverChoice {
     amrex::Real if_damp_alpha            = 0.5;    // [-]
     amrex::Real if_stability_wind_floor  = amrex::Real(0.0);  // [m/s]
     amrex::Real if_psi_cap_factor        = amrex::Real(1.0);  // [-]
+    amrex::Real if_small_volfrac         = amrex::Real(0.005);  // [-] eb2.small_volfrac
 
     // This defaults to true but can be set to false for moving terrain cases only
     bool        use_lagged_delta_rt   = true;
@@ -2340,8 +2438,7 @@ struct SolverChoice {
 
     // Staggered z levels for vertical grid stretching
     amrex::Real grid_stretching_ratio   = 0;
-    amrex::Real zsurf                   = zero;
-    amrex::Real dz0;
+    amrex::Real dz0                     = zero;
 
     // Coriolis forcing
     amrex::Real coriolis_factor = zero;
@@ -2612,6 +2709,8 @@ struct SolverChoice {
     bool        forest_biophysics       {false};
     bool        forest_biophysics_heat  {false};
     amrex::Real forest_leaf_theta_fixed {-one};
+    // Canopy terms of the k-eqn RANS model (ERF_CanopyTurbStruct.H)
+    CanopyTurbulence canopyTurb;
 
     // Enforce constant mass flux?
     amrex::Real const_massflux_u = zero;
@@ -2687,6 +2786,14 @@ struct SolverChoice {
  * @brief Whether to emit extra CFL diagnostics for compressible substepping.
  * @var SolverChoice::beta_s
  * @brief Time off-centering coefficient for forward weighting.
+ * @var SolverChoice::use_variable_beta_s
+ * @brief Whether beta_s varies on the w-faces with the terrain slope.
+ * @var SolverChoice::beta_s_min
+ * @brief Lower bound of the spatially varying beta_s.
+ * @var SolverChoice::beta_s_max
+ * @brief Upper bound of the spatially varying beta_s.
+ * @var SolverChoice::beta_d
+ * @brief Divergence damping coefficient used in the acoustic substepping.
  * @var SolverChoice::vert_implicit_fac
  * @brief Per-level, per-stage implicit vertical diffusion factors.
  * @var SolverChoice::implicit_thermal_diffusion
@@ -2703,6 +2810,8 @@ struct SolverChoice {
  * @brief Whether the compact terrain-metric part of the vertical diffusion is solved implicitly.
  * @var SolverChoice::ncorr
  * @brief Number of projection correction iterations.
+ * @var SolverChoice::terrain_poisson_solver
+ * @brief Projection solver on a terrain-fitted mesh: gmres_fft (default), mlmg or gmres_mlmg.
  * @var SolverChoice::poisson_abstol
  * @brief Absolute tolerance for the Poisson solve.
  * @var SolverChoice::poisson_reltol
@@ -2741,6 +2850,9 @@ struct SolverChoice {
  * @brief Input Obukhov length for immersed-forcing MOST [m].
  * @var SolverChoice::if_use_most
  * @brief Whether immersed-forcing MOST is enabled.
+ * @var SolverChoice::if_small_volfrac
+ * @brief Immersed-forcing solid fraction below which a cell or face counts as fluid; read from
+ *        eb2.small_volfrac (default 0.005), the same value the EB build uses.
  * @var SolverChoice::if_snap_partial_cells
  * When true, the immersed forcing reads the blanking snapped to solid (1) or
  * fluid (0) at half, so a building from a height map becomes the same
@@ -2787,8 +2899,6 @@ struct SolverChoice {
  * @brief Ratio of dry-air gas constant to c_p.
  * @var SolverChoice::grid_stretching_ratio
  * @brief Vertical grid stretching ratio.
- * @var SolverChoice::zsurf
- * @brief Nominal surface height for stretched-grid setup.
  * @var SolverChoice::dz0
  * @brief Initial vertical grid spacing for stretched-grid setup.
  * @var SolverChoice::coriolis_factor

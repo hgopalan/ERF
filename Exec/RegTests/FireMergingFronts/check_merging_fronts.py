@@ -41,7 +41,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)                                                    # the CTest copy of the reader
-sys.path.append(os.path.join(HERE, "..", "..", "CanonicalTests", "Canonical_RANS"))  # from the source folder
+sys.path.append(os.path.join(HERE, "..", "..", "Tools"))  # from the source folder
 import erf_plotfile  # noqa: E402
 
 TOL_MEAN = 0.5      # mean |arrival error|, in cell crossings h/R

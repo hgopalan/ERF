@@ -17,13 +17,12 @@ class ERF;
  * Verifies that ERF is configured so that a fire grid can be coupled to it,
  * whichever fire engine runs on that grid:
  * - MOST surface layer is active with proper boundary conditions
- * - The level the fire grid refines exists, keeps its boxes and has no dust layer above level 0
+ * - The level the fire grid refines exists and keeps its boxes
  * - No z-direction MPI decomposition (all z-levels on same rank)
  * - The level's boxes cover one rectangle
  * - Grid divisibility by refinement factor
  *
- * Each engine checks its own inputs after these (ERF_FireEnginePrerequisites.H
- * for the native engine).
+ * Each engine checks its own inputs after these (FireEngine::verify_prerequisites).
  *
  * All checks use AMREX_ALWAYS_ASSERT_WITH_MESSAGE for actionable diagnostics.
  */
@@ -40,18 +39,18 @@ class ERF;
 int fire_anchor_level(int anchor_level, int finest_level);
 
 /**
- * @brief Start-up check of erf.fire.precip_source = atmosphere: the microphysics
- *        scheme must provide surface precipitation accumulators.
+ * @brief Start-up check for an engine that reads the rain of every column
+ *        (FireEngine::wants_surface_precip): the microphysics scheme must
+ *        provide surface precipitation accumulators.
  *
- * Aborts, naming erf.fire.precip_source and erf.moisture_model, when the
- * sources are empty (no moisture model, Kessler_NoRain, saturation adjustment
- * only, ...). A no-op for the uniform source. Called after the microphysics of
- * the fire grid's level is initialised.
+ * Aborts, naming the engine and erf.moisture_model, when the sources are
+ * empty (no moisture model, Kessler_NoRain, saturation adjustment only, ...).
+ * Called after the microphysics of the fire grid's level is initialised.
  *
- * @param[in] precip_source  erf.fire.precip_source ("atmosphere" or "uniform")
- * @param[in] sources        Microphysics::Get_Surface_Precip_Accumulation_Ptrs(lev)
+ * @param[in] engine_name  The engine's name (FireEngine::name)
+ * @param[in] sources      Microphysics::Get_Surface_Precip_Accumulation_Ptrs(lev)
  */
-void verify_fire_precip_source(const std::string& precip_source,
+void verify_fire_precip_source(const std::string& engine_name,
                                const SurfacePrecipAccumulationSources& sources);
 
 /**
@@ -67,10 +66,10 @@ void verify_fire_precip_source(const std::string& precip_source,
  * @param[in] grid_ratio       erf.fire.grid_ratio, fire cells per atmospheric cell in x and y
  *
  * Checks performed (in order):
- * 1. SurfaceLayer pointer is not null (zlo.type = surface_layer)
+ * 1. SurfaceLayer pointer is not null (zlo.type = surface_layer), unless
+ *    needs_surface_layer is false (FireEngine::needs_surface_layer)
  * 2. 0 <= lev <= finest level
  * 3. On a level above 0: static refinement (erf.regrid_int <= 0)
- * 4. On a level above 0: no dust layer (erf.dust.enable)
  * 7. Every box of the level spans its full height (no z-decomposition)
  * 7b. The level's boxes cover one rectangle in x and y
  * 8. grid_ratio >= 1
@@ -81,6 +80,7 @@ void verify_fire_precip_source(const std::string& precip_source,
 void verify_fire_prerequisites(const ERF& erf,
                                int lev,
                                const SurfaceLayer* surface_layer,
-                               int grid_ratio);
+                               int grid_ratio,
+                               bool needs_surface_layer = true);
 
 #endif

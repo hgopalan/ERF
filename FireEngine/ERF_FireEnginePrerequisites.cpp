@@ -2,6 +2,7 @@
 #include <ERF_NumericalSchemes.H>
 #include <ERF.H>
 #include <AMReX_Print.H>
+#include <AMReX_ParmParse.H>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -101,6 +102,21 @@ void verify_native_fire_prerequisites(const ERF& erf,
                                       int lev,
                                       const FireParams& fire_params)
 {
+    // Check 11: the dust layer and the fire-dust coupling of this repository live
+    // on level 0 and share the fire grid's index space; they cannot follow a
+    // finer fire grid. (Upstream ERF's shared checks know nothing of the dust
+    // layer, so the check lives with the native engine.)
+    if (lev > 0) {
+        ParmParse pp_dust("erf.dust");
+        bool dust_enable = false;
+        pp_dust.query("enable", dust_enable);
+        if (dust_enable) {
+            Abort("[FIRE] The dust layer and the fire-dust coupling run on level 0, so they cannot "
+                  "run with the fire grid on level " + std::to_string(lev) + " (erf.dust.enable = true). "
+                  "Set erf.fire.anchor_level = 0, or turn the dust layer off.");
+        }
+    }
+
     // Check 12: Domain depth > the height the wind is sampled at: the target
     // height, or erf.fire.wind_sample_ht when the wind is sampled there and
     // brought down. The depth, not the top: a height above ground compared

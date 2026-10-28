@@ -27,6 +27,7 @@ erf.fire.ignition_r = 0.0             # nothing burns: all the heat is the presc
 erf.fire.coupling_type = "lagged"
 erf.fire.fire_atm_feedback = 1.0
 erf.fire.inject_latent = false
+erf.fire.heat_tendency_exner = false  # the checks below read Cp d(rho theta) = placed power x time, the tendency without the Exner factor (ERF defaults it to true since erf-model/ERF#4798)
 erf.fire.prescribed_heat.flux = 1.0e4
 erf.fire.prescribed_heat.center = 350.0 350.0
 erf.fire.prescribed_heat.radius = 30.0

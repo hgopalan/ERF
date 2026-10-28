@@ -51,7 +51,7 @@ TEST(FireDefaults, AnEmptyDeckTakesTheReviewedForms)
     EXPECT_TRUE(fp.use_wind_limit);
     EXPECT_EQ(fp.wind_limit_mode, fire_wind_limit::rothermel)      << "the wind limit is Rothermel's 0.9 I_R";
     EXPECT_FALSE(fp.wind_below_first_log)                          << "the centre's wind below the first cell centre (log is opt-in)";
-    EXPECT_FALSE(fp.heat_tendency_exner)                           << "WRF-SFIRE's tendency without the Exner factor";
+    EXPECT_TRUE(fp.heat_tendency_exner)                            << "Exner factor on, as ERF's FireCouplingParams defaults it (erf-model/ERF#4798)";
     EXPECT_NEAR(fp.macarthur_ros_max, 6.0, 1.0e-12)                << "WRF-Fire's 6 m/s cap";
     EXPECT_TRUE(fp.rothermel_cell_moisture);
     EXPECT_EQ(fp.ros_model, "rothermel");
@@ -67,7 +67,7 @@ TEST(FireDefaults, LegacyKeysSelectTheEarlierForms)
     deck.add("wind_limit", std::string("fuel_class"));
     deck.add("wind_below_first_cell", std::string("log"));
     deck.add("use_terrain_wind", true);
-    deck.add("heat_tendency_exner", true);
+    deck.add("heat_tendency_exner", false);
     deck.add("rothermel_cell_moisture", false);
     deck.add("firebreak.use_mask", false);
 
@@ -76,7 +76,7 @@ TEST(FireDefaults, LegacyKeysSelectTheEarlierForms)
     EXPECT_EQ(fp.wind_limit_mode, fire_wind_limit::fuel_class);
     EXPECT_TRUE(fp.wind_below_first_log);
     EXPECT_TRUE(fp.use_terrain_wind);
-    EXPECT_TRUE(fp.heat_tendency_exner);
+    EXPECT_FALSE(fp.heat_tendency_exner);
     EXPECT_FALSE(fp.rothermel_cell_moisture);
     EXPECT_FALSE(fp.firebreak_use_mask);
 }

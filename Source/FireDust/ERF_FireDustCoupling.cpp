@@ -1,6 +1,6 @@
 #include <ERF_FireDustCoupling.H>
 
-#if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
+#if defined(ERF_USE_FIRE) && defined(ERF_USE_DUST)
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>

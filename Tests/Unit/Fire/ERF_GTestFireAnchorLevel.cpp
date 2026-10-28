@@ -12,7 +12,6 @@
 
 #include "ERF_FireGrid.H"
 #include "ERF_FireAtmCoupling.H"
-#include "ERF_TerrainSlope.H"
 #include "ERF_FireSurfaceHeight.H"
 #include "ERF_FireWindExtract.H"
 
@@ -287,15 +286,6 @@ TEST(FireAnchorLevel, TerrainMapsReadTheColumnUnderTheFireCell)
     EXPECT_LT(max_rel_error(zs, fg, 0, [](Real x, Real y) {
         return node_mean(column_of(x), column_of(y)); }), TOL);
 
-    MultiFab slopes(fg.ba, fg.dm, 2, 1);
-    compute_terrain_slopes(slopes, &z_nd, L.geom, fg, "");
-    EXPECT_LT(max_rel_error(slopes, fg, 0, [](Real x, Real) {
-        const Real xl = column_of(x) * DX;
-        return ((xl + DX) * (xl + DX) - xl * xl) / 1000.0_rt / DX; }), TOL);
-    EXPECT_LT(max_rel_error(slopes, fg, 1, [](Real, Real y) {
-        const Real yl = column_of(y) * DX;
-        return ((yl + DX) * (yl + DX) - yl * yl) / 2000.0_rt / DX; }), TOL);
-
     MultiFab grounds(fg.ba, fg.dm, 4, 0);
     compute_fire_column_grounds(grounds, &z_nd, L.geom, fg);
     for (int c = 0; c < 4; ++c) {
@@ -370,8 +360,8 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
     MultiFab ez(fg.ba, fg.dm, 1, 0);
 
     // The 10 m target sits below the first cell centre (12.5 m); with
-    // erf.fire.wind_below_first_cell = clamp the lowest centre's wind is taken
-    // as it is, so the horizontal maps can be read alone (the log form is
+    // below_first_log = false the lowest centre's wind is taken as it is, so
+    // the horizontal maps can be read alone (the log form is
     // WindBelowTheFirstCentreFollowsTheLogProfile).
     const bool below_first_log = false;
 
@@ -392,7 +382,7 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
 
 /**
  * Each fire cell sampled at its own height (the per-cell field an engine hands
- * the sampler, the native engine's per-fuel wind height): with u = z and
+ * the sampler, for example a per-fuel wind height): with u = z and
  * v = 2 z in every column a cell sampled at h reads (h, 2 h), the height
  * differing from cell to cell (cell_height, 15 to 55 m, between cell centres),
  * and the sampling height recorded is the cell's own; the global height (10 m,
@@ -429,9 +419,8 @@ TEST(FireAnchorLevel, EachFireCellIsSampledAtItsOwnHeight)
 
 /**
  * A target below the first cell centre takes the lowest centre's wind scaled
- * by the neutral log profile ln(z / z0) / ln(z1 / z0) (the opt-in
- * erf.fire.wind_below_first_cell = log), not the centre's wind unchanged
- * (the default clamp).
+ * by the neutral log profile ln(z / z0) / ln(z1 / z0) (below_first_log = true),
+ * not the centre's wind unchanged (below_first_log = false).
  * Here z_ref = 10 m under a first centre at 12.5 m with z0 = 0.1 m: the
  * factor is ln(100) / ln(125) = 0.95379, 4.6 % below the clamp. A target at
  * the first centre is unchanged, and the ground height enters the heights.

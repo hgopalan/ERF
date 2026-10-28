@@ -13,8 +13,8 @@
 
 /**
  * @file ERF_GTestFirePrecip.cpp
- * @brief The rain per column of the fuel moisture model (erf.fire.precip_source =
- *        atmosphere): the accumulation difference to mm/hr, the combination of the
+ * @brief The rain per column handed to an engine that asks for it
+ *        (FireEngine::wants_surface_precip): the accumulation difference to mm/hr, the combination of the
  *        scheme-native accumulators without double counting, the per-column rate
  *        with its rolling snapshot, and the map onto the fire grid.
  */

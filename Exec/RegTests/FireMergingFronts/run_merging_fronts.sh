@@ -9,7 +9,7 @@ EXE=${1:?usage: run_merging_fronts.sh /path/to/erf_exec [extra args]}
 shift || true
 VARIANTS="coalescing junction parallel"
 here=$(cd "$(dirname "$0")" && pwd)
-[ -f erf_plotfile.py ] || cp "$here/../../CanonicalTests/Canonical_RANS/erf_plotfile.py" .
+[ -f erf_plotfile.py ] || cp "$here/../../Tools/erf_plotfile.py" .
 
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi
