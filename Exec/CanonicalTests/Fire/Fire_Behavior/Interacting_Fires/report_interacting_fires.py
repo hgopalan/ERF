@@ -14,7 +14,7 @@ burned is the meeting time (to the plotfile interval). The meeting cells:
 
 It also prints the reference wind the fire saw (fire_wind_ref_u) at the end.
 
-This reads the plotfiles with the pure-Python reader of Canonical_RANS; no yt.
+This reads the plotfiles with the pure-Python reader Exec/Tools/erf_plotfile.py; no yt.
 """
 import glob
 import math
@@ -22,7 +22,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "Canonical_RANS"))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "..", "Tools"))
 import erf_plotfile  # noqa: E402
 
 VARIANTS = ("coalescing", "junction", "parallel")

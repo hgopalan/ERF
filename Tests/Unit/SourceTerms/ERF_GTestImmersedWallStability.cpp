@@ -282,6 +282,9 @@ TEST(ImmersedWallStability, PsiMCapKeepsAVelocityTargetInUnstableAir)
         SolverChoice sc = col.choice(Real(0.12));
         sc.if_z0 = Real(0.5);
         sc.if_psi_cap_factor = factors[n];
+        // the cap acts on psi_m, which the wall law only forms with the stability
+        // correction on (off by default since erf-model/ERF#4751)
+        sc.if_stability_correction = true;
         const amrex::Box xbx = amrex::surroundingNodes(col.bx, 0);
         ImmersedForcingTerrain_Xmom(xbx, col.u.const_array(), col.v.const_array(), col.w.const_array(),
                                     col.cell.const_array(), col.blank.const_array(),
@@ -312,6 +315,9 @@ TEST(ImmersedWallStability, PsiMCapBeforeUstarKeepsTheWallLawInStrongInstability
             SolverChoice sc = col.choice(Real(0.5));
             sc.if_z0 = Real(0.5);
             sc.if_psi_cap_factor = factors[n];
+        // the cap acts on psi_m, which the wall law only forms with the stability
+        // correction on (off by default since erf-model/ERF#4751)
+        sc.if_stability_correction = true;
             const amrex::Box xbx = amrex::surroundingNodes(col.bx, 0);
             ImmersedForcingTerrain_Xmom(xbx, col.u.const_array(), col.v.const_array(), col.w.const_array(),
                                         col.cell.const_array(), col.blank.const_array(),
@@ -326,6 +332,9 @@ TEST(ImmersedWallStability, PsiMCapBeforeUstarKeepsTheWallLawInStrongInstability
             SolverChoice sc = col.choice(Real(2.0));
             sc.if_z0 = Real(0.5);
             sc.if_psi_cap_factor = factors[n];
+        // the cap acts on psi_m, which the wall law only forms with the stability
+        // correction on (off by default since erf-model/ERF#4751)
+        sc.if_stability_correction = true;
             ImmersedForcingTerrain_Scalar(col.bx, col.u.const_array(), col.v.const_array(),
                                           col.cell.const_array(), col.blank.const_array(),
                                           amrex::Array4<const Real>{}, col.src.array(), col.geom, sc,

@@ -53,10 +53,11 @@ import subprocess
 import sys
 import time
 
-# erf_plotfile.py and rans_checks.py live in Canonical_RANS/ next to the case
-# directories; the CTest copies them beside this script, so look in both.
+# rans_checks.py lives in Canonical_RANS/ next to the case directories and
+# erf_plotfile.py in Exec/Tools; the CTest copies them beside this script, so
+# look in all three.
 _here = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [_here, os.path.join(_here, "..")]
+sys.path[:0] = [_here, os.path.join(_here, ".."), os.path.join(_here, "..", "..", "..", "Tools")]
 import erf_plotfile  # noqa: E402
 from rans_checks import Report  # noqa: E402
 

@@ -39,7 +39,7 @@ import os
 import sys
 
 _here = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [_here, os.path.join(_here, "..", "..", "CanonicalTests", "Canonical_RANS")]
+sys.path[:0] = [_here, os.path.join(_here, "..", "..", "Tools")]
 
 PHI_MIN = 0.5          # m, the largest |phi_post - phi_step| must reach this (4.69 m measured)
 PHI_MAX = 7.0          # m, ...and stay below this (9.94 m with the reference copied once per step)

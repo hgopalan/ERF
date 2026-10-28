@@ -79,17 +79,21 @@ TEST(MultiScalarSlots, TheWrfBoundaryMapsReadNoScalarAndPutTheVapourInQ1)
         EXPECT_EQ(m.bnd[RhoQ2_comp], static_cast<int>(BCVars::RhoQ2_bc_comp));
         EXPECT_EQ(m.bnd[RhoScalar_comp + NSCALARS - 1], static_cast<int>(BCVars::RhoScalar_bc_comp));
     }
-    // Hydrometeor field mappings do not change the upstream read flags.
+    // With erf.use_wrf_bdy_qc_qi the mapped hydrometeors are read too (this
+    // repository's hgopalan/ERF#515; upstream ERF keeps its read flags).
     const RealBdyConsMaps q = real_bdy_cons_maps(false, mi, true, false);
     EXPECT_EQ(q.read[RhoQ1_comp], 1);
     EXPECT_EQ(q.map[RhoQ1_comp], static_cast<int>(RealBdyVars::QV));
-    EXPECT_EQ(q.read[RhoQ2_comp], 0);
+    EXPECT_EQ(q.read[RhoQ2_comp], 1);
     EXPECT_EQ(q.map[RhoQ2_comp], static_cast<int>(RealBdyVars::QC));
     EXPECT_EQ(q.read[RhoQ3_comp], 0);
 }
 
-TEST(MultiScalarSlots, HydrometeorMappingsPreserveUpstreamReadFlags)
+TEST(MultiScalarSlots, HydrometeorMappingsReadOnlyTheMappedHydrometeors)
 {
+    // hgopalan/ERF#515: erf.use_wrf_bdy_qc_qi reads the hydrometeors the WRF
+    // boundary file maps (qc and qi; qr, qs, qg only with separate hydrometeors)
+    // and leaves every other component's read flag and boundary slot alone.
     const MoistureComponentIndices mi(RhoQ1_comp, RhoQ2_comp, RhoQ3_comp,
                                        RhoQ4_comp, RhoQ5_comp, RhoQ6_comp);
     for (bool read_density : {false, true}) {
@@ -97,10 +101,13 @@ TEST(MultiScalarSlots, HydrometeorMappingsPreserveUpstreamReadFlags)
         for (bool separate_hydrometeors : {false, true}) {
             const RealBdyConsMaps mapped = real_bdy_cons_maps(
                 read_density, mi, true, separate_hydrometeors);
-            EXPECT_EQ(mapped.read, legacy.read);
             EXPECT_EQ(mapped.bnd, legacy.bnd);
-            for (int comp : {mi.qc, mi.qi, mi.qr, mi.qs, mi.qg}) {
-                EXPECT_EQ(mapped.read[comp], 0) << "component " << comp;
+            for (int comp = 0; comp < NVAR_max; ++comp) {
+                const bool mapped_hydrometeor =
+                    (comp == mi.qc || comp == mi.qi ||
+                     (separate_hydrometeors && (comp == mi.qr || comp == mi.qs || comp == mi.qg)));
+                EXPECT_EQ(mapped.read[comp], mapped_hydrometeor ? 1 : legacy.read[comp])
+                    << "component " << comp << " separate " << separate_hydrometeors;
             }
         }
     }

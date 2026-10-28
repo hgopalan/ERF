@@ -1385,7 +1385,7 @@ ERF::ReadCheckpointFile ()
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nsc == NSCALARS,
             ("Checkpoint " + restart_chkfile + " was written with " + std::to_string(nsc)
              + " passive scalar(s)" + (recorded ? "" : " (it records no scalar layout, so it predates the"
-             " fire and dust scalars)") + " but this build has " + std::to_string(NSCALARS)
+             " fire coupling's smoke scalar and the dust scalar)") + " but this build has " + std::to_string(NSCALARS)
              + " (ERF_USE_FIRE adds the smoke scalar, ERF_ENABLE_DUST the dust scalar); restart with"
              " a build configured like the one that wrote it").c_str());
     }
