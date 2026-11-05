@@ -4524,6 +4524,16 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   add_test_restart_parity(${_conductors_restart} Conductors_DragOnFlow 5 10
       DATALOG "S1.dat S1_nodes.dat S1_stats.csv conductors/total_load.dat" DATALOG_SIGDIGITS 10)
   set_tests_properties(${_conductors_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # The widths of the drag's kernel per line and per tower type: the coupled span gets a lattice tower at
+  # its middle and a second span 200 m upwind, and each line and the tower type set the width the shared
+  # erf.conductors.epsilon gives in the other run (1.5 cells), while the shared one is 3 cells. The
+  # plotfile (the flow and the lines' and tower's momentum source) must be the same to the bit; a line or
+  # tower type whose own width were not read, or not used, would spread its drag over 3 cells.
+  add_test_option_parity(Conductors_OwnWidthsParity Conductors_DragOnFlow "plt00010"
+      COMMON_OPTIONS "ylo.dirichlet_file=../inflow_profile erf.input_sounding_file=../input_sounding erf.conductors.lines=S1 S2 erf.conductors.S1.towers=750. 500. 30. erf.conductors.S1.length=151. 151. erf.conductors.S1.tower_type=lattice erf.conductors.tower_types=lattice erf.conductors.lattice.base_width=6. erf.conductors.lattice.top_width=1.5 erf.conductors.lattice.solidity=0.2 erf.conductors.lattice.arm_length=12. erf.conductors.S2.end_a=600. 300. 30. erf.conductors.S2.end_b=900. 300. 30. erf.conductors.S2.length=301.5 erf.conductors.S2.diameter=0.0281 erf.conductors.S2.mass_per_length=1.628 erf.conductors.S2.axial_stiffness=3.0e7 erf.conductors.S2.output_root=S2"
+      OFF_OPTIONS "erf.conductors.epsilon=1.5"
+      ON_OPTIONS  "erf.conductors.epsilon=3.0 erf.conductors.S1.epsilon=1.5 erf.conductors.S2.epsilon=1.5 erf.conductors.lattice.epsilon=1.5")
+  set_tests_properties(Conductors_OwnWidthsParity PROPERTIES LABELS "regression;option-parity;conductors")
   # Start-up checks that stop a run before it starts, on the flow-sampled single span: the
   # conductor lines are listed in erf.conductors.lines, and giving erf.conductors.spans stops
   # the run with a message naming erf.conductors.lines
@@ -4546,6 +4556,18 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                  Conductors_GeneratedTowers.i
                  "tower L1_t1 \\(cross-arm 30[.0-9]* m\\): the cross-arm's depth \\(40 m\\) must be in"
                  "erf.conductors.lattice.arm_depth=40")
+  # a line's or a tower type's own drag width: refused without drag_on_flow, as erf.conductors.epsilon is, and
+  # refused when it is not positive, naming the key
+  add_test_abort(Conductors_LineWidthNeedsDragAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
+                 Conductors_FlowWind.i
+                 "erf.conductors.S1.epsilon needs erf.conductors.drag_on_flow = true"
+                 "erf.conductors.S1.epsilon=1.5")
+  add_test_abort(Conductors_TowerWidthAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_Terrain
+                 Conductors_Terrain.i
+                 "erf.conductors.lattice.epsilon must be positive"
+                 "erf.conductors.drag_on_flow=true erf.conductors.lattice.epsilon=0")
   # a member design file that cannot be read stops the run naming its key
   add_test_abort(Conductors_MemberFileAbort
                  ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FrameTowers

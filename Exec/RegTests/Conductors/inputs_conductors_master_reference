@@ -83,7 +83,8 @@ erf.conductors.drag_on_flow       = false       # Boolean. Put the air's drag on
                                                 #   flow as a momentum source on the anchor level, which must then
                                                 #   be amr.max_level. Not with gust_type event or random.
                                                 #   Default: false
-erf.conductors.epsilon            = 2.0         # Real > 0 (cells). Width of the Gaussian that spreads that drag.
+erf.conductors.epsilon            = 2.0         # Real > 0 (cells). Width of the Gaussian that spreads that drag, for
+                                                #   every line and tower type that sets no epsilon of its own.
                                                 #   Needs drag_on_flow = true; with drag_on_flow = false given it
                                                 #   is ignored with a warning. Default: 2.0
 erf.conductors.flashover_distance = 1.0         # Real > 0 (m). Two lines closer than this are flagged as clashing in
@@ -180,6 +181,12 @@ erf.conductors.L1.insulator_mass     = 50.0    # Real > 0 (kg). One string. Must
                                                #   refused when insulator_length is 0
 erf.conductors.L1.insulator_diameter = 0.254   # Real > 0 (m). The discs' diameter, which the wind acts on. Refused
                                                #   when insulator_length is 0. Default: 0.254
+
+# the drag's width (needs drag_on_flow)
+erf.conductors.L1.epsilon = 2.0                # Real > 0 (cells). Width of the Gaussian that spreads the drag of this
+                                               #   line's nodes, its strings' included; its towers take their type's.
+                                               #   Needs drag_on_flow = true, as erf.conductors.epsilon does.
+                                               #   Default: erf.conductors.epsilon
 
 # the towers (needs towers)
 erf.conductors.L1.tower_type = lattice         # One of erf.conductors.tower_types: the towers are lattice towers of
@@ -328,3 +335,6 @@ erf.conductors.lattice.steel_temperature = 20.0      # Real in (-273.15, 1200) (
                                                      #   members' yield strength (EN 1993-1-2 Table 3.1); other than
                                                      #   20 needs frame_file or frame_panels; a restart cannot change
                                                      #   it. Default: 20
+erf.conductors.lattice.epsilon = 2.0                 # Real > 0 (cells). Width of the Gaussian that spreads the drag of
+                                                     #   this type's towers. Needs drag_on_flow = true, as
+                                                     #   erf.conductors.epsilon does. Default: erf.conductors.epsilon

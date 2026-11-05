@@ -7,7 +7,8 @@
 // - TowerType.EveryValueOutsideItsRangeIsRefusedByName: validate() names the key of every value
 //   outside its range, NaN and infinity included; the foundation stiffnesses and damping_ratio on a
 //   tower that stands still, leg_spacing with a frame, a frame without damping, a cross-arm no longer than
-//   the top width with arm_outside_shaft, and angle_principal_axes without frame_panels are refused.
+//   the top width with arm_outside_shaft, and angle_principal_axes without frame_panels are refused; a type's own
+//   drag width, epsilon, must be positive when given and is not checked (and is 0) when it is not.
 // - Tower.TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine: the shaft's drag nodes stand up the
 //   tapering shaft with the direction factor's gain; the cross-arm's face is arm_depth deep out to the shaft's
 //   corners at the arm's bottom and tapers linearly to the tips (arm_face_at), its nodes across the line outside the shaft at the
@@ -141,6 +142,16 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     bad([](TowerType& t) { t.damping_ratio = 1.0; }, "damping_ratio");
     bad([](TowerType& t) { t.foundation_rotational_stiffness = -1.0; }, "foundation_rotational_stiffness");
     bad([](TowerType& t) { t.foundation_lateral_stiffness = -1.0; }, "foundation_lateral_stiffness");
+    bad([](TowerType& t) { t.epsilon_given = true; t.epsilon = 0.0; }, "epsilon must be positive");
+    bad([](TowerType& t) { t.epsilon_given = true; t.epsilon = -1.0; }, "epsilon must be positive");
+    {
+        TowerType t = lattice();
+        EXPECT_FALSE(t.epsilon_given);
+        EXPECT_TRUE(t.validate().empty()) << "no epsilon of its own: the towers take erf.conductors.epsilon";
+        t.epsilon_given = true;
+        t.epsilon = 0.5;
+        EXPECT_TRUE(t.validate().empty()) << t.validate();
+    }
     // NaN passes a test written as x < 0 and infinity one written as x > 0: every key refuses both
     const Real nan = std::numeric_limits<Real>::quiet_NaN(), inf = std::numeric_limits<Real>::infinity();
     for (const Real v : {nan, inf}) {
@@ -159,6 +170,7 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
         bad([v](TowerType& t) { t.damping_ratio = v; }, "damping_ratio");
         bad([v](TowerType& t) { t.foundation_rotational_stiffness = v; }, "foundation_rotational_stiffness");
         bad([v](TowerType& t) { t.foundation_lateral_stiffness = v; }, "foundation_lateral_stiffness");
+        bad([v](TowerType& t) { t.epsilon_given = true; t.epsilon = v; }, "epsilon must be finite");
     }
     TowerType moving = lattice();
     moving.frequency = 2.0;

@@ -78,6 +78,12 @@ namespace erf_conductors {
  *                                                       the line whose towers it shares. P2 has as many spans and takes
  *                                                       no other line's gusts; not with share_towers, which already
  *                                                       shares them)
+ *   erf.conductors.S1.epsilon       = 1.5              (> 0; the width of the kernel that spreads the drag of this line's
+ *                                                       nodes, its insulator strings' included, into the flow, in units of
+ *                                                       the anchor level's x spacing dx; default erf.conductors.epsilon;
+ *                                                       needs drag_on_flow = true as that key does, a warning with
+ *                                                       drag_on_flow = false given. The towers the line hangs from take
+ *                                                       their type's epsilon)
  *
  * Every Real input must be finite. Lines, transformers and tower types share the prefix
  * erf.conductors.<name>, so no name may be used twice.
@@ -105,6 +111,8 @@ struct LineInputs
     std::string tower_type;                          //!< the type of the suspension towers; empty: none
     std::string share_towers;                        //!< the line whose towers this one hangs from; empty: its own
     std::string gust_with;                           //!< the line whose random gusts this one takes; empty: see gust_owner()
+    amrex::Real epsilon{0.0};                        //!< the width of the kernel that spreads the line's drag (anchor dx)
+    bool epsilon_given{false};                       //!< epsilon was given; else the line takes erf.conductors.epsilon
 
     /** Segments of each insulator string. */
     static constexpr int insulator_segments = 2;
@@ -279,7 +287,9 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *                                                   on the anchor level, which must then be amr.max_level)
  *   erf.conductors.epsilon          = 2.0          (> 0; the radius eps of the kernel exp(-r^2/eps^2) that spreads that
  *                                                   force, cut off at 3 eps, in units of the anchor level's x spacing dx;
- *                                                   needs drag_on_flow = true, a warning with drag_on_flow = false given)
+ *                                                   needs drag_on_flow = true, a warning with drag_on_flow = false given;
+ *                                                   the width of every line and tower type that sets no epsilon of its
+ *                                                   own, erf.conductors.<line>.epsilon or erf.conductors.<type>.epsilon)
  *   erf.conductors.flashover_distance = 1.0        (m, > 0; two lines closer than this are flagged as clashing, and a
  *                                                   conductor this close to a transformer)
  *   erf.conductors.transformers     = T1 T2        (boxes on the terrain the lines end on, each with its own block;
@@ -409,6 +419,35 @@ struct ConductorInputs
     const LineInputs& tower_owner (const LineInputs& s) const;
     /** The tower type of a line's towers (those of the line it shares them with), or null when they have none. */
     const erf_towers::TowerType* tower_type (const LineInputs& s) const;
+    /**
+     * The width of the kernel that spreads the drag of a line's nodes (in units of the anchor level's x spacing):
+     * the line's own epsilon when it gives one, else erf.conductors.epsilon.
+     */
+    amrex::Real line_epsilon (const LineInputs& s) const { return s.epsilon_given ? s.epsilon : epsilon; }
+    /** The same for the drag nodes of a tower of type t: the type's own epsilon when it gives one, else erf.conductors.epsilon. */
+    amrex::Real tower_epsilon (const erf_towers::TowerType& t) const { return t.epsilon_given ? t.epsilon : epsilon; }
+    /**
+     * The first line or tower type that gives an epsilon of its own, as its key erf.conductors.<name>.epsilon (lines
+     * first, in their order), or an empty string when none does.
+     */
+    static std::string first_own_epsilon (const ConductorInputs& in);
+    /**
+     * Whether every line, and the tower type of every line's towers, gives an epsilon of its own, so that no node
+     * takes erf.conductors.epsilon.
+     */
+    static bool every_width_own (const ConductorInputs& in);
+    /**
+     * The tower types that give an epsilon of their own while no line's towers are of that type, as their keys
+     * erf.conductors.<type>.epsilon: read, but taken by no node.
+     */
+    static std::vector<std::string> unused_type_widths (const ConductorInputs& in);
+    /**
+     * The widths below one cell that some node takes, as their keys (erf.conductors.epsilon, then
+     * erf.conductors.<line>.epsilon, then erf.conductors.<type>.epsilon of the types a line's towers are): under one
+     * cell the kernel's shape depends on where a node sits in its cell, and a tower's drag gathered on a few faces can
+     * overshoot the wind next to it in one explicit step.
+     */
+    static std::vector<std::string> narrow_widths (const ConductorInputs& in);
     /** Whether a line's towers move (their type has a frequency or a frame): MoorDyn then takes their cross-arms as coupled points. */
     bool towers_move (const LineInputs& s) const
     {

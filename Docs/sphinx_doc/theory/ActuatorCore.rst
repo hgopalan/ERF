@@ -61,7 +61,8 @@ Force spreading and momentum source
 
 ``spread_forces`` carries the force each point exerts on the fluid onto ERF's
 face-centred momentum sources with a 3-D Gaussian kernel of width ``epsilon``
-(in metres), cut off beyond three widths. The kernel is normalised discretely
+(in metres; one width for every point, or one per point), cut off beyond three
+widths. The kernel is normalised discretely
 on each staggered grid, with the face volumes (``dx dy dz detJ`` on a
 terrain-following mesh, from ``face_volume``), so the source integrates back to
 the point force exactly for every point and component, whatever the resolution

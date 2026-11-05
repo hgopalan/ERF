@@ -131,6 +131,51 @@ const erf_towers::TowerType* ConductorInputs::tower_type (const LineInputs& s) c
     return nullptr;
 }
 
+std::string ConductorInputs::first_own_epsilon (const ConductorInputs& in)
+{
+    for (const auto& s : in.lines) { if (s.epsilon_given) { return "erf.conductors." + s.name + ".epsilon"; } }
+    for (const auto& t : in.tower_types) { if (t.epsilon_given) { return "erf.conductors." + t.name + ".epsilon"; } }
+    return std::string();
+}
+
+std::vector<std::string> ConductorInputs::unused_type_widths (const ConductorInputs& in)
+{
+    std::vector<std::string> keys;
+    for (const auto& t : in.tower_types) {
+        if (!t.epsilon_given) { continue; }
+        bool used = false;
+        for (const auto& s : in.lines) { used = used || in.tower_type(s) == &t; }
+        if (!used) { keys.push_back("erf.conductors." + t.name + ".epsilon"); }
+    }
+    return keys;
+}
+
+std::vector<std::string> ConductorInputs::narrow_widths (const ConductorInputs& in)
+{
+    std::vector<std::string> keys;
+    if (!every_width_own(in) && in.epsilon < Real(1.0)) { keys.emplace_back("erf.conductors.epsilon"); }
+    for (const auto& s : in.lines) {
+        if (s.epsilon_given && s.epsilon < Real(1.0)) { keys.push_back("erf.conductors." + s.name + ".epsilon"); }
+    }
+    for (const auto& t : in.tower_types) {
+        if (!t.epsilon_given || !(t.epsilon < Real(1.0))) { continue; }
+        bool used = false;
+        for (const auto& s : in.lines) { used = used || in.tower_type(s) == &t; }
+        if (used) { keys.push_back("erf.conductors." + t.name + ".epsilon"); }
+    }
+    return keys;
+}
+
+bool ConductorInputs::every_width_own (const ConductorInputs& in)
+{
+    for (const auto& s : in.lines) {
+        if (!s.epsilon_given) { return false; }
+        const erf_towers::TowerType* t = in.tower_type(s);
+        if (t != nullptr && !t->epsilon_given) { return false; }
+    }
+    return true;
+}
+
 std::string ConductorInputs::validate_shared_towers (const std::vector<LineInputs>& lines)
 {
     for (const auto& s : lines) {
@@ -245,9 +290,13 @@ std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slac
     const std::pair<const char*, Real> scalars[] = {
         {"stringing_tension", s.stringing_tension}, {"diameter", s.diameter}, {"mass_per_length", s.mass_per_length},
         {"axial_stiffness", s.axial_stiffness}, {"drag_coefficient", s.drag_coefficient}, {"damping_ratio", s.damping_ratio},
-        {"insulator_length", s.insulator_length}, {"insulator_mass", s.insulator_mass}, {"insulator_diameter", s.insulator_diameter}};
+        {"insulator_length", s.insulator_length}, {"insulator_mass", s.insulator_mass}, {"insulator_diameter", s.insulator_diameter},
+        {"epsilon", s.epsilon}};
     for (const auto& kv : scalars) {
         if (!std::isfinite(kv.second)) { return key + kv.first + " must be finite"; }
+    }
+    if (s.epsilon_given && !(s.epsilon > 0.0)) {
+        return key + "epsilon must be positive (in units of the anchor level's dx; not given: erf.conductors.epsilon)";
     }
     if (s.stringing_tension < 0.0) { return key + "stringing_tension must be positive (N), or 0 with length"; }
     if (s.stringing_tension > 0.0 && !s.lengths.empty()) { return key + "length and stringing_tension both given: give one of them"; }
@@ -607,7 +656,8 @@ ConductorInputs ConductorInputs::read ()
     pp.query("stats_start", in.stats_start);
     pp.query("node_output_int", in.node_output_int);
     const bool drag_given = pp.query("drag_on_flow", in.drag_on_flow) != 0;
-    if (pp.query("epsilon", in.epsilon) != 0 && !in.drag_on_flow) {
+    const bool epsilon_given = pp.query("epsilon", in.epsilon) != 0;
+    if (epsilon_given && !in.drag_on_flow) {
         // the width the drag is spread over: nothing to act on without drag_on_flow
         if (drag_given) {
             Print() << "erf.conductors: WARNING: epsilon is not used: drag_on_flow is false\n";
@@ -670,6 +720,7 @@ ConductorInputs ConductorInputs::read ()
         ps.query("tower_type", s.tower_type);
         ps.query("share_towers", s.share_towers);
         ps.query("gust_with", s.gust_with);
+        s.epsilon_given = ps.query("epsilon", s.epsilon) != 0;
         ps.get("diameter", s.diameter);
         ps.get("mass_per_length", s.mass_per_length);
         ps.get("axial_stiffness", s.axial_stiffness);
@@ -724,6 +775,7 @@ ConductorInputs ConductorInputs::read ()
         pt.query("diagonal_wind_factor", t.diagonal_wind_factor);
         pt.query("arm_outside_shaft", t.arm_outside_shaft);
         t.angle_axes_given = pt.query("angle_principal_axes", t.angle_principal_axes) != 0;
+        t.epsilon_given = pt.query("epsilon", t.epsilon) != 0;
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
         const std::string unused = t.unused_on_a_still_tower();
@@ -737,6 +789,30 @@ ConductorInputs ConductorInputs::read ()
     {
         const std::string err = validate_shared_towers(in.lines);
         if (!err.empty()) { Abort(err); }
+    }
+    // the widths of each line's and each tower type's drag: as erf.conductors.epsilon, nothing to act on without drag_on_flow
+    const std::string own_epsilon = first_own_epsilon(in);
+    if (!own_epsilon.empty() && !in.drag_on_flow) {
+        if (drag_given) {
+            Print() << "erf.conductors: WARNING: " << own_epsilon << " (and any other line's or tower type's epsilon) is not used: "
+                    << "drag_on_flow is false\n";
+        } else {
+            Abort(own_epsilon + " needs erf.conductors.drag_on_flow = true (the width the drag is spread over)");
+        }
+    }
+    if (epsilon_given && in.drag_on_flow && every_width_own(in)) {
+        Print() << "erf.conductors: WARNING: epsilon is not used: every line and the tower type of every line's towers "
+                << "give an epsilon of their own\n";
+    }
+    if (in.drag_on_flow) {
+        for (const std::string& key : unused_type_widths(in)) {
+            Print() << "erf.conductors: WARNING: " << key << " is not used: no line's towers are of that type\n";
+        }
+        for (const std::string& key : narrow_widths(in)) {
+            Print() << "erf.conductors: WARNING: " << key << " is below one cell: the kernel's shape then depends on where a "
+                    << "node sits in its cell, and a tower's drag gathered on a few faces can overshoot the wind next to it in "
+                    << "one explicit step; one to two cells or more is advised\n";
+        }
     }
     for (const std::string& name : tnames) {
         // a transformer's block shares erf.conductors.<name> with the lines'

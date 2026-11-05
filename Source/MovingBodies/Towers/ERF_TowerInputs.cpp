@@ -38,6 +38,10 @@ std::string TowerType::validate () const
     if (!non_negative(peak)) { return key + "peak must be finite and >= 0 (m)"; }
     if (!non_negative(drag_coefficient)) { return key + "drag_coefficient must be finite and >= 0 (0: from the solidity)"; }
     if (segments < 1) { return key + "segments must be >= 1"; }
+    if (!std::isfinite(epsilon)) { return key + "epsilon must be finite"; }
+    if (epsilon_given && !(epsilon > 0.0)) {
+        return key + "epsilon must be positive (in units of the anchor level's dx; not given: erf.conductors.epsilon)";
+    }
     if (!non_negative(weight)) { return key + "weight must be finite and >= 0 (N)"; }
     if (!non_negative(leg_spacing)) { return key + "leg_spacing must be finite and >= 0 (m; 0: base_width)"; }
     if (!non_negative(allowable_uplift)) { return key + "allowable_uplift must be finite and >= 0 (N; 0: not checked)"; }

@@ -5715,6 +5715,12 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 |                                                           |                                                          | not with             |                          |
 |                                                           |                                                          | share_towers         |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<line>.epsilon**                         | width of the Gaussian that spreads the drag of this      | Real > 0             | erf.conductors.epsilon   |
+|                                                           | line's nodes, its insulator strings' included, in cells  |                      |                          |
+|                                                           | (dx); the towers it hangs from take their type's; given  |                      |                          |
+|                                                           | without drag_on_flow it stops the run, and with          |                      |                          |
+|                                                           | drag_on_flow = false given it is ignored with a warning  |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<line>.output_root**                     | prefix of the line's diagnostics files:                  | String, different    | <diagnostics_dir>/<line> |
 |                                                           | <output_root>.dat for a single span,                     | for every line; no   |                          |
 |                                                           | <output_root>_span<k>.dat per span of a section (k from  | log of the line may  |                          |
@@ -5795,9 +5801,12 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 |                                                           | conductor_fy, conductor_fz)                              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.epsilon**                                | width of the Gaussian that spreads the drag onto the     | Real > 0             | 2.0                      |
-|                                                           | momentum sources, in cells (dx); given without           |                      |                          |
-|                                                           | drag_on_flow it stops the run, and with drag_on_flow =   |                      |                          |
-|                                                           | false given it is ignored with a warning                 |                      |                          |
+|                                                           | momentum sources, in cells (dx), for every line and      |                      |                          |
+|                                                           | tower type that sets no epsilon of its own (a warning    |                      |                          |
+|                                                           | when every line and the type of every line's towers set  |                      |                          |
+|                                                           | their own); given without drag_on_flow it stops the run, |                      |                          |
+|                                                           | and with drag_on_flow = false given it is ignored with a |                      |                          |
+|                                                           | warning                                                  |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.flashover_distance**                     | two lines whose conductors come closer than this are     | Real > 0             | 1.0                      |
 |                                                           | flagged as clashing in separation.dat, and a conductor   |                      |                          |
@@ -6008,6 +6017,11 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 |                                                           |                                                          | frame_panels; a      |                          |
 |                                                           |                                                          | restart cannot       |                          |
 |                                                           |                                                          | change it            |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.epsilon**                         | width of the Gaussian that spreads the drag of this      | Real > 0             | erf.conductors.epsilon   |
+|                                                           | type's towers' drag nodes, in cells (dx); given without  |                      |                          |
+|                                                           | drag_on_flow it stops the run, and with drag_on_flow =   |                      |                          |
+|                                                           | false given it is ignored with a warning                 |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.transformers**                           | names of the transformers the lines end on: every line   | Strings, each the    | none                     |
 |                                                           | end whose x, y lies on a transformer's footprint is      | name of no line or   |                          |

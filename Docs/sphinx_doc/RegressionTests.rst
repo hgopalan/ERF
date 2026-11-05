@@ -946,6 +946,21 @@ carries the source and its small wake and so has a gold per library, the
 runner checks in every row of ``conductors/total_load.dat`` that the
 integrated momentum source equals the force the lines put into the air.
 
+``Conductors_OwnWidthsParity`` runs that case with a lattice tower at the
+middle of the span and a second span 200 m upwind, twice: once with
+``erf.conductors.epsilon = 1.5`` alone, and once with the shared width at 3
+cells while each line and the tower type set 1.5 cells of their own
+(``erf.conductors.<line>.epsilon``, ``erf.conductors.<type>.epsilon``). The
+plotfiles, which carry the flow and the lines' and tower's momentum source,
+must be identical to the bit (``Tests/RunOptionParity.cmake``); a width of its
+own that was not read or not used would spread that drag over 3 cells. The
+test can give only one width to every node; that each line's nodes and each
+tower's take their own when they differ, and not one another's, is checked by
+the unit test ``Conductors.EachLineAndTowerSpreadsItsDragWithItsOwnWidth``.
+``Conductors_LineWidthNeedsDragAbort`` and ``Conductors_TowerWidthAbort`` stop
+a run that gives a line's width without ``drag_on_flow`` and a tower type's
+width of 0, each naming the key.
+
 ``Conductors_TwoLevel`` (stub) and ``Conductors_TwoLevel_MoorDyn`` (real
 library) run the same span on a refined level: a static level-1 box (x 400 to
 1100 m, y 300 to 700 m, up to 200 m, below the domain's top), its steps

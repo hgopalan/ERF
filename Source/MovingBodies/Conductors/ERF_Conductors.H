@@ -189,8 +189,12 @@ public:
     int coupling_unconverged () const { return m_coupling_unconverged; }
 
     int anchor_level () const { return m_anchor; }
-    /** How far around each line or tower node the anchor level's grids must reach (m): the sampler's cells, and the drag's kernel. */
-    amrex::Real coverage_reach (const amrex::Geometry& geom) const;
+    /**
+     * How far around a line or tower node the anchor level's grids must reach (m): the sampler's cells, and with
+     * drag_on_flow the drag's kernel, 3 epsilon dx, for the width epsilon (in units of dx) of the node's line or
+     * tower type (ConductorInputs::line_epsilon, tower_epsilon).
+     */
+    amrex::Real coverage_reach (const amrex::Geometry& geom, amrex::Real epsilon) const;
     /**
      * Abort unless the anchor level exists (finest_level, the run's finest level now): the lines are
      * placed on its terrain and stepped with it, so without it they would stand on flat ground and
