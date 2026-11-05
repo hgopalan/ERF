@@ -288,7 +288,22 @@ Gaussian of width ``epsilon`` cells, discretely normalised so that the source
 integrates back to the force exactly, and held constant as a source over the
 same ERF step, from :math:`t` to :math:`t + \Delta t`. Each node carries its
 share of the line's drag, so the force per unit length is resolved as long
-as the node spacing stays below the kernel width. A conductor's drag is
+as the node spacing stays below the kernel width. The width is
+``erf.conductors.epsilon`` unless a line or a tower type sets its own:
+``erf.conductors.<line>.epsilon`` for the nodes of that line, its insulator
+strings' included, and ``erf.conductors.<type>.epsilon`` for the drag nodes of
+the towers of that type (a line's towers take their type's width, not the
+line's). Every width is in units of the anchor level's :math:`\Delta x`, and
+all lines and towers share that level. The width is bounded below by the mesh,
+not by the body: a conductor a few centimetres thick is never resolved, so its
+lines keep the narrowest width the mesh allows, about one cell or more, while a
+tower wider than a cell can take a wider kernel that matches its plan size.
+Below one cell the kernel's shape depends on where the node sits in its cell
+(its second moment varies by about 9 % at 0.75 cells and by a factor of two at
+0.5 cells; the integral stays exact), and a tower's drag gathered on a few
+faces can overshoot the wind next to it in one explicit step, so the run warns
+for any width below one cell. The widths are not part of the checkpoint, so a
+restart may change them. A conductor's drag is
 small next to the momentum of the wind it crosses (4 to 5 N/m in a 17 m/s
 wind for 795 kcmil ACSR), which is why the switch is off by default; it is
 there for dense bundles, many spans in a small domain, and to close the
@@ -298,8 +313,9 @@ the anchor level and are available only with the switch on. The source goes
 into the anchor level only, so with ``drag_on_flow`` the anchor level must be
 ``amr.max_level`` (a finer level would neither feel the drag nor keep it, its
 flow averaged down over the coarse one), and the anchor level's grids must hold
-every line and tower node with the kernel's reach, 3 ``epsilon`` cells, around
-it (the run stops, naming the node, otherwise). On a terrain-following or
+every line and tower node with the kernel's reach, 3 ``epsilon`` cells of its
+line's or tower type's width, around it (the run stops, naming the node,
+otherwise). On a terrain-following or
 stretched mesh a node's cell is not its height over :math:`\Delta z`, so there
 the grids must hold the reach across in every cell the heights within reach
 may lie in, bounded by the mesh's lowest and highest ground and its smallest

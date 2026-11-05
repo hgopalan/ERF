@@ -35,6 +35,35 @@ using erf_conductors::LineInputs;
 using erf_conductors::Transformer;
 
 namespace {
+// Whether the anchor level's grids cover each group of points (a line's nodes, or a tower's) with that group's reach (m):
+// one points_covered_by call per distinct reach, over the points of every group with it, and on a miss the groups of that
+// reach one by one, so that the message names the group. ends[g] is where group g's points end in pos (3 per point);
+// returns an empty string, or the first point not covered and its group's name.
+std::string first_uncovered (const BoxArray& ba, const Geometry& geom, const std::vector<Real>& pos,
+                             const std::vector<std::size_t>& ends, const std::vector<std::string>& names,
+                             const std::vector<Real>& reach, erf_actuator::CoverZ z, const erf_actuator::ZBounds* zb)
+{
+    AMREX_ALWAYS_ASSERT(ends.size() == names.size() && ends.size() == reach.size());
+    auto slice = [&] (std::size_t g) {
+        const std::size_t first = (g == 0) ? 0 : ends[g - 1];
+        return std::vector<Real>(pos.begin() + static_cast<std::ptrdiff_t>(first), pos.begin() + static_cast<std::ptrdiff_t>(ends[g]));
+    };
+    std::map<Real, std::vector<std::size_t>> by_reach;
+    for (std::size_t g = 0; g < ends.size(); ++g) { by_reach[reach[g]].push_back(g); }
+    std::string outside;
+    for (const auto& [r, groups] : by_reach) {
+        std::vector<Real> all;
+        for (const std::size_t g : groups) { const std::vector<Real> p = slice(g); all.insert(all.end(), p.begin(), p.end()); }
+        if (erf_actuator::points_covered_by(ba, geom, all, r, outside, z, zb)) { continue; }
+        for (const std::size_t g : groups) {
+            if (!erf_actuator::points_covered_by(ba, geom, slice(g), r, outside, z, zb)) { return outside + ", a node of " + names[g]; }
+        }
+    }
+    return std::string();
+}
+} // namespace
+
+namespace {
 // a tower type's forms, 1 or 0 each: the wind-direction factor, the cross-arm's drag outside the shaft, and the
 // generated angles on their principal axes (only a generated frame has them)
 std::array<int,3> tower_forms (const erf_towers::TowerType& t)
@@ -73,10 +102,25 @@ Conductors::create (int max_level)
     const int anchor = ConductorInputs::resolve_anchor_level(in.anchor_level, max_level);
     const std::string err = ConductorInputs::validate_solver(max_level, anchor, in.drag_on_flow);
     if (!err.empty()) { Abort(err); }
+    std::string widths;
+    if (in.drag_on_flow) {
+        // the shared width, then every line and tower type that sets its own
+        widths = "epsilon " + std::to_string(in.epsilon) + " cells" +
+                 (ConductorInputs::every_width_own(in) ? std::string(", taken by no node") : std::string());
+        for (const auto& s : in.lines) {
+            if (s.epsilon_given) { widths += "; line " + s.name + " " + std::to_string(s.epsilon); }
+        }
+        // the types a line's towers are of
+        for (const auto& t : in.tower_types) {
+            bool used = false;
+            for (const auto& s : in.lines) { used = used || in.tower_type(s) == &t; }
+            if (t.epsilon_given && used) { widths += "; tower type " + t.name + " " + std::to_string(t.epsilon); }
+        }
+    }
     Print() << "erf.conductors: " << in.lines.size() << " line(s) on MoorDyn-C " << erf_moordyn::library_version()
             << (erf_moordyn::is_stub() ? " (the bundled stub stands in for MoorDyn)" : "") << ", anchor level " << anchor
             << ", wind " << (in.has_prescribed_velocity ? "prescribed" : "sampled from the flow at the line nodes")
-            << ", drag " << (in.drag_on_flow ? "put back into the flow (epsilon " + std::to_string(in.epsilon) + " cells)" : "not put into the flow") << "\n";
+            << ", drag " << (in.drag_on_flow ? "put back into the flow (" + widths + ")" : "not put into the flow") << "\n";
     return std::unique_ptr<Conductors>(new Conductors(std::move(in), anchor));
 }
 
@@ -569,13 +613,13 @@ Conductors::make_frame (const erf_towers::Tower& tw) const
 }
 
 Real
-Conductors::coverage_reach (const Geometry& geom) const
+Conductors::coverage_reach (const Geometry& geom, Real epsilon) const
 {
     // the sampler reads the cells around a point; with drag_on_flow the drag also reaches 3 epsilon dx
     // (the spreading kernel's cut-off), which must stay on the anchor level's grids (in z on a flat, uniform
     // mesh, where a point's cell is its height over dz; elsewhere see points_covered_by's CoverZ)
     const Real cells = std::max(geom.CellSize(0), geom.CellSize(1));
-    return m_in.drag_on_flow ? std::max(cells, Real(3.0) * m_in.epsilon * static_cast<Real>(geom.CellSize(0))) : cells;
+    return m_in.drag_on_flow ? std::max(cells, Real(3.0) * epsilon * static_cast<Real>(geom.CellSize(0))) : cells;
 }
 
 std::array<Real,3>
@@ -695,11 +739,23 @@ Conductors::tower_wind (const MultiFab& U, const MultiFab& V, const MultiFab& W,
         for (std::size_t p = 0; p < uvw.size() / 3; ++p) { for (int d = 0; d < 3; ++d) { uvw[3*p+d] = m_in.prescribed_velocity[d]; } }
         return uvw;
     }
-    const Real reach = coverage_reach(geom);
-    std::string outside;
-    if (!erf_actuator::points_covered_by(U.boxArray(), geom, pos, reach, outside,
-                                         (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Footprint)) {
-        Abort("erf.conductors: the tower node " + outside + " is not covered, with the cells around it, by the grids of the "
+    // each tower with the reach of its own type's drag width
+    std::vector<std::size_t> ends;
+    std::vector<std::string> names;
+    std::vector<Real> reach;
+    std::size_t end = 0;
+    for (const auto& t : m_towers) {
+        end += 3 * t.nodes().size();
+        ends.push_back(end);
+        names.push_back("tower " + t.name());
+        reach.push_back(coverage_reach(geom, m_in.tower_epsilon(t.type())));
+    }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(end == pos.size(), "Conductors::tower_wind: one position per tower node");
+    const std::string outside = first_uncovered(U.boxArray(), geom, pos, ends, names, reach,
+                                                (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Footprint,
+                                                nullptr);
+    if (!outside.empty()) {
+        Abort("erf.conductors: the point " + outside + ", is not covered, with the cells around it, by the grids of the "
               "anchor level " + std::to_string(m_anchor) + "; refine around the whole tower" +
               (m_in.drag_on_flow ? std::string(" (with drag_on_flow, its drag's reach too)")
                                  : std::string(" or lower erf.conductors.anchor_level")));
@@ -1551,7 +1607,7 @@ Conductors::wind_at (const ConductorLine& span,
     const std::vector<Real> pos(kin.begin(), kin.begin() + 3 * static_cast<std::ptrdiff_t>(span.num_nodes()));
     check_nodes_in_domain(span, pos, geom);
     // the sampler reads the cells around each point: on a refined anchor level they must be on its grids
-    const Real reach = coverage_reach(geom);
+    const Real reach = coverage_reach(geom, m_in.line_epsilon(span.inputs()));
     std::string outside;
     if (!erf_actuator::points_covered_by(U.boxArray(), geom, pos, reach, outside,
                                          (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Footprint)) {
@@ -2115,24 +2171,41 @@ Conductors::spread_drag (const MultiFab& U, const MultiFab* z_phys_nd, const Mul
         m_src_z.define(amrex::convert(ba, IntVect(0,0,1)), dm, 1, 0);
         m_src_defined = true;
     }
-    // the force each node exerts on the air is minus the air's drag on it
-    std::vector<Real> pos, force;
+    // the force each node exerts on the air is minus the air's drag on it, spread with the width of its line or its
+    // tower's type (m); groups holds where each line's and tower's points end in pos, and its width in cells
+    std::vector<Real> pos, force, eps;
+    std::vector<std::size_t> ends;
+    std::vector<std::string> names;
+    std::vector<Real> reach;
+    const Real dx = geom.CellSize(0);
     for (const auto& span : m_lines) {
         const std::vector<Real> p = span->node_positions();
         pos.insert(pos.end(), p.begin(), p.end());
+        const Real e = m_in.line_epsilon(span->inputs());
         for (unsigned n = 0; n < span->num_nodes(); ++n) {
             const auto f = span->node_drag(n);
             force.insert(force.end(), {-f[0], -f[1], -f[2]});
+            eps.push_back(e * dx);
         }
+        ends.push_back(pos.size());
+        names.push_back("line " + span->name());
+        reach.push_back(coverage_reach(geom, e));
     }
     for (const auto& t : m_towers) {
         const auto nodes = t.current_nodes();
+        const Real e = m_in.tower_epsilon(t.type());
         for (std::size_t n = 0; n < nodes.size(); ++n) {
             const auto& p = nodes[n].pos;
             pos.insert(pos.end(), {p[0], p[1], p[2]});
             force.insert(force.end(), {-t.loads()[3*n], -t.loads()[3*n+1], -t.loads()[3*n+2]});
+            eps.push_back(e * dx);
         }
+        ends.push_back(pos.size());
+        names.push_back("tower " + t.name());
+        reach.push_back(coverage_reach(geom, e));
     }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(3 * eps.size() == pos.size() && force.size() == pos.size(),
+                                     "Conductors::spread_drag: one force and one width per line or tower node");
     {
         std::string err = erf_conductors::first_nonfinite(force, 3, "the force (N) on the air of spread point");
         if (err.empty()) { err = erf_conductors::first_nonfinite(pos, 3, "the position (m) of spread point"); }
@@ -2143,22 +2216,21 @@ Conductors::spread_drag (const MultiFab& U, const MultiFab* z_phys_nd, const Mul
     {
         // the kernel reaches 3 epsilon around each point: on the anchor level's grids, or the force would be
         // renormalised over the faces present (checked here too, since a prescribed wind samples nothing)
-        std::string outside;
         // with z_phys_nd a node's cell is not its height over dz: the grids must then stand over the reach across in
         // every cell the heights within reach may lie in, which the mesh's lowest and highest ground and spacing bound
         erf_actuator::ZBounds zb;
         if (z_phys_nd != nullptr) { zb = erf_actuator::mesh_z_bounds(*z_phys_nd, geom); }
-        if (!erf_actuator::points_covered_by(U.boxArray(), geom, pos, coverage_reach(geom), outside,
-                                             (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Column,
-                                             (z_phys_nd == nullptr) ? nullptr : &zb)) {
-            Abort("erf.conductors.drag_on_flow: the point " + outside + " (a line or tower node) is not covered, with its drag's "
-                  "reach of 3 epsilon cells, by the grids of the anchor level " + std::to_string(m_anchor) +
+        const std::string outside = first_uncovered(U.boxArray(), geom, pos, ends, names, reach,
+                                                    (z_phys_nd == nullptr) ? erf_actuator::CoverZ::Reach : erf_actuator::CoverZ::Column,
+                                                    (z_phys_nd == nullptr) ? nullptr : &zb);
+        if (!outside.empty()) {
+            Abort("erf.conductors.drag_on_flow: the point " + outside + ", is not covered, with its drag's reach of 3 epsilon "
+                  "cells of its line or tower type, by the grids of the anchor level " + std::to_string(m_anchor) +
                   "; refine around the lines and towers that far" +
                   ((z_phys_nd == nullptr) ? std::string() : std::string(" (on a terrain-following or stretched mesh, over "
                                                                           "every height the reach may span on the mesh)")));
         }
     }
-    const Real eps = m_in.epsilon * geom.CellSize(0);
     erf_actuator::spread_forces(pos, force, eps, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
     m_source_integral = {{erf_actuator::integrate_source(0, m_src_x, detJ_cc, geom),
                           erf_actuator::integrate_source(1, m_src_y, detJ_cc, geom),

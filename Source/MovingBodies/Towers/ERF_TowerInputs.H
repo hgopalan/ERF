@@ -96,6 +96,10 @@ namespace erf_towers {
  *   erf.conductors.lattice.steel_temperature = 20. (C, the steel's temperature, which lowers its stiffness and
  *                                          yield strength by EN 1993-1-2; above -273.15 and below 1200, default 20;
  *                                          only with a frame model, frame_file or frame_panels)
+ *   erf.conductors.lattice.epsilon = 3. (> 0; the width of the kernel that spreads the drag of this type's towers'
+ *                                          drag nodes into the flow, in units of the anchor level's x spacing dx;
+ *                                          default erf.conductors.epsilon; needs erf.conductors.drag_on_flow = true
+ *                                          as that key does, a warning with drag_on_flow = false given)
  *
  * Every value must also be finite. The members mirror the keys, with the same units.
  */
@@ -132,6 +136,8 @@ struct TowerType
     bool arm_outside_shaft{true};                      //!< the cross-arm's drag outside the shaft, at its pieces' centroids
     bool angle_principal_axes{true};                   //!< the generated angles turned to their principal axes
     bool angle_axes_given{false};                      //!< angle_principal_axes was given (it needs frame_panels)
+    amrex::Real epsilon{0.0};                          //!< the drag kernel's width (anchor level's dx); used when epsilon_given
+    bool epsilon_given{false};                         //!< epsilon was given; else the towers take erf.conductors.epsilon
 
     /** The number of drag nodes on the cross-arm, one per equal segment at its face's centroid (half on each side). */
     static constexpr int arm_segments = 4;

@@ -30,10 +30,15 @@
 // EveryLineNeedsAnOutputRootOfItsOwn: validate_output_roots.
 // TheFirstNonFiniteValueIsNamedWithItsPoint: first_nonfinite, used at the module's boundaries.
 // OnlyASpanAlongPlusXHasItsYDragAcrossIt: along_plus_x, which decides whether a drag_y statistic continues.
+// EachLineAndTowerTypeMayGiveItsOwnWidth: erf.conductors.<line>.epsilon and erf.conductors.<type>.epsilon are read,
+//     each line's nodes and each type's towers take their own or erf.conductors.epsilon, and the shared key given
+//     while every line and line's tower type sets its own is read but warned about.
 // ReadRefusesMalformedInputsNamingTheKey: every abort of read() fires and names its key.
 
 #include <cmath>
 #include <functional>
+#include <iostream>
+#include <sstream>
 #include <limits>
 #include <string>
 #include <type_traits>
@@ -264,6 +269,8 @@ TEST(ConductorInputs, EveryLineValueOutsideItsRangeIsRefusedByName)
     bad([](LineInputs& s) { s.damping_ratio = 0.0; }, "damping_ratio");
     bad([](LineInputs& s) { s.damping_ratio = 1.5; }, "damping_ratio");
     bad([](LineInputs& s) { s.segments = 1; }, "segments");
+    bad([](LineInputs& s) { s.epsilon_given = true; s.epsilon = 0.0; }, "epsilon must be positive");
+    bad([](LineInputs& s) { s.epsilon_given = true; s.epsilon = -2.0; }, "epsilon must be positive");
     // every Real input must be finite
     const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();
     const amrex::Real inf = std::numeric_limits<amrex::Real>::infinity();
@@ -279,6 +286,8 @@ TEST(ConductorInputs, EveryLineValueOutsideItsRangeIsRefusedByName)
     bad([nan](LineInputs& s) { s.insulator_length = nan; }, "insulator_length must be finite");
     bad([nan](LineInputs& s) { s.insulator_mass = nan; }, "insulator_mass must be finite");
     bad([inf](LineInputs& s) { s.insulator_diameter = inf; }, "insulator_diameter must be finite");
+    bad([nan](LineInputs& s) { s.epsilon_given = true; s.epsilon = nan; }, "epsilon must be finite");
+    bad([inf](LineInputs& s) { s.epsilon_given = true; s.epsilon = inf; }, "epsilon must be finite");
 }
 
 TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
@@ -1003,6 +1012,181 @@ TEST(ConductorInputs, TheFirstNonFiniteValueIsNamedWithItsPoint)
 
 namespace {
 // the required keys of a single-span line under erf.conductors.<name>
+void add_line_block (const std::string& name);
+
+} // namespace
+
+// what read() prints (its warnings), with aborts turned into exceptions
+std::string read_output ()
+{
+    std::ostringstream os;
+    std::streambuf* old = std::cout.rdbuf(os.rdbuf());
+    const std::string msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
+    std::cout.rdbuf(old);
+    return os.str() + msg;
+}
+
+TEST(ConductorInputs, EachLineAndTowerTypeMayGiveItsOwnWidth)
+{
+    amrex::ParmParse pp("erf.conductors");
+    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity", "drag_on_flow", "epsilon"}) { pp.remove(key); }
+    // ParmParse is global to the test binary: leave none of this test's keys behind, whatever its outcome
+    struct Cleanup {
+        ~Cleanup ()
+        {
+            for (const char* block : {"erf.conductors.EW1", "erf.conductors.EW2", "erf.conductors.ew_lattice", "erf.conductors.ew_spare"}) {
+                amrex::ParmParse(block).remove("epsilon");
+            }
+            amrex::ParmParse p("erf.conductors");
+            for (const char* key : {"lines", "tower_types", "drag_on_flow", "epsilon"}) { p.remove(key); }
+        }
+    } cleanup;
+    // EW1 hangs from towers of type ew_lattice and gives its own width; EW2, a single span, does not
+    pp.addarr("lines", std::vector<std::string>{"EW1", "EW2"});
+    pp.addarr("tower_types", std::vector<std::string>{"ew_lattice"});
+    pp.add("drag_on_flow", true);
+    amrex::ParmParse p1("erf.conductors.EW1");
+    p1.addarr("end_a", std::vector<amrex::Real>{100.0, 500.0, 30.0});
+    p1.addarr("end_b", std::vector<amrex::Real>{700.0, 500.0, 30.0});
+    p1.addarr("towers", std::vector<amrex::Real>{400.0, 500.0, 30.0});
+    p1.addarr("length", std::vector<amrex::Real>{301.5, 301.5});
+    p1.add("diameter", 0.0281);
+    p1.add("mass_per_length", 1.628);
+    p1.add("axial_stiffness", 3.0e7);
+    p1.add("tower_type", std::string("ew_lattice"));
+    p1.add("epsilon", 1.5);
+    add_line_block("EW2");
+    amrex::ParmParse("erf.conductors.EW2").remove("end_a");
+    amrex::ParmParse("erf.conductors.EW2").remove("end_b");
+    amrex::ParmParse("erf.conductors.EW2").addarr("end_a", std::vector<amrex::Real>{100.0, 200.0, 30.0});
+    amrex::ParmParse("erf.conductors.EW2").addarr("end_b", std::vector<amrex::Real>{400.0, 200.0, 30.0});
+    amrex::ParmParse pt("erf.conductors.ew_lattice");
+    pt.add("base_width", 6.0);
+    pt.add("top_width", 1.5);
+    pt.add("solidity", 0.2);
+    pt.add("arm_length", 12.0);
+    pt.add("epsilon", 2.5);
+    {
+        // the shared width at its default, 2
+        const ConductorInputs in = ConductorInputs::read();
+        ASSERT_EQ(in.lines.size(), 2u);
+        EXPECT_TRUE(in.lines[0].epsilon_given);
+        EXPECT_FALSE(in.lines[1].epsilon_given);
+        EXPECT_EQ(in.line_epsilon(in.lines[0]), amrex::Real(1.5));
+        EXPECT_EQ(in.line_epsilon(in.lines[1]), amrex::Real(2.0)) << "a line without its own takes erf.conductors.epsilon";
+        ASSERT_NE(in.tower_type(in.lines[0]), nullptr);
+        EXPECT_EQ(in.tower_epsilon(*in.tower_type(in.lines[0])), amrex::Real(2.5)) << "the towers take their type's, not the line's";
+        EXPECT_EQ(ConductorInputs::first_own_epsilon(in), "erf.conductors.EW1.epsilon");
+        EXPECT_FALSE(ConductorInputs::every_width_own(in)) << "EW2 takes the shared width";
+    }
+    pp.add("epsilon", 3.0);
+    {
+        const ConductorInputs in = ConductorInputs::read();
+        EXPECT_EQ(in.line_epsilon(in.lines[0]), amrex::Real(1.5));
+        EXPECT_EQ(in.line_epsilon(in.lines[1]), amrex::Real(3.0));
+        EXPECT_EQ(in.tower_epsilon(*in.tower_type(in.lines[0])), amrex::Real(2.5));
+    }
+    // a tower type without its own takes the shared width as well
+    pt.remove("epsilon");
+    {
+        const ConductorInputs in = ConductorInputs::read();
+        EXPECT_FALSE(in.tower_types[0].epsilon_given);
+        EXPECT_EQ(in.tower_epsilon(in.tower_types[0]), amrex::Real(3.0));
+        // with only the tower type's own the first key named is the type's
+        ConductorInputs t = in;
+        t.lines[0].epsilon_given = false;
+        t.tower_types[0].epsilon_given = true;
+        EXPECT_EQ(ConductorInputs::first_own_epsilon(t), "erf.conductors.ew_lattice.epsilon");
+        t.tower_types[0].epsilon_given = false;
+        EXPECT_TRUE(ConductorInputs::first_own_epsilon(t).empty());
+    }
+    // every line and its towers' type with their own: the shared key is read but no node takes it (a warning)
+    amrex::ParmParse("erf.conductors.EW2").add("epsilon", 4.0);
+    pt.add("epsilon", 2.5);
+    {
+        const ConductorInputs in = ConductorInputs::read();
+        EXPECT_TRUE(ConductorInputs::every_width_own(in));
+        ConductorInputs t = in;
+        t.tower_types[0].epsilon_given = false;
+        EXPECT_FALSE(ConductorInputs::every_width_own(t)) << "EW1's towers take the shared width";
+    }
+    {
+        // the shared key given while no node takes it: a warning, as is printed with drag_on_flow
+        pp.add("epsilon", 3.0);
+        const std::string out = read_output();
+        EXPECT_NE(out.find("WARNING: epsilon is not used: every line and the tower type"), std::string::npos) << out;
+        EXPECT_EQ(out.find("below one cell"), std::string::npos) << out;
+        pp.remove("epsilon");
+    }
+    {
+        // a tower type with its own width that no line's towers are of: read, and a warning that no node takes it
+        pp.addarr("tower_types", std::vector<std::string>{"ew_lattice", "ew_spare"});
+        amrex::ParmParse ps("erf.conductors.ew_spare");
+        ps.add("base_width", 6.0);
+        ps.add("top_width", 1.5);
+        ps.add("solidity", 0.2);
+        ps.add("arm_length", 12.0);
+        ps.add("epsilon", 4.0);
+        const ConductorInputs in = ConductorInputs::read();
+        ASSERT_EQ(ConductorInputs::unused_type_widths(in).size(), 1u);
+        EXPECT_EQ(ConductorInputs::unused_type_widths(in)[0], "erf.conductors.ew_spare.epsilon");
+        EXPECT_TRUE(ConductorInputs::every_width_own(in)) << "an unused type does not count";
+        const std::string out = read_output();
+        EXPECT_NE(out.find("WARNING: erf.conductors.ew_spare.epsilon is not used: no line's towers are of that type"),
+                  std::string::npos) << out;
+        ps.remove("epsilon");
+        pp.addarr("tower_types", std::vector<std::string>{"ew_lattice"});
+    }
+    {
+        // widths below one cell that some node takes: a warning each, naming the key; one an unused type gives is not named
+        p1.remove("epsilon");
+        p1.add("epsilon", 0.75);
+        amrex::ParmParse("erf.conductors.EW2").remove("epsilon");
+        pp.add("epsilon", 0.5);
+        const ConductorInputs in = ConductorInputs::read();
+        const std::vector<std::string> narrow = ConductorInputs::narrow_widths(in);
+        ASSERT_EQ(narrow.size(), 2u);
+        EXPECT_EQ(narrow[0], "erf.conductors.epsilon") << "EW2 takes the shared width";
+        EXPECT_EQ(narrow[1], "erf.conductors.EW1.epsilon");
+        const std::string out = read_output();
+        EXPECT_NE(out.find("WARNING: erf.conductors.EW1.epsilon is below one cell"), std::string::npos) << out;
+        EXPECT_NE(out.find("WARNING: erf.conductors.epsilon is below one cell"), std::string::npos) << out;
+        ConductorInputs t = in;
+        t.tower_types[0].epsilon = 0.9;
+        EXPECT_EQ(ConductorInputs::narrow_widths(t).back(), "erf.conductors.ew_lattice.epsilon");
+        t.lines[1].epsilon_given = true;
+        t.lines[1].epsilon = 1.0;
+        EXPECT_EQ(ConductorInputs::narrow_widths(t).front(), "erf.conductors.EW1.epsilon") << "one cell itself is not narrow";
+        pp.remove("epsilon");
+        p1.remove("epsilon");
+        p1.add("epsilon", 1.5);
+    }
+    // the widths need drag_on_flow, as erf.conductors.epsilon does: refused when it is not given, a warning when it is false
+    pp.remove("drag_on_flow");
+    pp.remove("epsilon");
+    std::string msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
+    EXPECT_NE(msg.find("erf.conductors.EW1.epsilon needs erf.conductors.drag_on_flow = true"), std::string::npos) << msg;
+    pp.add("drag_on_flow", false);
+    msg = read_output();
+    EXPECT_NE(msg.find("WARNING: erf.conductors.EW1.epsilon (and any other line's or tower type's epsilon) is not used: "
+                       "drag_on_flow is false"), std::string::npos) << msg;
+    EXPECT_EQ(msg.find("below one cell"), std::string::npos) << "no width warning without drag_on_flow: " << msg;
+    // a width that is not positive is refused, naming the line's or the type's key
+    pp.remove("drag_on_flow");
+    pp.add("drag_on_flow", true);
+    p1.remove("epsilon");
+    p1.add("epsilon", 0.0);
+    msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
+    EXPECT_NE(msg.find("erf.conductors.EW1.epsilon must be positive"), std::string::npos) << msg;
+    p1.remove("epsilon");
+    pt.remove("epsilon");
+    pt.add("epsilon", -1.0);
+    msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
+    EXPECT_NE(msg.find("erf.conductors.ew_lattice.epsilon must be positive"), std::string::npos) << msg;
+}
+
+namespace {
+
 void add_line_block (const std::string& name)
 {
     amrex::ParmParse ps("erf.conductors." + name);

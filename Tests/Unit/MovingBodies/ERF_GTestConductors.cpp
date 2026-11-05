@@ -11,7 +11,8 @@
 //     the thread) no longer stop the run at create(); MoorDyn starts and steps under them, and they stay on.
 // ClearanceIsTheHeightAboveTheTerrainUnderEachNode: the clearance against the terrain under each node.
 // AStringReachingBelowTheGroundIsRefused: placed, a tower's string may not end below the ground.
-// TheGridsMustReachAsFarAsTheDragDoes: the coverage reach is a cell, and with drag_on_flow 3 epsilon cells.
+// TheGridsMustReachAsFarAsTheDragDoes: the coverage reach is a cell, and with drag_on_flow 3 epsilon cells, for the
+//     epsilon of the node's line or tower type.
 // TheDragNeedsTheGridsAsFarAsItReaches: with a prescribed wind, the spreading itself refuses a patch the drag outreaches.
 // TheSpansDragStatisticIsAcrossTheSpan: drag_normal of a span along +y in a wind along +x is minus its
 //     x drag (the horizontal drag along z x the span's direction), not its y drag.
@@ -34,6 +35,12 @@
 // LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag: tower placement, member drag, the
 //     line's pull and the footing checks.
 // TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart: the towers' drag in the sources.
+// EachLineAndTowerSpreadsItsDragWithItsOwnWidth: a line's nodes take erf.conductors.<line>.epsilon, its towers'
+//     drag nodes their type's erf.conductors.<type>.epsilon and a line without its own erf.conductors.epsilon: the
+//     sources are those of spreading every node with that width, and differ from one width for all; a line's
+//     coverage check takes its own reach.
+// EachTowerIsCoveredWithItsTypesReach: the coverage checks of the sampled towers and of the spreading take each tower's
+//     reach from its type's width and each line's from its own, and name the tower or line that outreaches the grids.
 // MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine: bending towers at rest.
 // MovingTowersContinueAcrossARestart: bending towers' restart, coupling.dat's counts across a checkpoint
 //     between two of its rows included.
@@ -326,13 +333,16 @@ TEST(Conductors, TheGridsMustReachAsFarAsTheDragDoes)
     const Real cell = std::max(static_cast<Real>(m.geom.CellSize(0)), static_cast<Real>(m.geom.CellSize(1)));
     {
         auto c = Conductors::create(0);
-        EXPECT_EQ(c->coverage_reach(m.geom), cell);
+        EXPECT_EQ(c->coverage_reach(m.geom, c->inputs().epsilon), cell) << "without drag_on_flow the sampler's cell only";
     }
     amrex::ParmParse pp("erf.conductors");
     pp.add("drag_on_flow", true);
     pp.add("epsilon", 2.0);
     auto c = Conductors::create(0);
-    EXPECT_EQ(c->coverage_reach(m.geom), std::max(cell, Real(6.0) * static_cast<Real>(m.geom.CellSize(0))));
+    EXPECT_EQ(c->coverage_reach(m.geom, c->inputs().epsilon), std::max(cell, Real(6.0) * static_cast<Real>(m.geom.CellSize(0))));
+    // a line or tower type with a width of its own reaches 3 of its widths
+    EXPECT_EQ(c->coverage_reach(m.geom, 0.5), std::max(cell, Real(1.5) * static_cast<Real>(m.geom.CellSize(0))));
+    EXPECT_EQ(c->coverage_reach(m.geom, 3.0), std::max(cell, Real(9.0) * static_cast<Real>(m.geom.CellSize(0))));
 }
 
 TEST(Conductors, TheDragNeedsTheGridsAsFarAsItReaches)
@@ -353,8 +363,24 @@ TEST(Conductors, TheDragNeedsTheGridsAsFarAsItReaches)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(nullptr, m.geom);
-    const std::string msg = erf_gtest::abort_message([&] { c->advance(0, 0.0, 0.2, u, v, w, nullptr, nullptr, m.geom); });
-    EXPECT_NE(msg.find("is not covered, with its drag's reach of 3 epsilon cells"), std::string::npos) << msg;
+    std::string msg = erf_gtest::abort_message([&] { c->advance(0, 0.0, 0.2, u, v, w, nullptr, nullptr, m.geom); });
+    EXPECT_NE(msg.find("a node of line Tdr, is not covered, with its drag's reach of 3 epsilon cells"), std::string::npos) << msg;
+    struct Cleanup { ~Cleanup () { amrex::ParmParse("erf.conductors.Tdr").remove("epsilon"); } } cleanup;
+    // the line's own width, 1 cell, reaches 300 m past its end, inside the patch
+    amrex::ParmParse("erf.conductors.Tdr").add("epsilon", 1.0);
+    auto d = Conductors::create(0);
+    ASSERT_TRUE(d);
+    d->set_ground(nullptr, m.geom);
+    msg = erf_gtest::abort_message([&] { d->advance(0, 0.0, 0.2, u, v, w, nullptr, nullptr, m.geom); });
+    EXPECT_TRUE(msg.empty()) << msg;
+    amrex::ParmParse("erf.conductors.Tdr").remove("epsilon");
+    // and a width of 1.5 cells, 450 m, outreaches it again
+    amrex::ParmParse("erf.conductors.Tdr").add("epsilon", 1.5);
+    auto e = Conductors::create(0);
+    ASSERT_TRUE(e);
+    e->set_ground(nullptr, m.geom);
+    msg = erf_gtest::abort_message([&] { e->advance(0, 0.0, 0.2, u, v, w, nullptr, nullptr, m.geom); });
+    EXPECT_NE(msg.find("a node of line Tdr, is not covered"), std::string::npos) << msg;
 }
 
 TEST(Conductors, TheSpansDragStatisticIsAcrossTheSpan)
@@ -1524,6 +1550,172 @@ void make_towers_move (Real damping)
     pt.add("damping_ratio", damping);
 }
 } // namespace
+
+TEST(Conductors, EachLineAndTowerSpreadsItsDragWithItsOwnWidth)
+{
+    // a section along x at y = 500 over two lattice towers, with its own width (1.2 cells); its towers' type with
+    // another (0.8 cells); a single span along x at y = 250 without one, which takes erf.conductors.epsilon (1.6 cells).
+    // A prescribed crosswind: the drag of every node is along +y, the towers' bodies too
+    const std::string dir = scratch("widths");
+    set_towered_section(dir, "Tew");
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("drag_on_flow", true);
+    pp.add("epsilon", 1.6);
+    pp.addarr("lines", std::vector<std::string>{"Tew", "Tew2"});
+    amrex::ParmParse("erf.conductors.Tew").add("epsilon", 1.2);
+    amrex::ParmParse("erf.conductors.lat").add("epsilon", 0.8);
+    {
+        amrex::ParmParse ps("erf.conductors.Tew2");
+        ps.addarr("end_a", std::vector<Real>{300.0, 250.0, 30.0});
+        ps.addarr("end_b", std::vector<Real>{600.0, 250.0, 30.0});
+        ps.add("length", 301.5);
+        ps.add("diameter", 0.0281);
+        ps.add("mass_per_length", 1.628);
+        ps.add("axial_stiffness", 3.0e7);
+    }
+    // ParmParse is global to the test binary: leave no width behind, whatever the test's outcome
+    struct Cleanup {
+        ~Cleanup ()
+        {
+            amrex::ParmParse("erf.conductors.Tew").remove("epsilon");
+            amrex::ParmParse("erf.conductors.lat").remove("epsilon");
+            amrex::ParmParse("erf.conductors").remove("epsilon");
+            clear_towered_section("Tew");
+        }
+    } cleanup;
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    ASSERT_EQ(c->lines().size(), 2u);
+    ASSERT_EQ(c->towers().size(), 2u);
+    c->advance(0, 0.0, 0.25, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
+
+    // every node's position and force on the air, and the width it should be spread with (cells)
+    std::vector<Real> pos, force, cells;
+    for (const auto& span : c->lines()) {
+        const std::vector<Real> p = span->node_positions();
+        pos.insert(pos.end(), p.begin(), p.end());
+        const Real e = (span->name() == "Tew") ? Real(1.2) : Real(1.6);
+        for (unsigned n = 0; n < span->num_nodes(); ++n) {
+            const auto f = span->node_drag(n);
+            force.insert(force.end(), {-f[0], -f[1], -f[2]});
+            cells.push_back(e);
+        }
+    }
+    std::size_t tower_nodes = 0;
+    for (const auto& t : c->towers()) {
+        const auto nodes = t.current_nodes();
+        for (std::size_t n = 0; n < nodes.size(); ++n) {
+            pos.insert(pos.end(), {nodes[n].pos[0], nodes[n].pos[1], nodes[n].pos[2]});
+            force.insert(force.end(), {-t.loads()[3*n], -t.loads()[3*n+1], -t.loads()[3*n+2]});
+            cells.push_back(Real(0.8));
+            ++tower_nodes;
+        }
+    }
+    ASSERT_GT(tower_nodes, 0u);
+    const Real dx = m.geom.CellSize(0);
+    std::vector<Real> eps(cells.size());
+    for (std::size_t p = 0; p < cells.size(); ++p) { eps[p] = cells[p] * dx; }
+    auto sources = [&] (const std::vector<Real>& widths) {
+        std::array<amrex::MultiFab,3> s{{amrex::MultiFab(amrex::convert(m.ba, amrex::IntVect(1,0,0)), m.dm, 1, 0),
+                                         amrex::MultiFab(amrex::convert(m.ba, amrex::IntVect(0,1,0)), m.dm, 1, 0),
+                                         amrex::MultiFab(amrex::convert(m.ba, amrex::IntVect(0,0,1)), m.dm, 1, 0)}};
+        erf_actuator::spread_forces(pos, force, widths, m.znd.get(), nullptr, m.geom, s[0], s[1], s[2]);
+        return s;
+    };
+    const auto want = sources(eps);
+    amrex::MultiFab sx(amrex::convert(m.ba, amrex::IntVect(1,0,0)), m.dm, 1, 0);
+    amrex::MultiFab sy(amrex::convert(m.ba, amrex::IntVect(0,1,0)), m.dm, 1, 0);
+    amrex::MultiFab sz(amrex::convert(m.ba, amrex::IntVect(0,0,1)), m.dm, 1, 0);
+    sx.setVal(0.0); sy.setVal(0.0); sz.setVal(0.0);
+    c->add_momentum_sources(0, sx, sy, sz);
+    const Real scale = want[1].norm0();
+    ASSERT_GT(scale, 0.0) << "the crosswind's drag must reach the flow";
+    // the same widths, points and forces in the same order: the same sources to the last place
+    amrex::MultiFab diff(sy.boxArray(), sy.DistributionMap(), 1, 0);
+    amrex::MultiFab::LinComb(diff, Real(1.0), sy, 0, Real(-1.0), want[1], 0, 0, 1, 0);
+    EXPECT_LE(diff.norm0(), tight * scale) << "the y source differs from spreading each node with its own width";
+    for (const auto& [got, ref] : {std::make_pair(&sx, &want[0]), std::make_pair(&sz, &want[2])}) {
+        amrex::MultiFab d(got->boxArray(), got->DistributionMap(), 1, 0);
+        amrex::MultiFab::LinComb(d, Real(1.0), *got, 0, Real(-1.0), *ref, 0, 0, 1, 0);
+        EXPECT_LE(d.norm0(), tight * std::max(scale, ref->norm0()));
+    }
+    // and not those of one width for all: each choice a mutant would make moves the source by much more
+    for (const Real one : {Real(0.8), Real(1.2), Real(1.6)}) {
+        const auto other = sources(std::vector<Real>(eps.size(), one * dx));
+        amrex::MultiFab d(sy.boxArray(), sy.DistributionMap(), 1, 0);
+        amrex::MultiFab::LinComb(d, Real(1.0), sy, 0, Real(-1.0), other[1], 0, 0, 1, 0);
+        EXPECT_GT(d.norm0(), Real(0.01) * scale) << "one width of " << one << " cells for every node";
+    }
+    // the swapped mapping, the line's width on the towers and the type's on the line, differs too
+    {
+        std::vector<Real> swapped(eps);
+        for (std::size_t p = 0; p < swapped.size(); ++p) {
+            if (cells[p] == Real(1.2)) { swapped[p] = Real(0.8) * dx; } else if (cells[p] == Real(0.8)) { swapped[p] = Real(1.2) * dx; }
+        }
+        const auto other = sources(swapped);
+        amrex::MultiFab d(sy.boxArray(), sy.DistributionMap(), 1, 0);
+        amrex::MultiFab::LinComb(d, Real(1.0), sy, 0, Real(-1.0), other[1], 0, 0, 1, 0);
+        EXPECT_GT(d.norm0(), Real(0.01) * scale) << "the line's and its towers' widths swapped";
+    }
+    // the source still integrates to minus the drag on the lines and the towers
+    std::array<Real,3> drag{{0.0, 0.0, 0.0}};
+    for (const auto& s : c->lines()) { const auto f = s->total_drag(); for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
+    for (const auto& t : c->towers()) { const auto f = t.total_force(); for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(c->source_integral()[d], -drag[d], 1.0e-6 * std::abs(drag[1]) + roundoff) << d; }
+}
+
+TEST(Conductors, EachTowerIsCoveredWithItsTypesReach)
+{
+    // a patch of the level from y = 100 to 900 m (cells 1 to 8 of 100 m) under a section along x at y = 500 over two
+    // lattice towers: a width of 1 cell reaches 300 m, inside it; 1.5 cells reach 450 m, beyond it. The line and its towers
+    // each with their own width; the check names the line or the tower that outreaches the patch. The flow is sampled
+    // (tower_wind's check) for the towers, prescribed (spread_drag's check) for the line
+    const std::string dir = scratch("tower_reach");
+    set_towered_section(dir, "Ttr");
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("drag_on_flow", true);
+    struct Cleanup {
+        ~Cleanup ()
+        {
+            amrex::ParmParse("erf.conductors.Ttr").remove("epsilon");
+            amrex::ParmParse("erf.conductors.lat").remove("epsilon");
+            clear_towered_section("Ttr");
+        }
+    } cleanup;
+    Mesh m(false);
+    const amrex::BoxArray ba(amrex::Box(amrex::IntVect(0, 1, 0), amrex::IntVect(m.nx - 1, 8, m.nz - 1)));
+    const amrex::DistributionMapping dm(ba);
+    amrex::MultiFab u(amrex::convert(ba, amrex::IntVect(1,0,0)), dm, 1, 1), v(amrex::convert(ba, amrex::IntVect(0,1,0)), dm, 1, 1),
+                    w(amrex::convert(ba, amrex::IntVect(0,0,1)), dm, 1, 1);
+    u.setVal(0.0); v.setVal(10.0); w.setVal(0.0);
+    auto run = [&] (Real line, Real tower, bool sampled) {
+        amrex::ParmParse("erf.conductors.Ttr").remove("epsilon");
+        amrex::ParmParse("erf.conductors.lat").remove("epsilon");
+        amrex::ParmParse("erf.conductors.Ttr").add("epsilon", line);
+        amrex::ParmParse("erf.conductors.lat").add("epsilon", tower);
+        pp.remove("prescribed_velocity");
+        if (!sampled) { pp.addarr("prescribed_velocity", std::vector<Real>{0.0, 10.0, 0.0}); }
+        return erf_gtest::abort_message([&] {
+            auto c = Conductors::create(0);
+            c->set_ground(nullptr, m.geom);
+            c->advance(0, 0.0, 0.2, u, v, w, nullptr, nullptr, m.geom);
+        });
+    };
+    for (const bool sampled : {true, false}) {
+        SCOPED_TRACE(sampled ? "the flow sampled" : "a prescribed wind");
+        std::string msg = run(1.0, 1.0, sampled);
+        EXPECT_TRUE(msg.empty()) << msg;
+        // the towers' width outreaches the patch, the line's does not
+        msg = run(1.0, 1.5, sampled);
+        EXPECT_NE(msg.find("a node of tower Ttr_t1, is not covered"), std::string::npos) << msg;
+        // and the other way round (with the flow sampled the line's own sampling check, in wind_at, stops it first)
+        msg = run(1.5, 1.0, sampled);
+        EXPECT_NE(msg.find(sampled ? "erf.conductors.Ttr: the point" : "a node of line Ttr, is not covered"), std::string::npos) << msg;
+        EXPECT_EQ(msg.find("tower Ttr_t"), std::string::npos) << "the towers fit: " << msg;
+    }
+}
 
 TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
 {
