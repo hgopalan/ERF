@@ -145,16 +145,27 @@ NativeAggregate aggregate_native_bundle (const NativeBundle& bundle) noexcept
     };
 }
 
-// Largest stability coordinate z/L used by the 2 m profile. The stable
-// correction is linear in z/L and is calibrated for z/L of order one; with a
-// very small positive L it would otherwise grow without bound.
+// Largest stability coordinate z/L used by the 2 m and 10 m profiles. The
+// Businger-Dyer stable correction is linear in z/L and is calibrated for z/L of
+// order one; with a very small positive L it would otherwise grow without bound.
+// The QNSE correction grows only as ln(1 + b z/L), and its flux kernels run up to
+// the bound of the kernels, most_zeta_lim (their fold can sit above 1), so the
+// profiles take the same bound and are evaluated at the z/L the flux was.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real most_profile_zeta_max () noexcept { return amrex::Real(1.0); }
+amrex::Real most_profile_zeta_max (const similarity_funs& sfuns) noexcept
+{
+    const amrex::Real zlim = most_zeta_lim; // by value: no reference to a namespace constant in device code
+    return sfuns.uses_qnse() ? zlim : amrex::Real(1.0);
+}
 
+// The scalar MOST factor ln(z/z0) - psi_h(z/L) of the surface layer's similarity
+// functions sfuns (most.stable_functions; the callers pass the surface layer's own,
+// so that a caller cannot fall back to Businger-Dyer by leaving them out).
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 bool evaluate_most_factor (const MostState& state,
                            amrex::Real height,
-                           amrex::Real& factor) noexcept
+                           amrex::Real& factor,
+                           const similarity_funs& sfuns) noexcept
 {
     if (!valid_real(state.roughness_height) ||
         !valid_real(state.obukhov_length) ||
@@ -163,10 +174,30 @@ bool evaluate_most_factor (const MostState& state,
         state.obukhov_length == amrex::Real(0.0)) {
         return false;
     }
-    const similarity_funs sfuns{};
     const amrex::Real zeta = amrex::min(height / state.obukhov_length,
-                                        most_profile_zeta_max());
+                                        most_profile_zeta_max(sfuns));
     factor = std::log(height / state.roughness_height) - sfuns.calc_psi_h(zeta);
+    return valid_real(factor);
+}
+
+// The momentum counterpart of evaluate_most_factor: ln(z/z0) - psi_m(z/L), so that
+// the wind speed at height z is u_star / KAPPA times it.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+bool evaluate_most_momentum_factor (amrex::Real roughness_height,
+                                    amrex::Real obukhov_length,
+                                    amrex::Real height,
+                                    amrex::Real& factor,
+                                    const similarity_funs& sfuns) noexcept
+{
+    if (!valid_real(roughness_height) || !valid_real(obukhov_length) ||
+        roughness_height <= amrex::Real(0.0) ||
+        height <= roughness_height ||
+        obukhov_length == amrex::Real(0.0)) {
+        return false;
+    }
+    const amrex::Real zeta = amrex::min(height / obukhov_length,
+                                        most_profile_zeta_max(sfuns));
+    factor = std::log(height / roughness_height) - sfuns.calc_psi_m(zeta);
     return valid_real(factor);
 }
 
@@ -175,7 +206,8 @@ bool evaluate_most_factor (const MostState& state,
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 bool evaluate_most_profile (const MostState& state,
                             amrex::Real height,
-                            MostProfile& profile) noexcept
+                            MostProfile& profile,
+                            const similarity_funs& sfuns) noexcept
 {
     if (!valid_real(state.theta_surface) || !valid_real(state.theta_star) ||
         !valid_real(state.mixing_ratio_surface) || !valid_real(state.mixing_ratio_star)) {
@@ -183,7 +215,7 @@ bool evaluate_most_profile (const MostState& state,
     }
 
     amrex::Real profile_factor = amrex::Real(0.0);
-    if (!evaluate_most_factor(state, height, profile_factor)) {
+    if (!evaluate_most_factor(state, height, profile_factor, sfuns)) {
         return false;
     }
 
@@ -215,6 +247,7 @@ struct Sources
     const amrex::iMultiFab* land_mask = nullptr;
     const amrex::MultiFab* cons = nullptr;
     const amrex::MultiFab* z_phys_nd = nullptr;
+    similarity_funs sfuns;                ///< the surface layer's similarity functions (most.stable_functions)
 
     amrex::Real dz = amrex::Real(0.0);
     int klo = 0;
@@ -233,6 +266,37 @@ void fill (amrex::MultiFab& dst,
            int source_comp,
            const Sources& sources,
            amrex::Real missing_value = amrex::Real(-999.0));
+
+// Inputs to the 10 m wind: the surface layer's friction velocity, roughness height
+// and Obukhov length set the speed; the grid-relative wind at the centre of the first
+// cell sets the direction; cos_alpha and sin_alpha, where given, turn it earth-relative.
+struct WindSources
+{
+    const amrex::MultiFab* u_star = nullptr;
+    const amrex::MultiFab* roughness_height = nullptr;
+    const amrex::MultiFab* obukhov_length = nullptr;
+    const amrex::MultiFab* xvel = nullptr;
+    const amrex::MultiFab* yvel = nullptr;
+    const amrex::MultiFab* cos_alpha = nullptr;
+    const amrex::MultiFab* sin_alpha = nullptr;
+    similarity_funs sfuns;                ///< the surface layer's similarity functions (most.stable_functions)
+    int klo = 0;
+};
+
+// Height of the wind diagnostics above the local surface
+constexpr amrex::Real wind_height = amrex::Real(10.0);
+
+// Fill any requested 10 m wind components: grid-relative u and v, and earth-relative
+// u_east and v_north. A component index below zero means that field was not
+// requested. Where the surface layer is absent or its state cannot be evaluated at
+// 10 m (for example z0 >= 10 m), every requested component is missing_value.
+void fill_wind_10m (amrex::MultiFab& dst,
+                    int u_comp,
+                    int v_comp,
+                    int u_east_comp,
+                    int v_north_comp,
+                    const WindSources& sources,
+                    amrex::Real missing_value = amrex::Real(-999.0));
 
 } // namespace near_surface_diagnostics
 

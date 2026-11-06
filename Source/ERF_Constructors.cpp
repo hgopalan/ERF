@@ -56,7 +56,7 @@ void validate_sbm_m3_advection (const SolverChoice& choice,
         "SBM M3 mapped advection requires three dimensions");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(max_level == 0,
         "SBM M3 mapped advection supports one AMR level only");
-    const bool anelastic = !choice.anelastic.empty() && choice.anelastic[0] != 0;
+    const bool anelastic = !choice.compressibility_type.empty() && choice.compressibility_type[0] != CompressibilityType::FullyCompressible;
     // Grid stretching may set StaticFittedMesh as a label while retaining
     // StretchedDz; only VariableDz selects the fitted-terrain projection.
     const bool fitted_terrain_mesh =
@@ -79,12 +79,12 @@ void validate_sbm_m3_advection (const SolverChoice& choice,
         "SBM M3 supports ConstantDz, StretchedDz, or static fitted-mesh geometry");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.buildings_type == BuildingsType::None,
         "SBM M3 requires buildings_type=None");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.substepping_type.size() == 1 &&
-                                     choice.substepping_type[0] == SubsteppingType::None,
-        "SBM M3 requires acoustic substepping_type=None");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.anelastic_type.empty() ||
-                                     choice.anelastic[0] == 0 ||
-                                     choice.anelastic_type[0] == AnelasticType::RK2,
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.timestepping_type.size() == 1 &&
+                                     choice.timestepping_type[0] != TimesteppingType::RK3_ImplicitSubstep,
+        "SBM M3 does not support acoustic substepping (erf.timestepping_type = RK3_ImplicitSubstep)");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.timestepping_type.empty() ||
+                                     choice.compressibility_type[0] == CompressibilityType::FullyCompressible ||
+                                     choice.timestepping_type[0] == TimesteppingType::RK2,
         "SBM M3 supports the Anelastic RK2 Heun integrator only");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.diffChoice.molec_diff_type == MolecDiffType::None,
         "SBM M3 does not support scalar or particle diffusion");
@@ -117,7 +117,8 @@ void validate_sbm_m3_advection (const SolverChoice& choice,
 }
 
 void validate_auxiliary_inert_tracer_fixture (const SolverChoice& choice,
-                                              const int max_level)
+                                              const int max_level,
+                                              const amrex::Geometry& geom0)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.moisture_type == MoistureType::None,
         "M2 auxiliary inert tracer fixture requires moisture_model=None");
@@ -129,10 +130,15 @@ void validate_auxiliary_inert_tracer_fixture (const SolverChoice& choice,
                                      choice.terrain_type == TerrainType::None &&
                                      choice.buildings_type == BuildingsType::None,
         "M2 auxiliary inert tracer fixture requires static Cartesian ConstantDz geometry");
+    // The tracer has no boundary conditions of its own: FillBoundary fills only periodic and
+    // inter-box ghosts of its intensive field, so a face on a non-periodic domain boundary
+    // would read stale ghost values (erf-model/ERF#4559)
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(geom0.isAllPeriodic(),
+        "M2 auxiliary inert tracer fixture requires a fully periodic domain (geometry.is_periodic = 1 1 1)");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!choice.use_gravity,
         "M2 auxiliary inert tracer fixture requires gravity disabled");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.substepping_type.size() == 1 &&
-                                     choice.substepping_type[0] == SubsteppingType::None,
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.timestepping_type.size() == 1 &&
+                                     choice.timestepping_type[0] != TimesteppingType::RK3_ImplicitSubstep,
         "M2 auxiliary inert tracer fixture does not support acoustic substepping");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(choice.diffChoice.molec_diff_type == MolecDiffType::None,
         "M2 auxiliary inert tracer fixture does not support scalar diffusion");
@@ -150,7 +156,7 @@ void validate_auxiliary_inert_tracer_fixture (const SolverChoice& choice,
         choice.advChoice.dryscal_vert_adv_type == AdvType::Centered_2nd,
         "M2 auxiliary inert tracer fixture requires Centered_2nd dry scalar advection");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-        !choice.anelastic[0] || choice.anelastic_type[0] == AnelasticType::RK2,
+        (choice.compressibility_type[0] == CompressibilityType::FullyCompressible) || choice.timestepping_type[0] == TimesteppingType::RK2,
         "M2 auxiliary inert tracer fixture does not support Anelastic MidPoint");
 
     std::string problem_name = "Undefined";
@@ -286,7 +292,7 @@ ERF::ERF_shared ()
     ParmParse pp_auxiliary("erf");
     pp_auxiliary.queryAdd("auxiliary_inert_tracer_test", auxiliary_inert_tracer_test);
     if (auxiliary_inert_tracer_test) {
-        validate_auxiliary_inert_tracer_fixture(solverChoice, max_level);
+        validate_auxiliary_inert_tracer_fixture(solverChoice, max_level, geom[0]);
         auxiliary_inert_tracer = std::make_unique<erf_auxiliary::AuxiliaryInertTracer>(max_level + 1);
     }
     if (solverChoice.moisture_type == MoistureType::SBM) {
@@ -294,6 +300,15 @@ ERF::ERF_shared ()
         std::vector<amrex::Real> candidate(static_cast<std::size_t>(layout.ncomp()),
                                            amrex::Real(0.0));
         if (!solverChoice.sbm_fixture_initial_state.empty()) {
+            // ReadParameters checks the length against sbm_nbins and sbm_moment_mode;
+            // check it against the layout itself before writing into candidate.
+            if (solverChoice.sbm_fixture_initial_state.size() !=
+                static_cast<amrex::Long>(layout.ncomp())) {
+                amrex::Error("sbm_fixture_initial_state has " +
+                    std::to_string(solverChoice.sbm_fixture_initial_state.size()) +
+                    " entries but the SBM layout has " + std::to_string(layout.ncomp()) +
+                    " components");
+            }
             std::copy(solverChoice.sbm_fixture_initial_state.begin(),
                       solverChoice.sbm_fixture_initial_state.end(), candidate.begin());
         }
@@ -332,6 +347,7 @@ ERF::ERF_shared ()
     // InitData can read restart metadata or write an output on restart.
     execution_provenance = erf_provenance::initialize_execution_provenance();
     initializeMicrophysics(nlevs_max);
+    initializeFire(nlevs_max);
 
 #ifdef ERF_USE_WINDFARM
     initializeWindFarm(nlevs_max);
@@ -486,7 +502,7 @@ ERF::ERF_shared ()
     const std::string prob_name_ci = amrex::toLower(prob_name);
     if (prob_name_ci == "cloud chamber" || prob_name_ci == "cloudchamber") {
         cloud_chamber_config = erf_cloud_chamber::parse_config(
-            geom[0].ProbLo(), geom[0].ProbHi());
+            geom[0].ProbLo(), geom[0].ProbHi(), solverChoice.moisture_type);
         const amrex::GpuArray<Real, AMREX_SPACEDIM> cloud_chamber_dx = {
             geom[0].CellSize(0), geom[0].CellSize(1), geom[0].CellSize(2)};
         erf_cloud_chamber::validate_wall_roughness_geometry(
@@ -500,7 +516,7 @@ ERF::ERF_shared ()
                 !cloud_chamber_config.physical_initialization ||
                 (solverChoice.moisture_type != MoistureType::None &&
                  solverChoice.moisture_type != MoistureType::SatAdj)) {
-                Error("Cloud Chamber: cloud_chamber_budget_interval requires physical_temperature_rh with no moisture or SatAdj");
+                Error("Cloud Chamber: cloud_chamber_budget_interval supports only physical_temperature_rh with dry mode or SatAdj; bulk and other active moisture models are unsupported");
             }
             cloud_chamber_budget = std::make_unique<CloudChamberBudget>(budget_interval);
         }
@@ -611,6 +627,13 @@ ERF::ERF_shared ()
     terrain_blanking_xface.resize(nlevs_max);
     terrain_blanking_yface.resize(nlevs_max);
     terrain_blanking_zface.resize(nlevs_max);
+    ib_wall_face13.resize(nlevs_max);
+    ib_wall_face23.resize(nlevs_max);
+    ib_wall_face33.resize(nlevs_max);
+    ib_wall_hfx.resize(nlevs_max);
+    ib_wall_qfx.resize(nlevs_max);
+    ib_wall_ktarget.resize(nlevs_max);
+    ib_wall_height.resize(nlevs_max);
 
     // Wall distance
     walldist.resize(nlevs_max);

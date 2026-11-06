@@ -134,6 +134,24 @@ from the modelled heat flux :math:`-\rho \nu_t' \, \partial \theta / \partial z`
 
    \varepsilon = (c_\mu^0)^3 \, \frac{k^{3/2}}{l}, \qquad c_\mu^0 = 0.5562.
 
+With a moisture model, ``erf.rans_moist_buoyancy = true`` (off by default) makes
+the buoyancy production the flux of the virtual potential temperature of
+unsaturated air, :math:`\theta_v = \theta (1 + \epsilon_v q_v)` with
+:math:`\epsilon_v = R_v/R_d - 1 = 0.608`,
+
+.. math::
+
+   P_b = \frac{g}{\theta_{v0}} \left[ (1 + \epsilon_v q_v) \, \overline{w' \theta'}
+         + \epsilon_v \theta \, \overline{w' q_v'} \right],
+
+from the modelled heat and water-vapour fluxes of the same stage (the surface fluxes
+of the surface layer or of the immersed wall law on the bottom face); :math:`\theta_{v0}`
+is ``erf.theta_ref`` when that is set, else the local :math:`\theta_v`. Water vapour
+only: the cloud-water flux term and the saturated form are not included. The option
+is the k-equation closure's; the Deardorff LES shares the TKE source and keeps the dry
+form. Pair it with ``erf.thermal_stratification = thetav`` so the buoyancy length scale
+below uses the same :math:`\theta_v`.
+
 The proportionality constant :math:`(c_\mu^0)^3` is what makes the
 logarithmic law hold in a constant-stress layer (AL01 Sect. 4.1). The
 dissipation is explicit in the update by default;
@@ -315,15 +333,31 @@ choices are offered through ``erf.wall_dist_type``:
   no linear solve. It cannot see side walls or overhangs, which the
   Poisson distance can.
 
+With terrain immersed forcing (``erf.terrain_type = ImmersedForcing``) the
+mesh is flat, and with the legacy wall law the distance is the height above
+the bottom of the domain, inside the solid, whatever ``erf.wall_dist_type``
+says. With the fraction-stress wall law (``erf.if_wall_form = fraction_stress``,
+see :ref:`Forcings <Forcings>`) the distance is measured from the surface the
+wall law uses, :math:`h = z_{bot} + \beta \Delta z` of the wall cell, with the
+wall cell at its fluid centroid :math:`(1 - \beta)\Delta z / 2` above it and
+every other cell at :math:`|z - h|`, so the length scale and the wall law see
+the same geometry; ``erf.wall_dist_type`` then does not apply. The distance is
+vertical (the wall law is), and a column without solid keeps the bottom of the
+domain as its wall. On a refined level a box need not hold the whole column:
+where a box does not see the surface of a column (it lies wholly inside the
+solid, or above the surface without reaching the bottom of the domain) the
+distance is measured from the wall height of the coarser level.
+
 The distance is available as the plot variable ``walldist``. It is
-computed once at initialisation, also on a restart; it is not recomputed
-after a regrid.
+computed at initialisation, also on a restart, and again on every level
+that a regrid adds or remakes.
 
 Limitations
 -----------
 
-* The buoyancy production and :math:`N^2` are dry: no virtual or
-  liquid-water potential temperature.
+* The buoyancy production is dry unless ``erf.rans_moist_buoyancy`` is set,
+  and then water vapour only (no cloud-water flux, no saturated form);
+  :math:`N^2` follows ``erf.thermal_stratification``.
 * All levels must use the closure; a hybrid RANS-LES set-up is refused.
 * Embedded and thin-body boundaries are not supported by the Poisson wall
   distance.
@@ -362,6 +396,8 @@ Inputs
 | **erf.implicit_tke_dissipation**       | linearised implicit dissipation                            | false            |
 +----------------------------------------+------------------------------------------------------------+------------------+
 | **erf.rans_consistent_diffusivities**  | heat, scalar and moisture diffusivities from :math:`c_\mu'`| false            |
++----------------------------------------+------------------------------------------------------------+------------------+
+| **erf.rans_moist_buoyancy**            | :math:`P_b` from the virtual potential temperature flux    | false            |
 +----------------------------------------+------------------------------------------------------------+------------------+
 | **erf.rans_lscale_from_pblh**          | cap :math:`l_g` at :math:`\kappa 0.1 z_i`                  | false            |
 +----------------------------------------+------------------------------------------------------------+------------------+

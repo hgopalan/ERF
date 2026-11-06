@@ -63,7 +63,10 @@ void make_sources (int level,
                    const Table1D<Real> t_plane_avg,
                    const MultiFab* forest_drag,
                    const MultiFab* cons_old,
-                   bool is_slow_step)
+                   bool is_slow_step,
+                   MultiFab* ib_wall_hfx,
+                   MultiFab* ib_wall_ktarget,
+                   MultiFab* ib_wall_qfx)
 {
     BL_PROFILE_REGION("erf_make_sources()");
 
@@ -500,20 +503,28 @@ void make_sources (int level,
             const Array4<const Real>& v = yvel.array(mfi);
 
             AMREX_ALWAYS_ASSERT(dptr_r_plane_if && dptr_t_plane_if);  // Tables must be filled before immersed forcing
-            ImmersedForcingTerrain_Scalar(bx, u, v, cell_data, t_blank_arr, z_cc_arr,
-                                         cell_src, geom, solverChoice, dptr_r_plane_if, dptr_t_plane_if, time);
+            if (solverChoice.if_fraction_stress) {
+                const Array4<Real> wall_hfx = (ib_wall_hfx) ? ib_wall_hfx->array(mfi) : Array4<Real>{};
+                const Array4<Real> wall_kt  = (ib_wall_ktarget) ? ib_wall_ktarget->array(mfi) : Array4<Real>{};
+                const Array4<Real> wall_qfx = (ib_wall_qfx) ? ib_wall_qfx->array(mfi) : Array4<Real>{};
+                const auto& tc_lev = solverChoice.turbChoice[level];
+                const bool wall_tke = solverChoice.if_wall_tke && (tc_lev.rans_type == RANSType::kEqn);
+                ImmersedForcingTerrain_Scalar_FractionStress(bx, u, v, cell_data, t_blank_arr, cell_src, wall_hfx, wall_kt,
+                                                             geom, solverChoice, dptr_r_plane_if, dptr_t_plane_if,
+                                                             static_cast<Real>(dt), static_cast<Real>(time),
+                                                             wall_tke, tc_lev.Cmu0, wall_qfx,
+                                                             tc_lev.rans_moist_buoyancy);
+            } else {
+                ImmersedForcingTerrain_Scalar(bx, u, v, cell_data, t_blank_arr, z_cc_arr,
+                                             cell_src, geom, solverChoice, dptr_r_plane_if, dptr_t_plane_if, time);
+            }
         }
 
         // *************************************************************************************
         // 10b. Add immersed source terms for buildings
         // *************************************************************************************
-        // geometric properties
-        const Real* dx_arr = geom.CellSize();
-        const Real delta_xy = std::sqrt(dx_arr[0] * dx_arr[1]);
-
-        if ((solverChoice.buildings_type == BuildingsType::ImmersedForcing) &&
-           ((is_slow_step && !use_ImmersedForcing_fast) || (!is_slow_step && use_ImmersedForcing_fast)) &&
-            (delta_xy <= 50.0)) { // only apply immersed forcing when grid spacing is less than 50m
+        if (solverChoice.use_building_immersed_forcing(geom) &&
+           ((is_slow_step && !use_ImmersedForcing_fast) || (!is_slow_step && use_ImmersedForcing_fast))) {
 
             const Array4<const Real>& u = xvel.array(mfi);
             const Array4<const Real>& v = yvel.array(mfi);
@@ -546,6 +557,9 @@ void make_sources (int level,
                 //       second pass below.  The accumulation order is unchanged, so the
                 //       values are identical to the old per-level array.
                 Real q_int_inf = zero;
+                // Height of the ground (the bottom face).  zi is an absolute height; the
+                //    zi factor in the flux below is the inversion's height above the ground.
+                Real z_sfc = myhalf * (z_cc_arr(i,j,klo) + z_cc_arr(i,j,klo-1));
                 Real zi   = myhalf * (z_cc_arr(i,j,khi) + z_cc_arr(i,j,khi-1));
                 Real rhoi = myhalf * (cell_data(i,j,khi,Rho_comp) + cell_data(i,j,khi-1,Rho_comp));
                 for (int k(klo+1); k<=khi+1; ++k) {
@@ -565,10 +579,10 @@ void make_sources (int level,
                 // the lower face is carried across iterations so each face is evaluated
                 // once, exactly as when both faces were read from the shared array.
                 Real q_int   = zero;                                             // face klo
-                Real z_lo    = myhalf * (z_cc_arr(i,j,klo) + z_cc_arr(i,j,klo-1));
+                Real z_lo    = z_sfc;
                 Real flux_lo = F1*std::exp(-q_int) + F0*std::exp(-(q_int_inf - q_int));
                 if (z_lo > zi) {
-                    flux_lo += rhoi * Cp_d * D * ( std::pow(z_lo-zi,Real(4.)/three)/Real(4.) + zi*std::pow(z_lo-zi,one/three) ) ;
+                    flux_lo += rhoi * Cp_d * D * ( std::pow(z_lo-zi,Real(4.)/three)/Real(4.) + (zi-z_sfc)*std::pow(z_lo-zi,one/three) ) ;
                 }
 
                 for (int k(klo); k<=khi; ++k) {
@@ -579,7 +593,7 @@ void make_sources (int level,
                     Real z_hi    = myhalf * (z_cc_arr(i,j,k+1) + z_cc_arr(i,j,k));
                     Real flux_hi = F1*std::exp(-q_int) + F0*std::exp(-(q_int_inf - q_int));
                     if (z_hi > zi) {
-                        flux_hi += rhoi * Cp_d * D * ( std::pow(z_hi-zi,Real(4.)/three)/Real(4.) + zi*std::pow(z_hi-zi,one/three) ) ;
+                        flux_hi += rhoi * Cp_d * D * ( std::pow(z_hi-zi,Real(4.)/three)/Real(4.) + (zi-z_sfc)*std::pow(z_hi-zi,one/three) ) ;
                     }
 
                     // Average to w-faces when looping CC

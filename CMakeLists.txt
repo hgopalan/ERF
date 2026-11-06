@@ -135,6 +135,8 @@ option(ERF_ENABLE_NETCDF "Enable NetCDF IO" OFF)
 option(ERF_ENABLE_HDF5 "Enable HDF5 IO" ${ERF_ENABLE_NETCDF})
 option(ERF_ENABLE_PARTICLES "Enable Lagrangian particles" OFF)
 option(ERF_ENABLE_FCOMPARE "Enable building fcompare when not testing" OFF)
+option(ERF_EXCLUDE_PLOTFILE_TOOLS_FROM_ALL
+  "Skip bundled AMReX plotfile tools in the default build (compile-only CI)" OFF)
 set(ERF_PRECISION "DOUBLE" CACHE STRING "Floating point precision SINGLE or DOUBLE")
 set(ERF_PARTICLES_PRECISION "${ERF_PRECISION}" CACHE STRING "Particle floating point precision SINGLE or DOUBLE")
 
@@ -194,6 +196,8 @@ option(ERF_ENABLE_WINDFARM "Enable wind farm parameterizations" OFF)
 option(ERF_ENABLE_MOVING_BODIES "Enable the actuator core for bodies in the flow (Source/MovingBodies/Core)" OFF)
 option(ERF_ENABLE_MOORDYN "Enable the MoorDyn-C line-dynamics coupling (implies ERF_ENABLE_MOVING_BODIES)" OFF)
 option(ERF_MOORDYN_USE_STUB "Build the MoorDyn coupling against the bundled stub library instead of MoorDyn-C (for testing)" OFF)
+option(ERF_ENABLE_FIRE "Enable the fire coupling (the atmosphere side; fire engines plug into it)" OFF)
+set(ERF_FIRE_ENGINE_DIRS "" CACHE STRING "Fire engine directories (each with ERFFireEngine.cmake) to compile in; needs ERF_ENABLE_FIRE")
 option(ERF_ENABLE_WSM6_FORT "Enable WSM6 Fortran bridge calls" OFF)
 option(ERF_ENABLE_WDM6_FORT "Enable WDM6 Fortran bridge calls" OFF)
 
@@ -209,7 +213,7 @@ endif()
 option(ERF_ENABLE_TOOLS "Enable building of additional tools" OFF)
 
 #Options for C++
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -252,6 +256,13 @@ if (${ERF_USE_INTERNAL_AMREX})
     list(APPEND CMAKE_MODULE_PATH "${AMREX_SUBMOD_LOCATION}/Tools/CMake")
 
     add_subdirectory(${AMREX_SUBMOD_LOCATION})
+
+    # Compile-only CI does not run the regression tests that need these tools.
+    # Keep their targets available for explicit builds, including fcompare.
+    if(AMReX_PLOTFILE_TOOLS AND ERF_EXCLUDE_PLOTFILE_TOOLS_FROM_ALL)
+      set_property(DIRECTORY ${AMREX_SUBMOD_LOCATION}/Tools/Plotfile
+        PROPERTY EXCLUDE_FROM_ALL TRUE)
+    endif()
 
     # Print AMReX properties
     print_target_properties(amrex)
@@ -433,7 +444,7 @@ if(ERF_ENABLE_EKAT)
     set(Kokkos_ENABLE_SYCL_LAMBDA ON CACHE BOOL "kokkos enable sycl lambda")
   endif()
 
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)
   set(EKAT_ENABLE_MPI ON CACHE BOOL "ekat enable mpi")
   set(EKAT_ENABLE_TESTS OFF CACHE BOOL "ekat enable tests")
   set(EKAT_ENABLE_KOKKOS ON CACHE BOOL "ekat enable kokkos")

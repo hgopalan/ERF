@@ -23,7 +23,7 @@ validate_flat_terrain (int lev,
     // threshold has to track the working precision: a hard-wired 1e-10 is far below single-
     // precision round-off at domain-top magnitudes and would abort on a genuinely flat mesh.
     // Keep the original (double-precision) threshold, floored at a few hundred ulps.
-    const Real scale = std::max(Real(1.0), std::abs(z_levels_h.back()));
+    const Real scale = std::max({Real(1.0), std::abs(z_levels_h.front()), std::abs(z_levels_h.back())});
     const Real rel_tol = std::max(Real(1.0e-10), Real(100.0) * std::numeric_limits<Real>::epsilon());
     const Real tolerance = rel_tol * scale;
 
@@ -53,6 +53,59 @@ validate_flat_terrain (int lev,
 }
 
 /**
+ * Abort unless the top of the domain is flat, i.e. z_phys_nd is the same at every node of the
+ * top slab.  The top boundary is a horizontal plane: erf_slow_rhs_pre sets Omega = rho w on the
+ * top face, the anelastic projection converts it with OmegaFromW, and the two only agree when
+ * the terrain slopes vanish there.  Every mesh builder pins the top node to z_top, so this
+ * guards against a mesh (custom, read from a file or a checkpoint) that does not.
+ *
+ * @param[in] lev Level index.
+ * @param[in] geom Geometry information.
+ * @param[in] z_phys_nd Nodal physical height field.
+ */
+void
+validate_flat_top (int lev,
+                   const Geometry& geom,
+                   const MultiFab& z_phys_nd)
+{
+    const int k_top = geom.Domain().bigEnd(2) + 1;
+
+    ReduceOps<ReduceOpMin, ReduceOpMax> reduce_op;
+    ReduceData<Real, Real> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+
+    for (MFIter mfi(z_phys_nd); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        if (bx.bigEnd(2) < k_top) { continue; }
+        auto const& z_arr = z_phys_nd.const_array(mfi);
+        reduce_op.eval(makeSlab(bx,2,k_top), reduce_data,
+        [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+            return {z_arr(i,j,k), z_arr(i,j,k)};
+        });
+    }
+
+    ReduceTuple hv = reduce_data.value(reduce_op);
+    Real z_top_min = amrex::get<0>(hv);
+    Real z_top_max = amrex::get<1>(hv);
+    ParallelDescriptor::ReduceRealMin(z_top_min);
+    ParallelDescriptor::ReduceRealMax(z_top_max);
+
+    // No box at this level reaches the top of the domain
+    if (z_top_min > z_top_max) { return; }
+
+    // Same precision-aware tolerance as validate_flat_terrain
+    const Real scale = std::max({Real(1.0), std::abs(z_top_min), std::abs(z_top_max)});
+    const Real rel_tol = std::max(Real(1.0e-10), Real(100.0) * std::numeric_limits<Real>::epsilon());
+
+    if (z_top_max - z_top_min > rel_tol * scale) {
+        Print() << "Top of the domain at level " << lev << " ranges from "
+                << z_top_min << " to " << z_top_max << std::endl;
+        Abort("The top of the domain must be flat: z_phys_nd varies along the top boundary at level "
+              + std::to_string(lev) + ".");
+    }
+}
+
+/**
  * Define a default z_phys so we have it even if a completely regular grid
  * This will be over-written if we use z_levels, or grid stretching, or terrain-fitted grids
  */
@@ -65,6 +118,7 @@ init_default_zphys (int /*lev*/,
 {
     const auto& dx = geom.CellSize();
     Real dz = dx[2];
+    Real z_bot = geom.ProbLo(2) - z_offset;
 
     for (MFIter mfi(z_phys_nd,true); mfi.isValid(); ++mfi)
     {
@@ -72,7 +126,7 @@ init_default_zphys (int /*lev*/,
         const Array4< Real> z_nd_arr = z_phys_nd.array(mfi);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k)
         {
-            z_nd_arr(i,j,k) = k * dz - z_offset;
+            z_nd_arr(i,j,k) = z_bot + k * dz;
         });
     }
 
@@ -82,7 +136,7 @@ init_default_zphys (int /*lev*/,
         const Array4< Real> z_cc_arr = z_phys_cc.array(mfi);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k)
         {
-            z_cc_arr(i,j,k) = (k + myhalf) * dz - z_offset;
+            z_cc_arr(i,j,k) = z_bot + (k + myhalf) * dz;
         });
     }
 }
@@ -684,6 +738,11 @@ init_which_terrain_grid (int lev,
     int nz = static_cast<int>(z_levels_h.size());
     Real z_top = z_levels_h[nz-1];
 
+    // The STF and Sullivan transforms measure heights and terrain from the bottom of the
+    // domain, which is z_levels_h[0] = geometry.prob_lo[2]; the BTF one does so already
+    Real z_bot = z_levels_h[0];
+    Real depth = z_top - z_bot;
+
     Gpu::DeviceVector<Real> z_levels_d;
     z_levels_d.resize(nz);
     Gpu::copy(Gpu::hostToDevice, z_levels_h.begin(), z_levels_h.end(), z_levels_d.begin());
@@ -737,7 +796,10 @@ init_which_terrain_grid (int lev,
                 // If k0 = 0 then z_arr at k0 has already been filled from the terrain data
                 // If k0 > 0 then z_arr at k0 has already been filled from interpolation
                 //
-                Real z         = z_lev[k];
+                // A box that does not start at the bottom (e.g. a refined box starting at
+                // k0 = 1) has ghost nodes below the domain, where z_lev is not defined;
+                // extend the levels there by reflection about the bottom
+                Real z         = (k >= domlo_z) ? z_lev[k] : two*z_lev[domlo_z] - z_lev[2*domlo_z-k];
                 Real z_sfc     = z_arr(ii,jj,k0);
                 Real z_lev_sfc = z_lev[k0];
 
@@ -811,11 +873,11 @@ init_which_terrain_grid (int lev,
                   // Fill the lateral boundaries
                   z_arr(i,j,k0) = z_arr(ii,jj,k0);
 
-                  // Populate h with terrain
-                  h(i,j,k0) = z_arr(i,j,k0);
+                  // Populate h with the terrain height above the bottom of the domain
+                  h(i,j,k0) = z_arr(i,j,k0) - z_bot;
 
                   // Return height for max
-                  return { z_arr(i,j,k0) };
+                  return { h(i,j,k0) };
                 });
         amrex::ParallelDescriptor::ReduceRealMax(h_m);
 
@@ -842,8 +904,8 @@ init_which_terrain_grid (int lev,
         {
             auto const& z_lev_h = z_levels_h.data();
 
-            Real zz       = z_lev_h[k];
-            Real zz_minus = z_lev_h[k-1];
+            Real zz       = z_lev_h[k]   - z_bot;
+            Real zz_minus = z_lev_h[k-1] - z_bot;
 
             // Hybrid attenuation profile, Klemp2011 Eqn. 9
             Real A;
@@ -1007,7 +1069,7 @@ init_which_terrain_grid (int lev,
 
                     // Fill levels using model from Sullivan et. al. 2014
                     int omega = 3; //Used to adjust how rapidly grid lines level out. omega=1 is BTF!
-                    z_arr(i,j,k) = z + static_cast<Real>(std::pow((one - (z/z_top)),omega) * z_arr(ii,jj,k0));
+                    z_arr(i,j,k) = z + static_cast<Real>(std::pow((one - (z - z_bot)/depth),omega) * (z_arr(ii,jj,k0) - z_bot));
 
                     // Fill lateral boundaries and below the bottom surface
                     if (k == k0) {
@@ -1044,18 +1106,18 @@ init_which_terrain_grid (int lev,
 
                     // Fill values outside the lateral boundaries and below the bottom surface (necessary if init_type = "WRFInput")
                     if (k == k0+1) {
-                        z_arr(i,j,k) = z + z_arr(ii,jj,k0);
+                        z_arr(i,j,k) = z + (z_arr(ii,jj,k0) - z_bot);
                     } else {
                         // Fill levels using model from Sullivan et. al. 2014
                         int omega = 3; //Used to adjust how rapidly grid lines level out. omega=1 is BTF!
-                        z_arr(i,j,k) = z + static_cast<Real>(std::pow((one - (z/z_top)),omega) * z_arr(ii,jj,k0));
+                        z_arr(i,j,k) = z + static_cast<Real>(std::pow((one - (z - z_bot)/depth),omega) * (z_arr(ii,jj,k0) - z_bot));
                     }
                 });
                 gbx.setBig(2,0);
                 ParallelFor(gbx, [=] AMREX_GPU_DEVICE (int i, int j, int k)
                 {
-                    z_arr(i,j,k  ) = zero;
-                    z_arr(i,j,k-1) = -z_arr(i,j,k+1);
+                    z_arr(i,j,k  ) = z_bot;
+                    z_arr(i,j,k-1) = two*z_bot - z_arr(i,j,k+1);
                 });
             } // mfi
             break;

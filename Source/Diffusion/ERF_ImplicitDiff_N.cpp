@@ -44,8 +44,18 @@ ImplicitDiffForStateLU_N (const Box& bx,
                           const BCRec* bc_ptr,
                           const bool use_SurfLayer,
                           const Real implicit_fac,
-                          const bool use_mrf_countergradient)
+                          const bool use_mrf_countergradient,
+                          const Array4<const Real>& wall_face,
+                          const Array4<const Real>& wall_pin)
 {
+    // Fraction-stress immersed wall law: wall_face is zero on the bottom face of the wall cell of
+    // each column (z faces), which then carries no diffusive coupling. Empty when not in use.
+    const bool has_wall_face = static_cast<bool>(wall_face);
+    // ... and wall_pin (the TKE solve with erf.if_wall_tke_time_factor = 1) holds the wall value
+    // of the TKE where it is >= 0: that row is a Dirichlet row, like the pinned first cell of flat
+    // ground, and the row above sees it as a Dirichlet neighbour
+    const bool has_wall_pin = static_cast<bool>(wall_pin);
+
     BL_PROFILE_VAR("ImplicitDiffForState_N()",ImplicitDiffForState_N);
 
     Real dt = static_cast<Real>(dt_d);
@@ -126,21 +136,30 @@ ImplicitDiffForStateLU_N (const Box& bx,
             {
                 getRhoAlpha(i, j, klo, rhoAlpha_lo, rhoAlpha_hi,
                             cell_data, mu_turb, d_alpha_eff, d_eddy_diff_idz,
-                            prim_index, prim_scal_index, l_consA, l_turb);
+                            prim_scal_index, l_consA, l_turb);
 
                 a_tmp      = zero;
                 if (!at_zlo) { a_tmp = -Fact * rhoAlpha_lo * dz_inv; }
                 c_tmp      = (pin_klo) ? zero : -Fact * rhoAlpha_hi * dz_inv;
+                if (has_wall_face) {
+                    a_tmp *= wall_face(i,j,klo);
+                    c_tmp *= wall_face(i,j,klo+1);
+                }
+                const bool pin_here_lo = has_wall_pin && (wall_pin(i,j,klo) >= zero);
+                if (pin_here_lo) { a_tmp = zero; c_tmp = zero; }
                 b_tmp      = cell_data(i,j,klo,Rho_comp) - a_tmp - c_tmp;
                 inv_b2_tmp = one;
 
                 RHS_a(i,j,klo) = cell_data(i,j,klo,n); // NOTE: this is rho*phi; solution is phi
-                if (!at_zlo) {
+                if (pin_here_lo) {
+                    // Dirichlet row: no flux terms
+                } else if (!at_zlo) {
                     // Coarse/fine boundary: close the system with the known value below
                     RHS_a(i,j,klo) -= a_tmp * (cell_data(i,j,klo-1,n) / cell_data(i,j,klo-1,Rho_comp));
                 } else if (pin_klo) {
                     // Dirichlet row: no flux terms
-                } else if (use_SurfLayer && scalar_zflux) {
+                } else if (use_SurfLayer && scalar_zflux && !(has_wall_face && wall_face(i,j,klo) == zero)) {
+                    // (a wall cell at klo takes its wall flux from the source, not from the surface layer)
                     RHS_a(i,j,klo) +=  Fact * scalar_zflux(i,j,klo); // NOTE: scalar_zflux = -K*d_z(\phi)
                 } else if (neumann_on_zlo) {
                     RHS_a(i,j,klo) += -Fact * rhoAlpha_lo * bc_neumann_vals[2]; // NOTE: N_val = d_z(\phi)
@@ -170,10 +189,16 @@ ImplicitDiffForStateLU_N (const Box& bx,
             for (int k(klo+1); k < khi; k++) {
                 getRhoAlpha(i, j, k, rhoAlpha_lo, rhoAlpha_hi,
                             cell_data, mu_turb, d_alpha_eff, d_eddy_diff_idz,
-                            prim_index, prim_scal_index, l_consA, l_turb);
+                            prim_scal_index, l_consA, l_turb);
 
                 a_tmp      = -Fact * rhoAlpha_lo * dz_inv;
                 c_tmp      = -Fact * rhoAlpha_hi * dz_inv;
+                if (has_wall_face) {
+                    a_tmp *= wall_face(i,j,k);
+                    c_tmp *= wall_face(i,j,k+1);
+                }
+                const bool pin_here = has_wall_pin && (wall_pin(i,j,k) >= zero);
+                if (pin_here) { a_tmp = zero; c_tmp = zero; }
                 b_tmp      = cell_data(i,j,k,Rho_comp) - a_tmp - c_tmp;
                 inv_b2_tmp = one / (b_tmp - a_tmp * coeffG_a(i,j,k-1));
 
@@ -201,28 +226,39 @@ ImplicitDiffForStateLU_N (const Box& bx,
             {
                 getRhoAlpha(i, j, khi, rhoAlpha_lo, rhoAlpha_hi,
                             cell_data, mu_turb, d_alpha_eff, d_eddy_diff_idz,
-                            prim_index, prim_scal_index, l_consA, l_turb);
+                            prim_scal_index, l_consA, l_turb);
 
                 a_tmp      = -Fact * rhoAlpha_lo * dz_inv;
                 c_tmp      = zero;
                 if (!at_zhi) { c_tmp = -Fact * rhoAlpha_hi * dz_inv; }
+                if (has_wall_face) {
+                    a_tmp *= wall_face(i,j,khi);
+                    if (!at_zhi) { c_tmp *= wall_face(i,j,khi+1); }
+                }
                 b_tmp      = cell_data(i,j,khi,Rho_comp) - a_tmp - c_tmp;
                 inv_b2_tmp = one / (b_tmp - a_tmp * coeffG_a(i,j,khi-1));
 
                 RHS_a(i,j,khi) = cell_data(i,j,khi,n); // NOTE: this is rho*phi; solution is phi
                 if (!at_zhi) {
-                    // Coarse/fine boundary: close the system with the known value above.  The
-                    // countergradient flux then passes through both faces, as it does in the
-                    // interior, rather than only through the lower one.
+                    // Coarse/fine boundary: close the system with the known value above
                     RHS_a(i,j,khi) -= c_tmp * (cell_data(i,j,khi+1,n) / cell_data(i,j,khi+1,Rho_comp));
-                    if (use_mrf_countergradient && (n == RhoTheta_comp || n == RhoQ1_comp)) {
-                        const int gam_comp = (n == RhoTheta_comp) ? EddyDiff::HGAMT_v : EddyDiff::HGAMQ_v;
-                        const Real gam_hi = myhalf * (mu_turb(i, j, khi, gam_comp) + mu_turb(i, j, khi+1, gam_comp));
-                        const Real gam_lo = myhalf * (mu_turb(i, j, khi, gam_comp) + mu_turb(i, j, khi-1, gam_comp));
-                        RHS_a(i,j,khi) -= Fact * (rhoAlpha_hi * gam_hi - rhoAlpha_lo * gam_lo);
-                    }
                 } else if (neumann_on_zhi) {
                     RHS_a(i,j,khi) -= -Fact * rhoAlpha_hi * bc_neumann_vals[5]; // NOTE: N_val = d_z(\phi)
+                }
+
+                // Add countergradient correction to RHS at top boundary.
+                // NOTE: The lower face at khi always carries the countergradient flux, which
+                //       row khi-1 has already taken out of the cell below; without it here
+                //       that flux would leave the column.  The upper face carries it only at
+                //       a coarse/fine boundary -- the domain top is a lid for gamma.
+                if (use_mrf_countergradient && (n == RhoTheta_comp || n == RhoQ1_comp)) {
+                    const int gam_comp = (n == RhoTheta_comp) ? EddyDiff::HGAMT_v : EddyDiff::HGAMQ_v;
+                    const Real gam_lo = myhalf * (mu_turb(i, j, khi, gam_comp) + mu_turb(i, j, khi-1, gam_comp));
+                    RHS_a(i,j,khi) += Fact * rhoAlpha_lo * gam_lo;
+                    if (!at_zhi) {
+                        const Real gam_hi = myhalf * (mu_turb(i, j, khi, gam_comp) + mu_turb(i, j, khi+1, gam_comp));
+                        RHS_a(i,j,khi) -= Fact * rhoAlpha_hi * gam_hi;
+                    }
                 }
 
                 // First solve
@@ -288,8 +324,14 @@ ImplicitDiffForMomLU_N (const Box& bx,
                         const BCRec* bc_ptr,
                         const bool use_SurfLayer,
                         const Real implicit_fac,
-                        const bool use_ysu_mom_countergradient)
+                        const bool use_ysu_mom_countergradient,
+                        const Array4<const Real>& wall_face)
 {
+    // Fraction-stress immersed wall law: wall_face is zero on the bottom face of the wall cell
+    // of each face column (xz or yz edges), which then carries no diffusive coupling; the wall
+    // stress is a source term (ERF_ImmersedWallCell.H). Empty when not in use.
+    const bool has_wall_face = static_cast<bool>(wall_face);
+
     BL_PROFILE_VAR("ImplicitDiffForMom_N()",ImplicitDiffForMom_N);
 
     Real dt = static_cast<Real>(dt_d);
@@ -421,6 +463,7 @@ ImplicitDiffForMomLU_N (const Box& bx,
 
               a_tmp = zero;
               c_tmp = -Fact * rhoAlpha_hi * dz_inv;
+              if (has_wall_face) { c_tmp *= wall_face(i,j,klo+1); }
 
               RHS_a(i,j,klo) = face_data(i,j,klo); // NOTE: this is momenta; solution is velocity
 
@@ -456,10 +499,11 @@ ImplicitDiffForMomLU_N (const Box& bx,
               }
 
               // Add YSU momentum countergradient correction at bottom boundary.
-              // NOTE: As for the scalars, the lower face at klo carries no
+              // NOTE: As for the scalars, the lower face at the domain bottom carries no
               //       countergradient flux -- the surface stress is supplied by the
-              //       surface layer model or the wall BC above.  Only the upper face
-              //       contributes here.
+              //       surface layer model or the wall BC above.  At a coarse/fine boundary
+              //       the lower face is an interior face and carries it, as in the
+              //       interior rows (erf-model/ERF#4822).
               // NOTE: The sign matches the scalar path: tau_i3 = -rho*K*(du_i/dz - gamma_i),
               //       so the countergradient piece of the flux is +rho*K*gamma_i and its
               //       divergence enters the RHS with a minus sign.
@@ -470,8 +514,15 @@ ImplicitDiffForMomLU_N (const Box& bx,
                   const Real gam_kp1 = myhalf * (mu_turb(i,j,klo+1,hgam_comp) + mu_turb(i-ioff,j-joff,klo+1,hgam_comp));
                   const Real gam_hi  = myhalf * (gam_klo + gam_kp1);
                   RHS_a(i,j,klo) -= Fact * rhoAlpha_hi * gam_hi;
+                  if (klo != dom_klo) {
+                      const Real gam_km1 = myhalf * (mu_turb(i,j,klo-1,hgam_comp) + mu_turb(i-ioff,j-joff,klo-1,hgam_comp));
+                      const Real gam_lo  = myhalf * (gam_klo + gam_km1);
+                      RHS_a(i,j,klo) += Fact * rhoAlpha_lo * gam_lo;
+                  }
               }
 
+              // the bottom face of a wall cell at a coarse/fine boundary carries no coupling either
+              if (has_wall_face) { a_tmp *= wall_face(i,j,klo); }
               b_tmp      = rhoface - a_tmp - c_tmp;
               inv_b2_tmp = one;
 
@@ -489,6 +540,10 @@ ImplicitDiffForMomLU_N (const Box& bx,
 
               a_tmp      = -Fact * rhoAlpha_lo * dz_inv;
               c_tmp      = -Fact * rhoAlpha_hi * dz_inv;
+              if (has_wall_face) {
+                  a_tmp *= wall_face(i,j,k);
+                  c_tmp *= wall_face(i,j,k+1);
+              }
               b_tmp      = rhoface - a_tmp - c_tmp;
               inv_b2_tmp = one/ (b_tmp - a_tmp * coeffG_a(i,j,k-1));
 
@@ -521,6 +576,7 @@ ImplicitDiffForMomLU_N (const Box& bx,
 
               a_tmp = -Fact * rhoAlpha_lo * dz_inv;
               c_tmp = zero;
+              if (has_wall_face) { a_tmp *= wall_face(i,j,khi); }
 
               RHS_a(i,j,khi)  = face_data(i,j,khi); // NOTE: this is momenta; solution is velocity
               RHS_a(i,j,khi) += Fact * (tau_corr(i,j,khi+1) - tau_corr(i,j,khi));
@@ -545,6 +601,26 @@ ImplicitDiffForMomLU_N (const Box& bx,
                                                  + cell_data(i-ioff,j-joff,khi+1,Rho_comp) );
                   const Real wall_velocity = face_data(i,j,khi+1) / rho_wall;
                   RHS_a(i,j,khi) -= c_tmp * wall_velocity;
+              }
+
+              // Add YSU momentum countergradient correction at top boundary.
+              // NOTE: The lower face at khi is the interior face shared with row khi-1, which
+              //       has already taken this flux out of the cell below, so it always carries
+              //       it; without it here the flux left the column (erf-model/ERF#4822).  The
+              //       upper face carries it only at a coarse/fine boundary -- the domain top
+              //       is a lid for gamma, as for the scalars.
+              if (use_ysu_mom_countergradient) {
+                  const int hgam_comp = (stagdir == 0) ? EddyDiff::HGAMU_v : EddyDiff::HGAMV_v;
+                  // Average HGAM* to the staggered face
+                  const Real gam_khi = myhalf * (mu_turb(i,j,khi  ,hgam_comp) + mu_turb(i-ioff,j-joff,khi  ,hgam_comp));
+                  const Real gam_km1 = myhalf * (mu_turb(i,j,khi-1,hgam_comp) + mu_turb(i-ioff,j-joff,khi-1,hgam_comp));
+                  const Real gam_lo  = myhalf * (gam_khi + gam_km1);
+                  RHS_a(i,j,khi) += Fact * rhoAlpha_lo * gam_lo;
+                  if (khi != dom_khi) {
+                      const Real gam_kp1 = myhalf * (mu_turb(i,j,khi+1,hgam_comp) + mu_turb(i-ioff,j-joff,khi+1,hgam_comp));
+                      const Real gam_hi  = myhalf * (gam_khi + gam_kp1);
+                      RHS_a(i,j,khi) -= Fact * rhoAlpha_hi * gam_hi;
+                  }
               }
 
               b_tmp      = rhoface - a_tmp - c_tmp;
@@ -592,7 +668,8 @@ ImplicitDiffForMomLU_N (const Box& bx,
         const BCRec*, \
         const bool, \
         const Real, \
-        const bool);
+        const bool, \
+        const Array4<const Real>&);
 INSTANTIATE_IMPLICIT_DIFF_FOR_MOM_LU(0)
 INSTANTIATE_IMPLICIT_DIFF_FOR_MOM_LU(1)
 #undef INSTANTIATE_IMPLICIT_DIFF_FOR_MOM_LU
@@ -645,7 +722,7 @@ ImplicitVerticalFluxForReflux_N (const Box& bx,
         Real rhoAlpha_lo, rhoAlpha_hi;
         const int kc = (k <= khi) ? k : k-1;
         getRhoAlpha(i, j, kc, rhoAlpha_lo, rhoAlpha_hi, cell_data, mu_turb, d_alpha_eff, d_eddy_diff_idz,
-                    prim_index, prim_scal_index, l_consA, l_turb);
+                    prim_scal_index, l_consA, l_turb);
         const Real rhoAlpha = (k <= khi) ? rhoAlpha_lo : rhoAlpha_hi;
         const Real phi_hi = cell_data(i,j,k  ,n) / cell_data(i,j,k  ,Rho_comp);
         const Real phi_lo = cell_data(i,j,k-1,n) / cell_data(i,j,k-1,Rho_comp);
