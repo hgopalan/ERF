@@ -22,6 +22,7 @@
 #include "ERF_RadStruct.H"
 #include "ERF_ShocTransportStruct.H"
 #include "ERF_CanopyTurbStruct.H"
+#include "ERF_MOSTUtils.H"
 
 /**
  * Enum of possible plotfile types.
@@ -79,22 +80,47 @@ AMREX_ENUM(CouplingType,
 );
 
 /**
- * @brief Acoustic substepping strategy.
+ * @brief Values of the deprecated erf.substepping_type; read only to map them onto
+ *        TimesteppingType.
  */
 AMREX_ENUM(SubsteppingType,
     None, Implicit
 );
 
 /**
- * @brief Two-stage scheme used by the anelastic time integrator.
+ * @brief Compressibility of the equations solved at a level.
  *
- * RK2 is the SSP (Heun) scheme: both stages advance a full timestep from the old
- * state and the second averages the two slow sources.  MidPoint advances only a
- * half timestep in the first stage, which makes the vertical diffusion second
- * order in time with an implicit solve in the first stage alone.
+ * FullyCompressible solves the compressible equations with acoustic substepping.
+ * Anelastic holds the density at its base-state value and projects the velocity.
+ * PseudoIncompressible currently takes exactly the anelastic path.
+ */
+AMREX_ENUM(CompressibilityType,
+    FullyCompressible, Anelastic, PseudoIncompressible
+);
+
+/**
+ * @brief Values of the deprecated erf.anelastic_type; read only to map them onto
+ *        TimesteppingType.
  */
 AMREX_ENUM(AnelasticType,
     RK2, MidPoint
+);
+
+/**
+ * @brief Time integrator used at a level.
+ *
+ * At a FullyCompressible level:
+ *   RK3_ImplicitSubstep is the three-stage RK3 with implicit acoustic substepping;
+ *   RK3_NoSubstepping is the three-stage SSP-RK3 with no acoustic substepping.
+ * At an Anelastic or PseudoIncompressible level (never any acoustic substepping):
+ *   RK2 is the SSP (Heun) scheme: both stages advance a full timestep from the old
+ *   state and the second averages the two slow sources;
+ *   MidPoint advances only a half timestep in the first stage, which makes the
+ *   vertical diffusion second order in time with an implicit solve in the first
+ *   stage alone.
+ */
+AMREX_ENUM(TimesteppingType,
+    RK3_ImplicitSubstep, RK3_NoSubstepping, RK2, MidPoint
 );
 
 /**
@@ -143,19 +169,6 @@ AMREX_ENUM(MoistureModelType,
 AMREX_ENUM(MoistureType,
     SAM, SAM_NoIce, SAM_NoPrecip_NoIce, Kessler, Kessler_NoRain, SatAdj, Morrison, Morrison_NoIce, WSM6, WDM6, SuperDroplets, MoistNoCondensation, SBM, None
 );
-
-/**
- * @brief Whether an anelastic SuperDroplets configuration is unsupported.
- *
- * The current SuperDroplets implementation diagnoses thermodynamics through
- * the compressible equation of state and has no BaseState pressure input.
- */
-inline bool anelastic_superdroplets_configuration_invalid (
-    const MoistureType moisture_type,
-    const bool any_anelastic) noexcept
-{
-    return any_anelastic && moisture_type == MoistureType::SuperDroplets;
-}
 
 /**
  * @brief Wind-farm model.
@@ -288,11 +301,17 @@ struct MoistureComponentIndices {
     // handed out by the microphysics interface.  Slot numbers are scheme
     // specific, which is exactly why they belong in this per-scheme map.
     // ---------------------------------------------------------------------
-    int rain_accum  = absent;  //!< accumulated surface rain
-    int snow_accum  = absent;  //!< accumulated surface snow
-    int graup_accum = absent;  //!< accumulated surface graupel
-    int rel_hum     = absent;  //!< relative humidity
-    int cond_rate   = absent;  //!< condensation rate
+    //
+    // The accumulations are what reached the ground, in mm of liquid water:
+    // rain, snow and graupel each hold that species alone, and precip_accum
+    // holds everything that fell out -- those three plus whatever cloud water
+    // and cloud ice the scheme sediments -- so it can exceed their sum.
+    int rain_accum    = absent;  //!< accumulated surface rain
+    int snow_accum    = absent;  //!< accumulated surface snow
+    int graupel_accum = absent;  //!< accumulated surface graupel
+    int precip_accum  = absent;  //!< accumulated surface precipitation, all species
+    int rel_hum       = absent;  //!< relative humidity
+    int cond_rate     = absent;  //!< condensation rate
 
     /**
      * @brief Construct the conserved-state component map.
@@ -377,10 +396,13 @@ struct MoistureComponentIndices {
 
         case MoistureType::Kessler:
             // Warm rain in three moist components; qmoist is {rain_accum}.
-            mi.qv         = RhoQ1_comp;
-            mi.qc         = RhoQ2_comp;
-            mi.qr         = RhoQ3_comp;
-            mi.rain_accum = 0;
+            // Rain is the only species that falls, so the precipitation total
+            // is the rain accumulation itself.
+            mi.qv           = RhoQ1_comp;
+            mi.qc           = RhoQ2_comp;
+            mi.qr           = RhoQ3_comp;
+            mi.rain_accum   = 0;
+            mi.precip_accum = 0;
             break;
 
         case MoistureType::SBM:
@@ -394,25 +416,27 @@ struct MoistureComponentIndices {
         case MoistureType::SAM_NoIce:
             // The SAM class always allocates six moist components, so rain sits
             // in the fourth slot even with the ice species switched off.
-            mi.qv         = RhoQ1_comp;
-            mi.qc         = RhoQ2_comp;
-            mi.qr         = RhoQ4_comp;
-            mi.rain_accum = 0;
+            mi.qv           = RhoQ1_comp;
+            mi.qc           = RhoQ2_comp;
+            mi.qr           = RhoQ4_comp;
+            mi.rain_accum   = 0;
+            mi.precip_accum = 3;
             break;
 
         case MoistureType::SAM:
         case MoistureType::WSM6:
             // Single-moment mixed phase; qmoist is
-            // {rain_accum, snow_accum, graup_accum}.
-            mi.qv          = RhoQ1_comp;
-            mi.qc          = RhoQ2_comp;
-            mi.qi          = RhoQ3_comp;
-            mi.qr          = RhoQ4_comp;
-            mi.qs          = RhoQ5_comp;
-            mi.qg          = RhoQ6_comp;
-            mi.rain_accum  = 0;
-            mi.snow_accum  = 1;
-            mi.graup_accum = 2;
+            // {rain_accum, snow_accum, graupel_accum, precip_accum}.
+            mi.qv            = RhoQ1_comp;
+            mi.qc            = RhoQ2_comp;
+            mi.qi            = RhoQ3_comp;
+            mi.qr            = RhoQ4_comp;
+            mi.qs            = RhoQ5_comp;
+            mi.qg            = RhoQ6_comp;
+            mi.rain_accum    = 0;
+            mi.snow_accum    = 1;
+            mi.graupel_accum = 2;
+            mi.precip_accum  = 3;
             break;
 
         case MoistureType::Morrison:
@@ -429,9 +453,10 @@ struct MoistureComponentIndices {
             mi.nr          = RhoQ9_comp;
             mi.ns          = RhoQ10_comp;
             mi.ng          = RhoQ11_comp;
-            mi.rain_accum  = 0;
-            mi.snow_accum  = 1;
-            mi.graup_accum = 2;
+            mi.rain_accum    = 0;
+            mi.snow_accum    = 1;
+            mi.graupel_accum = 2;
+            mi.precip_accum  = 3;
             break;
 
         case MoistureType::Morrison_NoIce:
@@ -442,9 +467,10 @@ struct MoistureComponentIndices {
             mi.qv         = RhoQ1_comp;
             mi.qc         = RhoQ2_comp;
             mi.qr         = RhoQ4_comp;
-            mi.nc         = RhoQ7_comp;
-            mi.nr         = RhoQ9_comp;
-            mi.rain_accum = 0;
+            mi.nc           = RhoQ7_comp;
+            mi.nr           = RhoQ9_comp;
+            mi.rain_accum   = 0;
+            mi.precip_accum = 3;
             break;
 
         case MoistureType::WDM6:
@@ -460,9 +486,10 @@ struct MoistureComponentIndices {
             mi.nc          = RhoQ7_comp;
             mi.nn          = RhoQ8_comp;
             mi.nr          = RhoQ9_comp;
-            mi.rain_accum  = 0;
-            mi.snow_accum  = 1;
-            mi.graup_accum = 2;
+            mi.rain_accum    = 0;
+            mi.snow_accum    = 1;
+            mi.graupel_accum = 2;
+            mi.precip_accum  = 3;
             break;
 
         case MoistureType::SuperDroplets:
@@ -476,10 +503,11 @@ struct MoistureComponentIndices {
             mi.qr         = RhoQ4_comp;
             mi.qs         = RhoQ5_comp;
             mi.qg         = RhoQ6_comp;
-            mi.cond_rate  = 3;
-            mi.rel_hum    = 7;
-            mi.rain_accum = 8;
-            mi.snow_accum = 10;
+            mi.cond_rate    = 3;
+            mi.rel_hum      = 7;
+            mi.rain_accum   = 8;
+            mi.snow_accum   = 10;
+            mi.precip_accum = 11;
             break;
 
         default:
@@ -614,7 +642,8 @@ struct MoistureComponentIndices {
     [[nodiscard]] int qmoist_index_for_var (const std::string& name) const {
         if (name == "rain_accum")        { return rain_accum; }
         if (name == "snow_accum")        { return snow_accum; }
-        if (name == "graup_accum")       { return graup_accum; }
+        if (name == "graupel_accum")     { return graupel_accum; }
+        if (name == "precip_accum")      { return precip_accum; }
         if (name == "rel_humidity")      { return rel_hum; }
         if (name == "condensation_rate") { return cond_rate; }
         return absent;
@@ -652,7 +681,8 @@ struct MoistureComponentIndices {
 
         // Moist diagnostics, either from a qmoist array or derived at output time
         if ( (name == "rain_accum") || (name == "snow_accum") ||
-             (name == "graup_accum") || (name == "rel_humidity") ||
+             (name == "graupel_accum") || (name == "precip_accum") ||
+             (name == "rel_humidity") ||
              (name == "condensation_rate") ) {
             return {true, qmoist_index_for_var(name) != absent};
         }
@@ -717,6 +747,14 @@ struct SolverChoice {
 
         // Do we set map scale factors to myhalf instead of 1 for testing?
         pp.queryAdd("test_mapfactor", test_mapfactor);
+
+        // For testing: if nonzero, the map scale factors on level 0 vary smoothly in space,
+        // m = 1 + test_mapfactor_amp sin(2 pi x / Lx) cos(2 pi y / Ly), as if read from an init file
+        // there; finer levels take theirs from the coarser level, as a level without a file does
+        pp.queryAdd("test_mapfactor_amp", test_mapfactor_amp);
+        if (test_mapfactor && test_mapfactor_amp != amrex::Real(0)) {
+            amrex::Abort("erf.test_mapfactor and erf.test_mapfactor_amp cannot be used together");
+        }
 
         // Which horizontal pressure gradient formulation to use with terrain fitted coords?
         // 0: dp/dx with dp/dz correction (default)
@@ -890,6 +928,7 @@ struct SolverChoice {
         if (buildings_type_temp == "ImmersedForcing") {
             buildings_type = BuildingsType::ImmersedForcing;
         }
+        pp.queryAdd("buildings_fc_factories", buildings_fc_factories);
 
         //
         // Read the init_type here to make sure we correctly set the mesh and terrain types
@@ -961,6 +1000,12 @@ struct SolverChoice {
         // fluxes through coarse/fine faces from the coarse level (cf_flux_history_active)
         if (terrain_type == TerrainType::MovingFittedMesh && max_level > 0) {
             amrex::Error("erf.terrain_type = MovingFittedMesh requires amr.max_level = 0");
+        }
+
+        // Immersed-forcing buildings need the terrain blanking that init_zphys builds, and
+        // init_zphys returns before building it when the terrain is EB
+        if (terrain_type == TerrainType::EB && buildings_type == BuildingsType::ImmersedForcing) {
+            amrex::Error("erf.buildings_type = ImmersedForcing is not supported with erf.terrain_type = EB");
         }
 
         if ( (moisture_type == MoistureType::SAM                ||
@@ -1057,10 +1102,35 @@ struct SolverChoice {
         rdOcp = R_d / c_p;
 
         // *******************************************************************************
-        // Read anelastic etc and over-ride if necessary
+        // Read compressibility_type etc and over-ride if necessary
         // *******************************************************************************
 
-        read_int_string(max_level, "anelastic", anelastic, 0);
+        compressibility_type.resize(max_level+1);
+        for (int i = 0; i <= max_level; ++i) {
+            compressibility_type[i] = CompressibilityType::FullyCompressible;
+        }
+        if (pp.contains("compressibility_type") && pp.contains("anelastic")) {
+            amrex::Abort("Specify only one of erf.compressibility_type and erf.anelastic "
+                         "(erf.anelastic is deprecated)");
+        }
+        if (pp.contains("anelastic")) {
+            amrex::Print() << "WARNING: erf.anelastic is deprecated; use erf.compressibility_type"
+                           << " = FullyCompressible, Anelastic or PseudoIncompressible" << std::endl;
+            amrex::Vector<int> anelastic;
+            read_int_string(max_level, "anelastic", anelastic, 0);
+            for (int i = 0; i <= max_level; ++i) {
+                if (anelastic[i] != 0 && anelastic[i] != 1) {
+                    amrex::Abort("erf.anelastic must be 0 or 1");
+                }
+                compressibility_type[i] = (anelastic[i] != 0) ? CompressibilityType::Anelastic
+                                                              : CompressibilityType::FullyCompressible;
+            }
+        } else {
+            for (int i = 0; i <= max_level; ++i) {
+                query_one_or_per_level_enum_case_insensitive(
+                    pp, "compressibility_type", compressibility_type[i], i, max_level);
+            }
+        }
         const bool fixed_density_given =
             read_int_string(max_level, "fixed_density", fixed_density, 0);
         read_int_string(max_level, "project_initial_velocity", project_initial_velocity, 0);
@@ -1071,11 +1141,11 @@ struct SolverChoice {
         bool any_anelastic = false;
         bool any_compress  = false;
         for (int i = 0; i <= max_level; ++i) {
-            if (anelastic[i] == 1) {
+            if (compressibility_type[i] != CompressibilityType::FullyCompressible) {
                 if (fixed_density_given && fixed_density[i] == 0) {
                     amrex::Print() << "WARNING: erf.fixed_density = 0 is ignored at level " << i
-                                   << " because erf.anelastic = 1 there; the anelastic equations"
-                                   << " always hold the density fixed in time." << std::endl;
+                                   << " because erf.compressibility_type is not FullyCompressible there; the anelastic"
+                                   << " and pseudo-incompressible equations always hold the density fixed in time." << std::endl;
                 }
                 project_initial_velocity[i] = 1;
                 fixed_density[i]            = 1; // Always fixed when anelastic
@@ -1084,13 +1154,6 @@ struct SolverChoice {
             } else {
                 any_compress                = true;
             }
-        }
-
-        if (anelastic_superdroplets_configuration_invalid(moisture_type, any_anelastic)) {
-            amrex::Error("erf.moisture_model = SuperDroplets is not supported with "
-                         "erf.anelastic = 1: the Super-Droplet path currently uses "
-                         "the compressible equation of state. Use compressible "
-                         "dynamics or a supported Eulerian moisture model.");
         }
 
         // Want to have different immersed forcing defaults depending on anelastic or fully compressible.
@@ -1107,36 +1170,72 @@ struct SolverChoice {
         }
 
         // *******************************************************************************
-        // Read anelastic_type and allow for different values at each level
+        // Read timestepping_type and allow for different values at each level.  The default
+        // depends on the level's compressibility: RK3_ImplicitSubstep at a FullyCompressible
+        // level, RK2 otherwise.
         // *******************************************************************************
-        anelastic_type.resize(max_level+1);
-
+        timestepping_type.resize(max_level+1);
         for (int i = 0; i <= max_level; i++) {
-            anelastic_type[i] = AnelasticType::RK2;
+            timestepping_type[i] = (compressibility_type[i] == CompressibilityType::FullyCompressible)
+                                 ? TimesteppingType::RK3_ImplicitSubstep : TimesteppingType::RK2;
         }
 
-        for (int i = 0; i <= max_level; i++) {
-            query_one_or_per_level_enum_case_insensitive(
-                pp, "anelastic_type", anelastic_type[i], i, max_level);
+        const bool substepping_type_given = pp.contains("substepping_type");
+        const bool anelastic_type_given   = pp.contains("anelastic_type");
+        if (pp.contains("timestepping_type")) {
+            if (substepping_type_given || anelastic_type_given) {
+                amrex::Abort("Specify erf.timestepping_type or the deprecated erf.substepping_type / "
+                             "erf.anelastic_type, not both");
+            }
+            for (int i = 0; i <= max_level; i++) {
+                query_one_or_per_level_enum_case_insensitive(
+                    pp, "timestepping_type", timestepping_type[i], i, max_level);
+            }
+        } else {
+            // The deprecated inputs: erf.substepping_type applied only at FullyCompressible
+            // levels and erf.anelastic_type only at the others
+            if (substepping_type_given) {
+                amrex::Print() << "WARNING: erf.substepping_type is deprecated; use erf.timestepping_type"
+                               << " = RK3_ImplicitSubstep or RK3_NoSubstepping" << std::endl;
+                for (int i = 0; i <= max_level; i++) {
+                    SubsteppingType sub = SubsteppingType::Implicit;
+                    query_one_or_per_level_enum_case_insensitive(pp, "substepping_type", sub, i, max_level);
+                    if (compressibility_type[i] == CompressibilityType::FullyCompressible) {
+                        timestepping_type[i] = (sub == SubsteppingType::None)
+                                             ? TimesteppingType::RK3_NoSubstepping
+                                             : TimesteppingType::RK3_ImplicitSubstep;
+                    }
+                }
+            }
+            if (anelastic_type_given) {
+                amrex::Print() << "WARNING: erf.anelastic_type is deprecated; use erf.timestepping_type"
+                               << " = RK2 or MidPoint" << std::endl;
+                if (!any_anelastic) {
+                    amrex::Print() << "Ignoring erf.anelastic_type because every level is FullyCompressible"
+                                   << std::endl;
+                }
+                for (int i = 0; i <= max_level; i++) {
+                    AnelasticType anelastic_scheme = AnelasticType::RK2;
+                    query_one_or_per_level_enum_case_insensitive(pp, "anelastic_type", anelastic_scheme, i, max_level);
+                    if (compressibility_type[i] != CompressibilityType::FullyCompressible) {
+                        timestepping_type[i] = (anelastic_scheme == AnelasticType::MidPoint)
+                                             ? TimesteppingType::MidPoint : TimesteppingType::RK2;
+                    }
+                }
+            }
         }
 
-        if (pp.contains("anelastic_type") && !any_anelastic) {
-            amrex::Print() << "Ignoring erf.anelastic_type because no level is anelastic" << std::endl;
-            for (int i = 0; i <= max_level; i++) { anelastic_type[i] = AnelasticType::RK2; }
-        }
-
-        // *******************************************************************************
-        // Read substepping_type and allow for different values at each level
-        // *******************************************************************************
-        substepping_type.resize(max_level+1);
-
+        // RK3_* are the FullyCompressible integrators and RK2 / MidPoint the others
         for (int i = 0; i <= max_level; i++) {
-            substepping_type[i] = SubsteppingType::Implicit;
-        }
-
-        for (int i = 0; i <= max_level; i++) {
-            query_one_or_per_level_enum_case_insensitive(
-                pp, "substepping_type", substepping_type[i], i, max_level);
+            const bool fc = (compressibility_type[i] == CompressibilityType::FullyCompressible);
+            const bool rk3 = (timestepping_type[i] == TimesteppingType::RK3_ImplicitSubstep ||
+                              timestepping_type[i] == TimesteppingType::RK3_NoSubstepping);
+            if (fc != rk3) {
+                amrex::Abort("erf.timestepping_type at level " + std::to_string(i) + " must be " +
+                             (fc ? "RK3_ImplicitSubstep or RK3_NoSubstepping because the level is "
+                                   "FullyCompressible"
+                                 : "RK2 or MidPoint because the level is not FullyCompressible"));
+            }
         }
 
         pp.queryAdd("substepping_diag", substepping_diag);
@@ -1166,7 +1265,7 @@ struct SolverChoice {
         // *******************************************************************************
         int nvals_old = pp.countval("no_substepping");
         if (nvals_old > 0) {
-            amrex::Error("The no_substepping flag is deprecated -- set substepping_type instead");
+            amrex::Error("The no_substepping flag is deprecated -- set erf.timestepping_type instead");
         }
 
         pp.queryAdd("ncorr", ncorr);
@@ -1192,13 +1291,6 @@ struct SolverChoice {
         poisson_abstol = amrex::max(poisson_abstol,amrex::Real(1e-6));
         poisson_reltol = amrex::max(poisson_reltol,amrex::Real(1e-6));
 #endif
-        for (int lev = 0; lev <= max_level; lev++) {
-            if (anelastic[lev] != 0)
-            {
-                substepping_type[lev] = SubsteppingType::None;
-            }
-        }
-
         pp.queryAdd("force_stage1_single_substep", force_stage1_single_substep);
 
         // Include Coriolis forcing?
@@ -1247,6 +1339,8 @@ struct SolverChoice {
         if_surf_heating_rate /= amrex::Real(3600.0);        // [K/s]
 
         pp.queryAdd("if_Olen", if_Olen_in);
+        pp.queryAdd("if_surf_moist_flux", if_surf_moist_flux);
+        pp.queryAdd("if_surf_moist", if_surf_moist);
         pp.queryAdd("if_use_most",if_use_most);
         pp.queryAdd("if_snap_partial_cells",if_snap_partial_cells);
         // The snapped staircase puts full-strength forcing on every wall face,
@@ -1258,6 +1352,127 @@ struct SolverChoice {
             if_implicit_drag = true;
         }
         pp.queryAdd("if_stability_correction",if_stability_correction);
+
+        // Wall law of the terrain immersed forcing (erf-model/ERF#4134): "legacy" (the default)
+        // relaxes the top partial cell toward the log law at fixed 0.5/1.5 dz;
+        // "fraction_stress" applies the wall stress of ERF_ImmersedWallCell.H in the wall cell
+        // and closes the wall face to diffusion (form 7 of the kynema-sgf immersed terrain)
+        std::string if_wall_form_in = "legacy";
+        pp.queryAdd("if_wall_form", if_wall_form_in);
+        if (if_wall_form_in == "fraction_stress") {
+            if_fraction_stress = true;
+        } else if (if_wall_form_in != "legacy") {
+            amrex::Abort("erf.if_wall_form must be legacy or fraction_stress, not " + if_wall_form_in);
+        }
+        // Spacing of the face above the wall cell (fraction_stress only): "log" (default) gives
+        // that face the relative error of flat ground's first interior face for a log profile,
+        // "physical" the centroid spacing, "grid" the cell height (ib_wall::face_above_factor)
+        // (the keys below are accepted at their default values with the legacy law, so one deck
+        // can run both laws; any other value belongs to fraction_stress)
+        std::string if_wall_face_spacing_in = "log";
+        pp.queryAdd("if_wall_face_spacing", if_wall_face_spacing_in);
+        if (if_wall_face_spacing_in != "log" && !if_fraction_stress) {
+            amrex::Abort("erf.if_wall_face_spacing belongs to erf.if_wall_form = fraction_stress");
+        }
+        if      (if_wall_face_spacing_in == "grid")     { if_wall_face_spacing = 0; }
+        else if (if_wall_face_spacing_in == "physical") { if_wall_face_spacing = 1; }
+        else if (if_wall_face_spacing_in == "log")      { if_wall_face_spacing = 2; }
+        else { amrex::Abort("erf.if_wall_face_spacing must be log, physical or grid"); }
+        // Wall value of the k-eqn TKE in the fraction-stress wall cell, (u*^3 + kappa B d1)^(2/3)
+        // / Cmu0^2 (the value erf.dirichlet_k holds over flat ground): with a time factor of 1
+        // (the default) the wall cell is held at it after every stage and in the implicit TKE
+        // solve, as flat ground is; a larger factor relaxes toward it as a source over that many
+        // steps (the kynema-sgf form)
+        pp.queryAdd("if_wall_tke", if_wall_tke);
+        pp.queryAdd("if_wall_tke_time_factor", if_wall_tke_time_factor);
+        if ((if_wall_tke || if_wall_tke_time_factor != one) && !if_fraction_stress) {
+            amrex::Abort("erf.if_wall_tke = true and erf.if_wall_tke_time_factor != 1 belong to erf.if_wall_form = fraction_stress");
+        }
+        if (!(if_wall_tke_time_factor >= one)) {
+            amrex::Abort("erf.if_wall_tke_time_factor must be >= 1 (steps over which the wall TKE is relaxed)");
+        }
+        // Partial wall cells of the fraction-stress law dissipate TKE with the length scale of flat
+        // ground's first cell (kynema-sgf KLAxell.flat_wall_dissipation); on by default with it.
+        // query, not queryAdd: the default depends on erf.if_wall_form, so storing it would make a
+        // later init_params in the same process (the unit tests) see it as given (cf. #4940)
+        if_flat_wall_dissipation = if_fraction_stress;
+        pp.query("if_flat_wall_dissipation", if_flat_wall_dissipation);
+        if (if_flat_wall_dissipation && !if_fraction_stress) {
+            amrex::Abort("erf.if_flat_wall_dissipation = true belongs to erf.if_wall_form = fraction_stress");
+        }
+        if (if_fraction_stress) {
+            if (terrain_type != TerrainType::ImmersedForcing) {
+                amrex::Abort("erf.if_wall_form = fraction_stress needs erf.terrain_type = ImmersedForcing");
+            }
+            if (buildings_type == BuildingsType::ImmersedForcing) {
+                amrex::Abort("erf.if_wall_form = fraction_stress is not available with erf.buildings_type = ImmersedForcing");
+            }
+            if (!if_use_most) {
+                amrex::Abort("erf.if_wall_form = fraction_stress is a wall law: it needs erf.if_use_most = true");
+            }
+            if (mesh_type != MeshType::ConstantDz) {
+                amrex::Abort("erf.if_wall_form = fraction_stress needs a constant-dz mesh");
+            }
+            // The wall heat flux and the wall TKE are written by the slow scalar source; the
+            // compressible fast substep (erf.immersed_forcing_substep) does not carry them
+            if (immersed_forcing_substep) {
+                amrex::Abort("erf.if_wall_form = fraction_stress runs with the anelastic model (erf.compressibility_type not FullyCompressible on "
+                             "every level); it does not support erf.immersed_forcing_substep = true");
+            }
+            // ... and the solid cells are held (rho, theta, the moisture species) by the anelastic
+            // update only
+            for (int lev = 0; lev <= max_level; ++lev) {
+                if (compressibility_type[lev] == CompressibilityType::FullyCompressible) {
+                    amrex::Abort("erf.if_wall_form = fraction_stress needs erf.compressibility_type not FullyCompressible on every level (level " +
+                                 std::to_string(lev) + " is compressible)");
+                }
+            }
+            // One surface condition (heat flux, surface temperature - optionally changing at
+            // erf.if_surf_heating_rate - or Obukhov length; none is neutral, checked below); the
+            // MOST stability functions always apply, as on the flat surface layer, so
+            // erf.if_stability_correction (a legacy switch) must not be set
+            if (if_surf_heating_rate != zero && !(if_init_surf_temp > zero)) {
+                amrex::Abort("erf.if_surf_heating_rate needs erf.if_init_surf_temp");
+            }
+            if (if_stability_correction) {
+                amrex::Abort("erf.if_wall_form = fraction_stress always applies the stability functions; "
+                             "erf.if_stability_correction is for the legacy wall law");
+            }
+        }
+        // Surface moisture condition of the fraction-stress law: a given kinematic moisture flux or
+        // a given surface mixing ratio (not both), as erf.most.surf_moist_flux / erf.most.surf_moist
+        // on flat ground; it needs a moisture model that carries water vapour (the wall cell's qv
+        // and the cell above's enter q* and the Obukhov length)
+        {
+            const bool moist_flux_set = (if_surf_moist_flux != zero);
+            const bool moist_surf_set = (if_surf_moist >= zero);
+            if (moist_flux_set || moist_surf_set) {
+                if (!if_fraction_stress) {
+                    amrex::Abort("erf.if_surf_moist_flux and erf.if_surf_moist belong to erf.if_wall_form = fraction_stress");
+                }
+                if (moist_flux_set && moist_surf_set) {
+                    amrex::Abort("erf.if_surf_moist_flux and erf.if_surf_moist: give one surface moisture condition, not both");
+                }
+                if (moisture_indices.qv == MoistureComponentIndices::absent) {
+                    amrex::Abort("erf.if_surf_moist_flux / erf.if_surf_moist need a moisture model that carries water vapour "
+                                 "(erf.moisture_model)");
+                }
+                if (!(std::abs(if_surf_moist_flux) <= amrex::Real(0.01))) {
+                    amrex::Abort("erf.if_surf_moist_flux must be in [-0.01, 0.01] kg/kg m/s (a kinematic surface moisture flux; "
+                                 "0.0001 is a strong evaporation)");
+                }
+                if (moist_surf_set && !(if_surf_moist <= amrex::Real(0.1))) {
+                    amrex::Abort("erf.if_surf_moist must be in [0, 0.1] kg/kg (a surface water vapour mixing ratio)");
+                }
+            }
+        }
+        // The wall laws that evaluate the stability functions (the legacy law with
+        // erf.if_stability_correction, the fraction_stress law) take the surface layer's
+        // similarity functions (the unqualified erf.most.stable_functions, erf.most.qnse_*);
+        // read here because an immersed run need not have a surface-layer boundary
+        if (if_use_most && (if_stability_correction || if_fraction_stress)) {
+            most_sfuns = read_most_similarity_funs(pp, "Immersed wall law");
+        }
         pp.queryAdd("if_ws_floor",if_ws_floor);
         pp.queryAdd("if_damp_alpha",if_damp_alpha);
         // Opt-in WRF-style bounds on the wall law (erf-model/ERF#4016): the wind floor behind the
@@ -1270,6 +1485,60 @@ struct SolverChoice {
         }
         if (!(if_psi_cap_factor > zero && if_psi_cap_factor <= one)) {
             amrex::Abort("erf.if_psi_cap_factor must be in (0, 1] (1 caps psi at ln(z/z0))");
+        }
+        // The cell average down over immersed-forcing levels (erf-model/ERF#4918): the plain
+        // average (the default), or one weighted by the fluid mass of the fine cells
+        pp.queryAdd("if_average_down", if_average_down);
+        if (if_average_down != "plain" && if_average_down != "fluid_mass") {
+            amrex::Abort("erf.if_average_down must be plain or fluid_mass");
+        }
+        // (queryAdd puts the default into the table, so the test is on the value, not on contains)
+        if (if_average_down == "fluid_mass" &&
+            terrain_type != TerrainType::ImmersedForcing && buildings_type != BuildingsType::ImmersedForcing)
+        {
+            amrex::Abort("erf.if_average_down = fluid_mass needs erf.terrain_type = ImmersedForcing "
+                         "or erf.buildings_type = ImmersedForcing");
+        }
+        // Warn at start-up where a lateral coarse/fine boundary crosses the immersed surface so
+        // that the levels disagree: spread of the fine solid fractions under a coarse edge cell
+        // at least this (0 turns the check off)
+        pp.queryAdd("if_cf_mismatch_warning", if_cf_mismatch_warning);
+        if (!(if_cf_mismatch_warning >= zero && if_cf_mismatch_warning <= one)) {
+            amrex::Abort("erf.if_cf_mismatch_warning must be in [0, 1] (a spread of solid fractions; 0 turns it off)");
+        }
+        // Log-law share of the wall coarse face's flux among its fine sub-faces at the lateral
+        // coarse/fine faces (erf-model/ERF#4920): the immersed surface or a surface-layer bottom
+        // (checked in check_params); constant dz, not EB terrain. The roughness length defaults
+        // to erf.if_z0 with immersed forcing and to the inputs' erf.most.z0 or erf.zlo.most.z0
+        // (0.1 m when neither is given) otherwise.
+        pp.queryAdd("cf_loglaw_fill", cf_loglaw_fill);
+        const bool z0_given = pp.query("cf_loglaw_z0", cf_loglaw_z0);
+        if (z0_given && !cf_loglaw_fill) {
+            amrex::Abort("erf.cf_loglaw_z0 belongs to erf.cf_loglaw_fill = true");
+        }
+        if (cf_loglaw_fill) {
+            if (mesh_type != MeshType::ConstantDz) {
+                amrex::Abort("erf.cf_loglaw_fill needs a constant-dz mesh");
+            }
+            if (terrain_type == TerrainType::EB) {
+                amrex::Abort("erf.cf_loglaw_fill is not implemented for erf.terrain_type = EB "
+                             "(its wall is not the bottom of the domain)");
+            }
+            if (!z0_given) {
+                if (terrain_type == TerrainType::ImmersedForcing || buildings_type == BuildingsType::ImmersedForcing) {
+                    cf_loglaw_z0 = if_z0;
+                } else {
+                    // the roughness given in the inputs for the bottom surface layer
+                    // (erf.most.z0, or erf.zlo.most.z0 when the faces are set one by one); a
+                    // roughness a land model supplies later is not seen here
+                    cf_loglaw_z0 = amrex::Real(0.1);
+                    pp.query("most.z0", cf_loglaw_z0);
+                    pp.query("zlo.most.z0", cf_loglaw_z0);
+                }
+            }
+            if (!(cf_loglaw_z0 > zero)) {
+                amrex::Abort("erf.cf_loglaw_z0 must be > 0 [m] (the roughness length of the log-law coarse/fine fill)");
+            }
         }
         // Say so when a bound is set and the wall law's stability estimate is in use
         if ((terrain_type == TerrainType::ImmersedForcing || buildings_type == BuildingsType::ImmersedForcing) &&
@@ -1304,6 +1573,35 @@ struct SolverChoice {
             }
         }
 
+        // Implicit drag of the immersed forcing inside the anelastic projection (erf-model/ERF#4919
+        // for terrain, #4887 for buildings): each face momentum becomes (m* - grad phi) / (1 + dt rate),
+        // with rate the drag rate of the source term on that face, and the solid is not frozen
+        // afterwards, so the projected field stays divergence free in the solid too
+        pp.queryAdd("if_implicit_projection", if_implicit_projection);
+        if (if_implicit_projection) {
+            const bool if_terrain   = (terrain_type   == TerrainType::ImmersedForcing);
+            const bool if_buildings = (buildings_type == BuildingsType::ImmersedForcing);
+            if (!if_terrain && !if_buildings) {
+                amrex::Abort("erf.if_implicit_projection needs erf.terrain_type = ImmersedForcing or "
+                             "erf.buildings_type = ImmersedForcing");
+            }
+            if (if_terrain && if_buildings) {
+                amrex::Abort("erf.if_implicit_projection is not implemented for erf.terrain_type = ImmersedForcing "
+                             "together with erf.buildings_type = ImmersedForcing");
+            }
+            if (mesh_type != MeshType::ConstantDz) {
+                amrex::Abort("erf.if_implicit_projection needs a constant-dz mesh");
+            }
+            for (int lev = 0; lev <= max_level; ++lev) {
+                if (compressibility_type[lev] == CompressibilityType::FullyCompressible) {
+                    amrex::Abort("erf.if_implicit_projection needs erf.compressibility_type not FullyCompressible on every level");
+                }
+            }
+#ifndef ERF_USE_FFT
+            amrex::Abort("erf.if_implicit_projection needs a build with FFT (its GMRES solve is FFT-preconditioned)");
+#endif
+        }
+
         // Flag to do MOST rotations with terrain
         pp.queryAdd("use_rotate_surface_flux",use_rotate_surface_flux);
         if (use_rotate_surface_flux) {
@@ -1326,6 +1624,17 @@ struct SolverChoice {
         pp.queryAdd("const_massflux_layer_hi", const_massflux_layer_hi);
 
         // Which type of inflow turbulent generation
+        // Real-data initialization uses parent controls unless explicitly overridden.
+        perturbation_auto = (init_type == InitType::WRFInput || init_type == InitType::Metgrid);
+        pp.queryAdd("perturbation_auto", perturbation_auto);
+        pp.queryAdd("perturbation_auto_period", perturbation_auto_period);
+        pp.queryAdd("perturbation_auto_pbl_fraction", perturbation_auto_pbl_fraction);
+        if (perturbation_auto &&
+            (!(perturbation_auto_period > zero) || !std::isfinite(perturbation_auto_period) ||
+             !(perturbation_auto_pbl_fraction > zero && perturbation_auto_pbl_fraction <= one))) {
+            amrex::Abort("Automatic perturbations require perturbation_auto_period > 0 and "
+                         "0 < perturbation_auto_pbl_fraction <= 1");
+        }
         pert_type.resize(max_level+1);
         for (int lev = 0; lev <= max_level; ++lev) {
             pert_type[lev] = PerturbationType::None; // Default
@@ -1422,6 +1731,34 @@ struct SolverChoice {
         }
 
             advChoice.init_params(pp_prefix);
+
+        // EB advection (EBAdvectionSrcForScalars, EBAdvectionSrcForMom) has only the centred and
+        // upwind schemes; with any other the fluxes are never set and, in a Release build, the
+        // fields are not advected at all.  The moist scalars default to WENO3, so they are checked
+        // only when they are advected.
+        if (terrain_type == TerrainType::EB) {
+            auto eb_supports = [] (AdvType t) {
+                return (t == AdvType::Centered_2nd || t == AdvType::Upwind_3rd ||
+                        t == AdvType::Centered_4th || t == AdvType::Upwind_5th ||
+                        t == AdvType::Centered_6th);
+            };
+            auto check_eb_adv = [&] (const std::string& name, AdvType t) {
+                if (!eb_supports(t)) {
+                    amrex::Abort("erf." + name + " = " + advChoice.adv_type_convert_int_to_string(t) +
+                                 " is not supported with erf.terrain_type = EB; use Centered_2nd, "
+                                 "Upwind_3rd, Centered_4th, Upwind_5th or Centered_6th");
+                }
+            };
+            check_eb_adv("dycore_horiz_adv_type",  advChoice.dycore_horiz_adv_type);
+            check_eb_adv("dycore_vert_adv_type",   advChoice.dycore_vert_adv_type);
+            check_eb_adv("dryscal_horiz_adv_type", advChoice.dryscal_horiz_adv_type);
+            check_eb_adv("dryscal_vert_adv_type",  advChoice.dryscal_vert_adv_type);
+            if (moisture_type != MoistureType::None) {
+                check_eb_adv("moistscal_horiz_adv_type", advChoice.moistscal_horiz_adv_type);
+                check_eb_adv("moistscal_vert_adv_type",  advChoice.moistscal_vert_adv_type);
+            }
+        }
+
            diffChoice.init_params(pp_prefix);
         dampingChoice.init_params(pp_prefix);
          spongeChoice.init_params(pp_prefix);
@@ -1430,6 +1767,24 @@ struct SolverChoice {
         turbChoice.resize(max_level+1);
         for (int lev = 0; lev <= max_level; lev++) {
             turbChoice[lev].init_params(lev,max_level,pp_prefix);
+            // the moist TKE buoyancy of the k-eqn RANS reads the water vapour and its flux
+            if (turbChoice[lev].rans_moist_buoyancy &&
+                moisture_indices.qv == MoistureComponentIndices::absent) {
+                amrex::Abort("erf.rans_moist_buoyancy needs a moisture model that carries water vapour "
+                             "(erf.moisture_model; level " + std::to_string(lev) + ")");
+            }
+        }
+
+        if (perturbation_auto) {
+            // Automatic forcing has a parent and a three-dimensional LES closure.
+            // A horizontal Smagorinsky closure paired with a PBL scheme is mesoscale.
+            for (int lev = 0; lev <= max_level; ++lev) {
+                const auto& tc = turbChoice[lev];
+                if (lev == 0 || tc.les_type == LESType::None || tc.smag2d ||
+                    tc.pbl_type != PBLType::None) {
+                    pert_type[lev] = PerturbationType::None;
+                }
+            }
         }
 
         // WRF's Smagorinsky-2D slope limiter divides K_h by the terrain slope factor of the
@@ -1460,6 +1815,16 @@ struct SolverChoice {
         // erf.radiation_model = TwoStream selects the two-stream model; its
         // erf.radiation.* sub-options are read only then.
         radChoice.init_params(rad_type == RadiationType::TwoStream, pp_prefix);
+        if (rad_type == RadiationType::RRTMGP) {
+            rrtmgpSolarChoice.read(pp_prefix);
+        }
+        topographicChoice.read(pp_prefix, rrtmgpSolarChoice);
+        if (topographicChoice.active()) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(terrain_type == TerrainType::StaticFittedMesh,
+                "Topographic radiation requires erf.terrain_type = StaticFittedMesh");
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(rad_type == RadiationType::RRTMGP,
+                "Topographic radiation currently requires erf.radiation_model = RRTMGP");
+        }
 
         // Noah-MP integrates on the downwelling shortwave, downwelling longwave and solar
         // zenith angle a radiation model writes into it. Only RRTMGP and TwoStream register
@@ -1612,7 +1977,7 @@ struct SolverChoice {
         // The default is true (i.e. that it happens before the acoustic substepping).
         pp.queryAdd("implicit_before_substep", implicit_before_substep);
         for (int lev = 0; lev <= max_level; lev++) {
-            if ( (substepping_type[lev] == SubsteppingType::None) && !implicit_before_substep) {
+            if ( (timestepping_type[lev] != TimesteppingType::RK3_ImplicitSubstep) && !implicit_before_substep) {
                 amrex::Print() << "implicit_before_substep cannot be false without substepping; setting to true." << "\n";
                 implicit_before_substep = true;
             }
@@ -1673,14 +2038,14 @@ struct SolverChoice {
         // second stage would reduce the pair to backward Euler, and with the RK2 (Heun)
         // stages there is no stage that plays the role of the midpoint at all.
         for (int lev = 0; lev <= max_level; lev++) {
-            if (anelastic[lev]) {
-                if (anelastic_type[lev] == AnelasticType::RK2) {
+            if (compressibility_type[lev] != CompressibilityType::FullyCompressible) {
+                if (timestepping_type[lev] == TimesteppingType::RK2) {
                     amrex::Print() << "Turning off native vertical implicit solve flag because anelastic at level " << lev
                                    << " with RK2 scheme." << std::endl;
                     vert_implicit_fac[lev][0] = zero;
                     vert_implicit_fac[lev][1] = zero;
                     vert_implicit_fac[lev][2] = zero;
-                } else if (anelastic_type[lev] == AnelasticType::MidPoint) {
+                } else if (timestepping_type[lev] == TimesteppingType::MidPoint) {
                     if (do_vert_implicit && vert_implicit_fac[lev][0] != one) {
                         amrex::Print() << "Forcing implicit factor 1 in first stage of MidPoint to ensure second-order accuracy." << std::endl;
                         vert_implicit_fac[lev][0] = one;
@@ -1876,6 +2241,82 @@ struct SolverChoice {
      */
     void check_params (int max_level, const amrex::Vector<amrex::Geometry>& geom_vect, amrex::GpuArray<ERF_BC, AMREX_SPACEDIM*2> phys_bc_type)
     {
+        // The weighted average down acts only where covered coarse cells are averaged down
+        if (if_average_down == "fluid_mass") {
+            if (max_level > 0 && coupling_type == CouplingType::TwoWay) {
+                amrex::Print() << "Immersed forcing: erf.if_average_down = fluid_mass (the cell average down "
+                               << "over refined levels is weighted by the fluid mass of the fine cells)\n";
+            } else {
+                amrex::Warning("erf.if_average_down = fluid_mass has no effect without refined levels "
+                               "(amr.max_level > 0) and erf.coupling_type = TwoWay");
+            }
+        }
+        if (if_fraction_stress) {
+            // The face-above spacing factor is bounded only while z0 < dz/4 (then d2 > d1 for
+            // every solid fraction and the fluid centroid of a full wall cell sits above 2 z0)
+            for (int lev = 0; lev <= max_level; ++lev) {
+                const amrex::Real dz = geom_vect[lev].CellSize(2);
+                if (!(if_z0 < amrex::Real(0.25) * dz)) {
+                    amrex::Abort("erf.if_wall_form = fraction_stress needs erf.if_z0 < dz/4 on every level (level " +
+                                 std::to_string(lev) + ": z0 = " + std::to_string(if_z0) + " m, dz = " +
+                                 std::to_string(dz) + " m)");
+                }
+            }
+        }
+        if (if_fraction_stress && (if_wall_tke || if_flat_wall_dissipation)) {
+            bool any_keqn = false;
+            for (int lev = 0; lev <= max_level; ++lev) {
+                any_keqn = any_keqn || (turbChoice[lev].rans_type == RANSType::kEqn);
+            }
+            if (!any_keqn) {
+                amrex::Abort("erf.if_wall_tke and erf.if_flat_wall_dissipation act on the k-eqn RANS closure: "
+                             "set erf.rans_type = kEqn on a level, or turn them off (erf.if_flat_wall_dissipation = false)");
+            }
+        }
+        if (if_fraction_stress) {
+            amrex::Print() << "Immersed forcing: erf.if_wall_form = fraction_stress (wall stress in the wall cell, "
+                           << "the wall face closed to diffusion; face spacing "
+                           << ((if_wall_face_spacing == 2) ? "log" : (if_wall_face_spacing == 1) ? "physical" : "grid")
+                           << ", wall TKE " << (if_wall_tke ? "on" : "off")
+                           << ", flat-wall dissipation " << (if_flat_wall_dissipation ? "on" : "off") << ")\n";
+            if (moisture_type != MoistureType::None) {
+                amrex::Print() << "Immersed forcing: the moisture species see a closed wall "
+                               << "(no diffusion through the wall face, held in the solid); surface moisture condition: ";
+                if (if_surf_moist_flux != zero) {
+                    amrex::Print() << "flux erf.if_surf_moist_flux = " << if_surf_moist_flux << " kg/kg m/s (q* = -F_q/u*)";
+                } else if (if_surf_moist >= zero) {
+                    amrex::Print() << "surface mixing ratio erf.if_surf_moist = " << if_surf_moist << " kg/kg";
+                } else {
+                    amrex::Print() << "none (q* = 0)";
+                }
+                if (moisture_indices.qv != MoistureComponentIndices::absent &&
+                    (if_surf_temp_flux != amrex::Real(1e-8) || if_init_surf_temp > zero || if_Olen_in != amrex::Real(1e-8) ||
+                     if_surf_moist_flux != zero || if_surf_moist >= zero)) {
+                    amrex::Print() << "; the Obukhov length uses theta_v and theta_v* = theta* (1 + epsv qv) + epsv theta q*";
+                }
+                amrex::Print() << "\n";
+            }
+        }
+        // The log-law coarse/fine fill acts only on refined levels
+        if (cf_loglaw_fill) {
+            const bool immersed = (terrain_type == TerrainType::ImmersedForcing ||
+                                   buildings_type == BuildingsType::ImmersedForcing);
+            if (!immersed && phys_bc_type[amrex::Orientation(amrex::Direction::z, amrex::Orientation::low)] != ERF_BC::surface_layer) {
+                amrex::Abort("erf.cf_loglaw_fill needs an immersed surface (erf.terrain_type or "
+                             "erf.buildings_type = ImmersedForcing) or zlo.type = surface_layer");
+            }
+            if (max_level > 0) {
+                amrex::Print() << "Coarse/fine faces: erf.cf_loglaw_fill = true (the wall coarse face's flux is shared "
+                               << "among its fine sub-faces by the integral of ln(1 + z/z0), z0 = " << cf_loglaw_z0 << " m)\n";
+            } else {
+                amrex::Warning("erf.cf_loglaw_fill has no effect without refined levels (amr.max_level > 0)");
+            }
+        }
+        if (perturbation_auto && any_perturbation() &&
+            (terrain_type == TerrainType::EB || terrain_type == TerrainType::ImmersedForcing)) {
+            amrex::Abort("Automatic perturbations currently support flat, stretched, and fitted-terrain meshes; "
+                         "immersed/embedded terrain requires a ground-relative parent PBL-height conversion");
+        }
 #if 0
         // Warn for PBL models and moisture - these may not yet be compatible
         for (int lev = 0; lev <= max_level; lev++) {
@@ -2059,16 +2500,21 @@ struct SolverChoice {
     void display (int max_level, std::string pp_prefix)
     {
         amrex::Print() << "SOLVER CHOICE: " << std::endl;
+        if (perturbation_auto) {
+            amrex::Print() << "Automatic LES-nest perturbations: parent update period = "
+                           << perturbation_auto_period << " s, PBL height fraction = "
+                           << perturbation_auto_pbl_fraction << std::endl;
+        }
         for (int lev = 0; lev <= max_level; lev++) {
             amrex::Print() << "At level " << lev << " : " << std::endl;
-            if (anelastic[lev]) {
+            if (compressibility_type[lev] != CompressibilityType::FullyCompressible) {
                 amrex::Print() << "   anelastic with no substepping, using the "
-                               << ((anelastic_type[lev] == AnelasticType::MidPoint) ? "MidPoint" : "RK2")
+                               << ((timestepping_type[lev] == TimesteppingType::MidPoint) ? "MidPoint" : "RK2")
                                << " integrator" << std::endl;
             } else {
-               if (substepping_type[lev] == SubsteppingType::None) {
+               if (timestepping_type[lev] == TimesteppingType::RK3_NoSubstepping) {
                    amrex::Print() << "   compressible with no substepping" << std::endl;
-               } else if (substepping_type[lev] == SubsteppingType::Implicit) {
+               } else if (timestepping_type[lev] == TimesteppingType::RK3_ImplicitSubstep) {
                    amrex::Print() << "   compressible with implicit substepping" << std::endl;
                }
            }
@@ -2304,6 +2750,9 @@ struct SolverChoice {
     BuildingsType buildings_type = BuildingsType::None;
 
     inline static
+    bool buildings_fc_factories = false;
+
+    inline static
     bool use_real_bcs = false;
 
     inline static
@@ -2326,12 +2775,13 @@ struct SolverChoice {
     amrex::Vector<TurbChoice>  turbChoice;
     EBChoice      ebChoice;
     RadChoice     radChoice;
+    RRTMGPSolarChoice rrtmgpSolarChoice;
+    TopographicShadingChoice topographicChoice;
 
     int         force_stage1_single_substep = 1;
 
-    amrex::Vector<SubsteppingType> substepping_type;
-    amrex::Vector<int> anelastic;
-    amrex::Vector<AnelasticType> anelastic_type;
+    amrex::Vector<CompressibilityType> compressibility_type;
+    amrex::Vector<TimesteppingType> timestepping_type;
     amrex::Vector<int> fixed_density;
     amrex::Vector<int> project_initial_velocity;
     amrex::Vector<int> buoyancy_type;
@@ -2382,6 +2832,7 @@ struct SolverChoice {
 #endif
 
     bool        test_mapfactor         = false;
+    amrex::Real test_mapfactor_amp     = amrex::Real(0);
 
     int         gradp_type             = 0;
 
@@ -2404,20 +2855,35 @@ struct SolverChoice {
     // Use a point-implicit (linearly-implicit) formulation of the immersed-forcing
     // drag. Defaults to false (explicit forward-Euler source).
     bool        if_implicit_drag      = false;
+    bool        if_implicit_projection = false;  // erf.if_implicit_projection: solid drag (terrain or buildings) inside the anelastic projection
     // immersed forcing MOST parameters.
     amrex::Real if_z0                    = amrex::Real(0.1);   // [m]
     amrex::Real if_surf_temp_flux        = amrex::Real(1e-8);  // [K m/s]
     amrex::Real if_init_surf_temp        = zero;               // [K]
     amrex::Real if_surf_heating_rate     = zero;               // [K/hr]
     amrex::Real if_Olen_in               = amrex::Real(1e-8);  // [m]
+    // Surface moisture condition of the fraction-stress wall law: a given kinematic moisture flux
+    // (erf.if_surf_moist_flux, 0 = none) or a given surface mixing ratio (erf.if_surf_moist, < 0 = none)
+    amrex::Real if_surf_moist_flux       = zero;               // [kg/kg m/s]
+    amrex::Real if_surf_moist            = amrex::Real(-1.0);  // [kg/kg]
     bool        if_use_most              = false;
     bool        if_snap_partial_cells    = false;
     bool        if_stability_correction  = false;
+    similarity_funs most_sfuns;                    // erf.most.stable_functions: the similarity functions of the immersed wall laws
+    bool        if_fraction_stress       = false;  // erf.if_wall_form = fraction_stress
+    int         if_wall_face_spacing     = 2;      // erf.if_wall_face_spacing: 0 grid, 1 physical, 2 log (default)
+    bool        if_wall_tke              = false;  // erf.if_wall_tke: wall value of the k-eqn TKE in the wall cell
+    amrex::Real if_wall_tke_time_factor  = amrex::Real(1.0); // erf.if_wall_tke_time_factor: 1 pins, > 1 relaxes over that many steps
+    bool        if_flat_wall_dissipation = false;  // erf.if_flat_wall_dissipation (default: = if_fraction_stress)
     amrex::Real if_ws_floor              = 0.001;  // [m/s]
     amrex::Real if_damp_alpha            = 0.5;    // [-]
     amrex::Real if_stability_wind_floor  = amrex::Real(0.0);  // [m/s]
     amrex::Real if_psi_cap_factor        = amrex::Real(1.0);  // [-]
     amrex::Real if_small_volfrac         = amrex::Real(0.005);  // [-] eb2.small_volfrac
+    std::string if_average_down          = "plain";  // or fluid_mass
+    amrex::Real if_cf_mismatch_warning   = amrex::Real(0.75); // erf.if_cf_mismatch_warning: c/f surface mismatch threshold
+    bool        cf_loglaw_fill           = false;    // erf.cf_loglaw_fill: log-law share of the wall coarse face's flux
+    amrex::Real cf_loglaw_z0             = amrex::Real(-1.0); // erf.cf_loglaw_z0 [m]; < 0: resolved from if_z0 / most.z0
 
     // This defaults to true but can be set to false for moving terrain cases only
     bool        use_lagged_delta_rt   = true;
@@ -2496,6 +2962,14 @@ struct SolverChoice {
     // Reset interval means after each plotfile or once at a requested time
     std::string mean_vars_reset_mode = "plotfile";
     amrex::Real mean_vars_reset_time = -one;
+
+    // Building forcing and its landmask use the same horizontal resolution cutoff.
+    [[nodiscard]] bool use_building_immersed_forcing (const amrex::Geometry& geom) const noexcept
+    {
+        return buildings_type == BuildingsType::ImmersedForcing &&
+               std::sqrt(geom.CellSize(0) * geom.CellSize(1)) <=
+                   amrex::Real(50.0) * (one + amrex::Real(1.e-6));
+    }
 
     /**
      * @brief Query whether any turbulent perturbation mode is enabled on a level.
@@ -2584,22 +3058,40 @@ struct SolverChoice {
 
     /**
      * @brief Query whether any level uses a turbulent perturbation mode.
-     * @return True if at least one configured level has source, direct, or CPM perturbations.
+     * @return True if at least one configured level has source, direct, CPM, or CPM_W perturbations.
      */
     bool any_perturbation () const
     {
         for (const auto& type : pert_type) {
             if (type == PerturbationType::Source ||
                 type == PerturbationType::Direct ||
-                type == PerturbationType::CPM) {
+                type == PerturbationType::CPM ||
+                type == PerturbationType::CPM_W) {
                 return true;
             }
         }
         return false;
     }
 
+    // Prefer a PBL scheme's height even when the immediate parent is LES.
+    // An all-LES hierarchy instead uses the nearest LES surface-layer diagnostic.
+    int perturbation_pblh_level (int lev) const
+    {
+        for (int source = lev-1; source >= 0; --source) {
+            if (turbChoice[source].pbl_type != PBLType::None) { return source; }
+        }
+        for (int source = lev-1; source >= 0; --source) {
+            const auto& tc = turbChoice[source];
+            if (tc.les_type != LESType::None && !tc.smag2d) { return source; }
+        }
+        return -1;
+    }
+
     // Type of perturbation
     amrex::Vector<PerturbationType> pert_type;
+    bool perturbation_auto{false};
+    amrex::Real perturbation_auto_period{amrex::Real(600.0)}; // seconds between parent-based updates
+    amrex::Real perturbation_auto_pbl_fraction{amrex::Real(0.9)};
 
     // Numerical diffusion
     bool use_num_diff{false};
@@ -2744,6 +3236,8 @@ struct SolverChoice {
  * @brief Permit fixed-index planar averages after validating a flat fitted mesh.
  * @var SolverChoice::buildings_type
  * @brief Building representation.
+ * @var SolverChoice::buildings_fc_factories
+ * @brief Use native face-centered EB factories for immersed buildings on a static fitted mesh.
  * @var SolverChoice::use_real_bcs
  * @brief Whether real-data lateral boundary conditions are used.
  * @var SolverChoice::mesh_type
@@ -2762,12 +3256,10 @@ struct SolverChoice {
  * @brief Embedded-boundary options.
  * @var SolverChoice::force_stage1_single_substep
  * @brief Flag forcing a single substep in the first RK stage.
- * @var SolverChoice::substepping_type
- * @brief Acoustic substepping type for each AMR level.
- * @var SolverChoice::anelastic
- * @brief Per-level flag selecting anelastic dynamics.
- * @var SolverChoice::anelastic_type
- * @brief Per-level two-stage scheme used by the anelastic integrator.
+ * @var SolverChoice::compressibility_type
+ * @brief Per-level compressibility (FullyCompressible, Anelastic or PseudoIncompressible).
+ * @var SolverChoice::timestepping_type
+ * @brief Per-level time integrator (RK3_ImplicitSubstep, RK3_NoSubstepping, RK2 or MidPoint).
  * @var SolverChoice::fixed_density
  * @brief Per-level flag selecting fixed-density treatment; always 1 at an anelastic level.
  * @var SolverChoice::project_initial_velocity
@@ -2812,6 +3304,8 @@ struct SolverChoice {
  * @brief Relative tolerance for the Poisson solve.
  * @var SolverChoice::test_mapfactor
  * @brief Whether to use test map scale factors.
+ * @var SolverChoice::test_mapfactor_amp
+ * @brief Amplitude of the spatially varying test map scale factors on level 0 (0: not used).
  * @var SolverChoice::gradp_type
  * @brief Terrain-fitted horizontal pressure-gradient formulation.
  * @var SolverChoice::use_pert_pres_gradient
@@ -2838,12 +3332,43 @@ struct SolverChoice {
  * @brief Immersed-forcing surface temperature flux [K m/s].
  * @var SolverChoice::if_init_surf_temp
  * @brief Initial immersed-forcing surface temperature [K].
+ * @var SolverChoice::if_fraction_stress
+ * @brief erf.if_wall_form = fraction_stress: the wall stress of ERF_ImmersedWallCell.H in the wall
+ *        cell of each column, with the wall face closed to diffusion; false is the legacy MOST
+ *        relaxation at fixed 0.5/1.5 dz (the default, unchanged).
+ * @var SolverChoice::if_wall_face_spacing
+ * @brief Spacing the face above the fraction-stress wall cell differences over: 0 the cell
+ *        height, 1 the centroid spacing, 2 (default) the log spacing (ib_wall::face_above_factor).
+ * @var SolverChoice::if_wall_tke
+ * @brief Hold the k-eqn TKE of the fraction-stress wall cell at its flat-ground wall value
+ *        (ib_wall::wall_tke), as erf.dirichlet_k does over flat ground.
+ * @var SolverChoice::if_wall_tke_time_factor
+ * @brief 1 (the default) pins the wall cell after every stage and in the implicit TKE solve;
+ *        a larger value relaxes toward the wall value as a source over that many steps.
+ * @var SolverChoice::if_flat_wall_dissipation
+ * @brief Partial fraction-stress wall cells dissipate TKE with the length scale of flat ground's
+ *        first cell; on by default with the fraction-stress law.
  * @var SolverChoice::if_surf_heating_rate
  * @brief Immersed-forcing surface heating rate [K/hr].
  * @var SolverChoice::if_Olen_in
  * @brief Input Obukhov length for immersed-forcing MOST [m].
  * @var SolverChoice::if_use_most
  * @brief Whether immersed-forcing MOST is enabled.
+ * @var SolverChoice::if_average_down
+ * @brief Cell average down over immersed-forcing levels: "plain" (the default, the plain cell
+ *        average) or "fluid_mass" (the fine cells weighted by their fluid mass, coarse cells solid
+ *        on their own level kept; see if_average_down in ERF_Utils.H).
+ * @var SolverChoice::if_cf_mismatch_warning
+ * @brief Spread of the fine solid fractions under a coarse cell along a lateral coarse/fine face
+ *        at or above which the start-up warning counts the cell (the levels describe the surface
+ *        differently there); 0 turns the check off.
+ * @var SolverChoice::cf_loglaw_fill
+ * @brief Share the flux of the first coarse face above a wall among its fine sub-faces at the
+ *        lateral coarse/fine faces by ln(1 + z/z0) at their heights above the wall, instead of the
+ *        linear interpolation; the immersed surface or a surface-layer bottom, constant dz.
+ * @var SolverChoice::cf_loglaw_z0
+ * @brief Roughness length [m] of that share; by default erf.if_z0 with immersed forcing, else
+ *        the inputs' erf.most.z0 or erf.zlo.most.z0 (0.1 m when neither is given).
  * @var SolverChoice::if_small_volfrac
  * @brief Immersed-forcing solid fraction below which a cell or face counts as fluid; read from
  *        eb2.small_volfrac (default 0.005), the same value the EB build uses.
@@ -2872,7 +3397,8 @@ struct SolverChoice {
  * and the interior drag together, and the roof only the drag); set it for
  * height-map buildings.
  * @var SolverChoice::if_stability_correction
- * @brief Whether immersed-forcing stability corrections are enabled.
+ * @brief Whether the immersed-forcing wall law applies the MOST similarity functions, in the momentum and the
+ * temperature kernels alike (off: the log law; a prescribed flux or Obukhov length still sets theta*).
  * @var SolverChoice::if_ws_floor
  * @brief Wind-speed floor [m/s] in the per-step change limit of the building wall-law forcing.
  * @var SolverChoice::if_damp_alpha
@@ -2935,6 +3461,14 @@ struct SolverChoice {
  * @brief Whether time-averaged velocity fields are output.
  * @var SolverChoice::pert_type
  * @brief Turbulent perturbation type for each AMR level.
+ * @var SolverChoice::perturbation_auto
+ * @brief Select LES nests, using parent winds and a PBL ancestor's height,
+ * or the nearest LES ancestor's diagnostic when no PBL scheme is present.
+ * Defaults to true for WRFInput and Metgrid initialization, false otherwise.
+ * @var SolverChoice::perturbation_auto_period
+ * @brief Seconds between automatic parent-wind and PBL-height updates.
+ * @var SolverChoice::perturbation_auto_pbl_fraction
+ * @brief Fraction of the selected ancestor's PBL height occupied by perturbations.
  * @var SolverChoice::use_num_diff
  * @brief Whether sixth-order numerical diffusion is enabled.
  * @var SolverChoice::num_diff_coeff

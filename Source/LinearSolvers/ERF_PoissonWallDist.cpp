@@ -54,6 +54,40 @@ assert_surface_gathered (const MultiFab& znd_surf)
 }
 
 /**
+ * The RANS wall distance at this level: the distance to the bottom wall from
+ * poisson_wall_dist, corrected for thin immersed bodies.  Does nothing when this
+ * level runs no RANS model.  init_stuff resets walldist to bogus_large_value
+ * whenever a level is made on new grids, so this runs at initialisation (and on
+ * a restart) and again for each level a regrid adds or remakes.
+ *
+ * @param lev Level index
+ */
+void ERF::make_wall_dist (int lev)
+{
+    // The wall-face masks of the fraction-stress immersed wall law depend on the grids and the
+    // level's solid fraction, like the wall distance: rebuild them here too
+    if (solverChoice.if_fraction_stress) { make_ib_wall_face_masks_lev(lev); }
+
+    if (solverChoice.turbChoice[lev].rans_type == RANSType::None) { return; }
+
+    // Handle bottom boundary
+    poisson_wall_dist(lev);
+
+    // Correct the wall distance for immersed bodies
+    if (solverChoice.advChoice.have_zero_flux_faces) {
+        thinbody_wall_dist(walldist[lev],
+                           solverChoice.advChoice.zero_xflux,
+                           solverChoice.advChoice.zero_yflux,
+                           solverChoice.advChoice.zero_zflux,
+                           geom[lev],
+                           z_phys_cc[lev]);
+
+        // The correction is only applied on the valid region
+        fill_wall_dist_ghost_cells(*walldist[lev], geom[lev]);
+    }
+}
+
+/**
  * Calculate wall distances using the Poisson equation
  *
  * The zlo boundary is assumed to correspond to the land surface. If there are
@@ -78,6 +112,49 @@ void ERF::poisson_wall_dist (int lev)
     {
         havewall = true;
     }
+
+    if (solverChoice.if_fraction_stress) {
+        // Fraction-stress immersed wall law: measure from the surface itself, so the RANS
+        // length scale and the wall law see the same geometry (ERF_ImmersedWallCell.H);
+        // erf.wall_dist_type does not apply (the surface is inside the domain)
+        Print() << "Calculating wall distance from the immersed surface (fraction-stress wall law)" << std::endl;
+        AMREX_ALWAYS_ASSERT(terrain_blanking[lev]);
+        const int klo = geom[lev].Domain().smallEnd(2);
+        const DistributionMapping& dm = walldist[lev]->DistributionMap();
+        BoxList bl2d = walldist[lev]->boxArray().boxList();
+        for (Box& b : bl2d) { b.setRange(2, klo); }
+        BoxArray ba_cols(std::move(bl2d));
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ba_cols.isDisjoint(),
+            "poisson_wall_dist: the immersed wall distance needs one box per column at each level");
+        ib_wall_height[lev] = std::make_unique<MultiFab>(ba_cols, dm, 1, 0);
+
+        // A fine level need not reach the surface or the top: bring the coarser level's wall
+        // height to this level's columns (piecewise constant) for the boxes that do not see it
+        std::unique_ptr<MultiFab> height_crse;
+        if (lev > 0) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ib_wall_height[lev-1],
+                "poisson_wall_dist: the immersed wall distance of a fine level needs the coarser level's");
+            const IntVect rr = refRatio(lev-1);
+            BoxArray cba2d = ba_cols; cba2d.coarsen(rr);
+            MultiFab tmp(cba2d, dm, 1, 0);
+            tmp.ParallelCopy(*ib_wall_height[lev-1], 0, 0, 1, IntVect(0), IntVect(0), geom[lev-1].periodicity());
+            height_crse = std::make_unique<MultiFab>(ba_cols, dm, 1, 0);
+            for (MFIter mfi(*height_crse); mfi.isValid(); ++mfi) {
+                auto const hf = height_crse->array(mfi);
+                auto const hc = tmp.const_array(mfi);
+                ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    hf(i,j,k) = hc(amrex::coarsen(i,rr[0]), amrex::coarsen(j,rr[1]), amrex::coarsen(k,rr[2]));
+                });
+            }
+        }
+        immersed_wall_dist(*walldist[lev], *terrain_blanking[lev], *z_phys_nd[lev], *z_phys_cc[lev],
+                           geom[lev].Domain(), solverChoice.if_small_volfrac,
+                           ib_wall_height[lev].get(), height_crse.get());
+        fill_wall_dist_ghost_cells(*walldist[lev], geom[lev]);
+        return;
+    }
+
 
     auto const& geomdata = geom[lev];
     auto const& dxinv    = geomdata.InvCellSizeArray();
@@ -645,4 +722,38 @@ void ERF::fill_surface_nodes (int lev, MultiFab& znd_surf)
             if (s_a(i,j,k) >= big) { s_a(i,j,k) = f_a(i,j,k); }
         });
     }
+}
+
+/**
+ * Build the wall-face masks of the fraction-stress immersed wall law (see ERF_ImmersedWallCell.H)
+ * from the solid fraction of this level. The vertical momentum fluxes tau13 and tau23, the vertical
+ * diffusive fluxes of theta and TKE, and the matching coefficients of the implicit vertical solves
+ * are multiplied by them. Called from make_wall_dist, at start-up and on every regrid.
+ *
+ * @param lev Level index
+ */
+void ERF::make_ib_wall_face_masks_lev (int lev)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(solverChoice.mesh_type == MeshType::ConstantDz,
+        "erf.if_wall_form = fraction_stress needs a constant-dz mesh");
+    AMREX_ALWAYS_ASSERT(terrain_blanking[lev]);
+    const BoxArray& ba = grids[lev];
+    const DistributionMapping& dm = dmap[lev];
+    ib_wall_face13[lev] = std::make_unique<MultiFab>(convert(ba, IntVect(1,0,1)), dm, 1, 1);
+    ib_wall_face23[lev] = std::make_unique<MultiFab>(convert(ba, IntVect(0,1,1)), dm, 1, 1);
+    ib_wall_face33[lev] = std::make_unique<MultiFab>(convert(ba, IntVect(0,0,1)), dm, 1, 1);
+    ib_wall_hfx[lev]    = std::make_unique<MultiFab>(ba, dm, 1, 0);
+    ib_wall_hfx[lev]->setVal(zero);
+    if (solverChoice.moisture_indices.qv != MoistureComponentIndices::absent) {
+        ib_wall_qfx[lev] = std::make_unique<MultiFab>(ba, dm, 1, 0);
+        ib_wall_qfx[lev]->setVal(zero);
+    }
+    if (solverChoice.if_wall_tke) {
+        ib_wall_ktarget[lev] = std::make_unique<MultiFab>(ba, dm, 1, 0);
+        ib_wall_ktarget[lev]->setVal(-one);
+    }
+    make_ib_wall_face_masks(*terrain_blanking[lev], *ib_wall_face13[lev], *ib_wall_face23[lev],
+                            *ib_wall_face33[lev],
+                            geom[lev].Domain(), solverChoice.if_small_volfrac,
+                            solverChoice.if_wall_face_spacing, geom[lev].CellSize(2), solverChoice.if_z0);
 }

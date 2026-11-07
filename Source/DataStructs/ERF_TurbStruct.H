@@ -252,8 +252,15 @@ public:
           pp, "pbl_ysu_land_Ribcr", pbl_ysu_land_Ribcr, lev, max_level);
         query_one_or_per_level(
           pp, "pbl_ysu_unst_Ribcr", pbl_ysu_unst_Ribcr, lev, max_level);
-        query_one_or_per_level(
-          pp, "enable_ysu_liquid_theta", enable_ysu_liquid_theta, lev, max_level);
+        // YSU now uses theta_v at WRF's thvx sites and theta_l at its thlix
+        // sites; catch the retired switch between them rather than ignoring it.
+        if (pp.contains("enable_ysu_liquid_theta")) {
+            amrex::Abort("erf.enable_ysu_liquid_theta has been removed. YSU uses "
+                         "theta_v (all condensate loading) for the bulk Richardson "
+                         "number and clear-sky entrainment, and theta_l (cloud "
+                         "liquid and ice) for the cloud-top extension scan and "
+                         "cloudy entrainment, as WRF does with thvx and thlix.");
+        }
         query_one_or_per_level(
           pp, "enable_ysu_countergradient", enable_ysu_countergradient, lev, max_level);
         query_one_or_per_level(
@@ -482,6 +489,21 @@ public:
     if (rans_lscale_from_pblh && !(rans_lscale_min > 0)) {
         amrex::Error("erf.rans_lscale_min must be > 0 with erf.rans_lscale_from_pblh");
     }
+    // Moist TKE buoyancy of the k-eqn closure (the Deardorff LES, which shares the TKE source,
+    // keeps the dry form). One value for the hierarchy is meant for its k-eqn levels and is
+    // reset on the others, as erf.rans_realizability is; a per-level list must not name a level
+    // without the closure.
+    query_one_or_per_level(pp, "rans_moist_buoyancy", rans_moist_buoyancy, lev, max_level);
+    if (rans_moist_buoyancy && rans_type != RANSType::kEqn) {
+        if (pp.countval("rans_moist_buoyancy") == 1) {
+            amrex::Print() << "erf.rans_moist_buoyancy reset to false on level " << lev
+                           << " (no k-eqn closure there)" << std::endl;
+            rans_moist_buoyancy = false;
+        } else {
+            amrex::Error("erf.rans_moist_buoyancy needs erf.rans_type = kEqn (it is the k-eqn TKE buoyancy; level "
+                         + std::to_string(lev) + ")");
+        }
+    }
 
     if (rans_type == RANSType::kEqn) {
         // The stability functions (AL01 Eqs. 31, 32) have poles at Rt = -3.59869
@@ -675,6 +697,7 @@ public:
         amrex::Print() << "Rt_min                      : " << Rt_min << std::endl;
         amrex::Print() << "max_geom_lscale             : " << l_g_max << std::endl;
         amrex::Print() << "rans_realizability          : " << rans_realizability << std::endl;
+        amrex::Print() << "rans_moist_buoyancy         : " << rans_moist_buoyancy << std::endl;
         amrex::Print() << "dirichlet_k                 : " << dirichlet_k << std::endl;
         amrex::Print() << "tke_floor                   : " << tke_floor << std::endl;
         amrex::Print() << "implicit_tke_dissipation    : " << implicit_tke_dissipation << std::endl;
@@ -724,8 +747,6 @@ public:
                      << pbl_ysu_land_Ribcr << std::endl;
       amrex::Print() << "    pbl_ysu_unst_Ribcr                 : "
                      << pbl_ysu_unst_Ribcr << std::endl;
-      amrex::Print() << "    enable_ysu_liquid_theta            : "
-                     << enable_ysu_liquid_theta << std::endl;
       amrex::Print() << "    enable_ysu_countergradient         : "
                      << enable_ysu_countergradient << std::endl;
       amrex::Print() << "    enable_ysu_terrain_pblh_floor      : "
@@ -900,6 +921,12 @@ public:
   // the SST limiter form).
   amrex::Real rans_realizability = zero;
 
+  // k-eqn RANS: moist TKE buoyancy production (erf.rans_moist_buoyancy),
+  //   B = g / theta_v0 [(1 + epsv qv) <w'theta'> + epsv theta <w'qv'>],
+  // water vapour only (no cloud-water flux, no saturated form); false keeps the
+  // dry production g / theta_0 <w'theta'>
+  bool rans_moist_buoyancy = false;
+
   // PBL model
   PBLType pbl_type = PBLType::None;
 
@@ -1000,8 +1027,6 @@ public:
     fourth; // Critical Bulk Richardson number of Land for stable conditions
   amrex::Real pbl_ysu_unst_Ribcr =
     zero; // Critical Bulk Richardson number for unstable conditions
-  bool enable_ysu_liquid_theta =
-    true; // if true, use liquid-water virtual potential temperature in YSU stability
   bool enable_ysu_countergradient =
     true; // if true, apply YSU-style HGAMT/HGAMQ/HGAMU/HGAMV countergradient correction
   bool enable_ysu_terrain_pblh_floor =
@@ -1145,8 +1170,6 @@ public:
  * @brief Critical bulk Richardson number over land for stable YSU conditions.
  * @var TurbChoice::pbl_ysu_unst_Ribcr
  * @brief Critical bulk Richardson number for unstable YSU conditions.
- * @var TurbChoice::enable_ysu_liquid_theta
- * @brief Whether YSU uses liquid-water virtual potential temperature for stability.
  * @var TurbChoice::enable_ysu_countergradient
  * @brief Whether YSU countergradient corrections are enabled.
  * @var TurbChoice::enable_ysu_terrain_pblh_floor

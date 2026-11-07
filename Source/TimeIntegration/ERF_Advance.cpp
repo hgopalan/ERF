@@ -65,19 +65,27 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         // Set ghost cells to bogus values so they aren't uninitialized
         W_old.setBndry(bogus_large_value);
         FillPatchFineLevel(lev, time, {&S_old, &U_old, &V_old, &W_old},
-                           {&S_old, &rU_old[lev], &rV_old[lev], &rW_old[lev]},
-                           base_state[lev], base_state[lev]);
+                           {&S_old, &rU_old[lev], &rV_old[lev], &rW_old[lev]});
     }
 
     // Update the inflow perturbation update time and amplitude
+    bool apply_perturbations = true;
     if (solverChoice.use_perturbation(lev))
     {
-        turbPert.calc_tpi_update(lev, dt_lev, U_old, V_old, S_old);
+        if (solverChoice.perturbation_auto) {
+            turbPert_update_automatic(lev, time);
+        }
+        if (turbPert.uniform_refresh_enabled(lev)) {
+            if (!solverChoice.perturbation_auto) { turbPert_update_uniform_wind(lev, time); }
+            apply_perturbations = turbPert.calc_tpi_uniform_update(lev, time);
+        } else {
+            turbPert.calc_tpi_update(lev, dt_lev, U_old, V_old, S_old);
+        }
     }
 
     // If PerturbationType::Direct or CPM is selected, directly add the computed perturbation
     // on the conserved field
-    if (solverChoice.use_direct_perturbation(lev))
+    if (solverChoice.use_direct_perturbation(lev) && apply_perturbations)
     {
         if (solverChoice.use_wvel_perturbation(lev)) { // CPM_W
             auto m_ixtype = W_old.boxArray().ixType();
@@ -91,11 +99,14 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             (*physbcs_w[lev])(W_old, U_old, V_old, W_old.nGrowVect(), time, BCVars::zvel_bc, true);
         } else {
             auto m_ixtype = S_old.boxArray().ixType(); // Conserved term
+            // The direct perturbation stores a rate, so it adds rate * dt at every step;
+            //    CPM stores the increment itself, which it adds once per refresh
+            const Real pert_scale = (solverChoice.pert_type[lev] == PerturbationType::Direct) ? Real(dt_lev) : one;
             for (MFIter mfi(S_old,TileNoZ()); mfi.isValid(); ++mfi) {
                 Box bx  = mfi.tilebox();
                 const Array4<Real> &cell_data  = S_old.array(mfi);
                 const Array4<const Real> &pert_cell = turbPert.pb_cell[lev].array(mfi);
-                turbPert.apply_tpi(lev, bx, RhoTheta_comp, m_ixtype, cell_data, pert_cell);
+                turbPert.apply_tpi(lev, bx, RhoTheta_comp, m_ixtype, cell_data, pert_cell, pert_scale);
             }
             // apply_tpi only modifies valid cells, but the ghost cells must agree with them:
             //   the first RK stage reads them across box boundaries, and the next finer
@@ -249,7 +260,6 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 } else {
                     Vector<MultiFab*> mfs_mom = {&S_old, &rU_old[lev], &rV_old[lev], &rW_old[lev]};
                     FillPatchFineLevel(lev, time, mfs_vel, mfs_mom,
-                                       base_state[lev], base_state[lev],
                                        true, false);
                 }
             }
@@ -376,7 +386,6 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 FillPatchFineLevel(lev, t_new[lev],
                                    {&S_new, &U_new, &V_new, &W_new},
                                    {&S_new, &rU_new[lev], &rV_new[lev], &rW_new[lev]},
-                                   base_state[lev], base_state[lev],
                                    /*fillset=*/true, /*cons_only=*/true);
             }
         }
@@ -448,13 +457,11 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             // We must fill the ghost cells of these so that the parallel copy works correctly
             state_old[IntVars::xmom].FillBoundary(geom[lev].periodicity());
             state_new[IntVars::xmom].FillBoundary(geom[lev].periodicity());
-            FPr_u[lev].RegisterCoarseData({&state_old[IntVars::xmom], &state_new[IntVars::xmom]},
-                                          {time, time+dt_lev});
-
             state_old[IntVars::ymom].FillBoundary(geom[lev].periodicity());
             state_new[IntVars::ymom].FillBoundary(geom[lev].periodicity());
-            FPr_v[lev].RegisterCoarseData({&state_old[IntVars::ymom], &state_new[IntVars::ymom]},
-                                          {time, time+dt_lev});
+            RegisterCoarseMomentumCF(lev, state_old[IntVars::xmom], state_new[IntVars::xmom],
+                                     state_old[IntVars::ymom], state_new[IntVars::ymom],
+                                     {time, time+dt_lev});
 
             state_old[IntVars::zmom].FillBoundary(geom[lev].periodicity());
             state_new[IntVars::zmom].FillBoundary(geom[lev].periodicity());
@@ -502,6 +509,24 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     if (solverChoice.time_avg_vel) {
         Time_Avg_Vel_atCC(dt[lev], t_avg_cnt[lev], vel_t_avg[lev].get(), U_new, V_new, W_new);
     }
+
+#ifdef ERF_USE_FIRE
+    // Advance the fire on the level its grid refines (erf.fire.anchor_level).
+    // The coupler hands the engine the wind (before the dycore with passive and
+    // lagged coupling, after it with synchronous), the air temperature and
+    // humidity at k = 0 from the state before the dycore and, when the engine
+    // asks for it, the surface precipitation accumulated through this step's
+    // microphysics; it then holds the engine's fluxes for the next step.
+    if (m_fire_coupler && lev == m_fire_coupler->level()) {
+        const SurfacePrecipAccumulationSources precip_sources =
+            micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(lev)
+                  : SurfacePrecipAccumulationSources{};
+        m_fire_coupler->advance(time, dt_lev, S_old,
+                                vars_old[lev][Vars::xvel], vars_old[lev][Vars::yvel],
+                                vars_new[lev][Vars::xvel], vars_new[lev][Vars::yvel],
+                                *z_phys_cc[lev], ba2d[lev], Geom(lev), precip_sources);
+    }
+#endif
 
     // ***********************************************************************************************
     // Two-stream radiation, post-dycore call: reports the cached flux

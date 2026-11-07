@@ -1,5 +1,9 @@
 #include "ERF_SrcHeaders.H"
 
+#ifdef ERF_USE_FIRE
+#include <ERF_FireCoupler.H>
+#endif
+
 /**
  *  Wrapper for calling the routine that creates the slow RHS
  */
@@ -131,7 +135,28 @@
                      turbPert,
                      r_avg_to_pass, t_avg_to_pass,
                      forest_drag, &S_old[IntVars::cons],
-                     true);
+                     true, ib_wall_hfx[level].get(), ib_wall_ktarget[level].get(), ib_wall_qfx[level].get());
+
+        // *****************************************************************************
+        // Inject the fire-to-atmosphere heat flux AFTER make_sources, which resets
+        // cc_src at every RK stage. The lagged fire flux (FireCoupler) is constant
+        // across all RK stages and must be added here to survive the integrator.
+        // *****************************************************************************
+#ifdef ERF_USE_FIRE
+        // on the level the fire grid refines; coarser levels get it by average-down.
+        // The heat and vapour with the WRF-Fire profile, then the smoke tracer,
+        // proportional to the fuel burnt (FireCoupler::add_sources).
+        if (m_fire_coupler && level == m_fire_coupler->level()) {
+            bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
+            m_fire_coupler->add_sources(cc_src,
+                                        S_old[IntVars::cons],
+                                        *zpc_to_use,
+                                        zpn_to_use,
+                                        fine_geom,
+                                        has_moisture,
+                                        istep[level]);
+        }
+#endif
 
         // Heat flux from the building faces (immersed-boundary surface energy
         // balance), added to the freshly rebuilt source; no-op unless enabled.
@@ -163,7 +188,7 @@
                                  (solverChoice.moisture_type != MoistureType::Morrison_NoIce &&
                                   solverChoice.moisture_type != MoistureType::SAM_NoIce) );
             add_moist_nudging_terms(S_data[IntVars::cons], cc_src, num_q, slow_dt,
-                                    start_time+old_stage_time,
+                                    old_stage_time, start_time,
                                     start_bdy_time, final_bdy_time, bdy_time_interval,
                                     bdy_factor, real_width, geom[level],
                                     bdy_data_xlo, bdy_data_xhi, bdy_data_ylo, bdy_data_yhi,
@@ -198,7 +223,7 @@
         // *****************************************************************************
         int num_q = micro->Get_Qstate_Moist_Size() - micro->Get_Qstate_Moist_NumConc_Size();
         make_buoyancy(level, S_data, S_prim, qt, buoyancy, fine_geom, solverChoice, base_to_use,
-                      num_q, get_eb(level), solverChoice.anelastic[level]);
+                      num_q, get_eb(level), solverChoice.compressibility_type[level] != CompressibilityType::FullyCompressible);
 
         // *****************************************************************************
         // Make remaining (not gradp or buoyancy) momentum sources
@@ -263,7 +288,17 @@
                          native_shoc_driver[level].get(),
                          fr_as_crse, fr_as_fine, &base_to_use,
                          cloud_chamber_config.active ? &cloud_chamber_config : nullptr,
-                         cloud_chamber_budget.get());
+                         cloud_chamber_budget.get(),
+                         ib_wall_face13[level].get(), ib_wall_face23[level].get(),
+                         ib_wall_face33[level].get(), ib_wall_hfx[level].get());
+
+        // Anelastic coarse/fine faces in time (ERF_CoarseFineFaces.cpp): a coarse level adds
+        // this stage's mass fluxes to those of its step, a fine level registers the coarse
+        // momenta its coarse/fine faces are filled from in this stage
+        if (solverChoice.compressibility_type[level] != CompressibilityType::FullyCompressible) {
+            if (level < finest_level) { cf_anelastic_record(level, nrk); }
+            if (level > 0)            { cf_anelastic_stage_registration(level, nrk); }
+        }
 
         if ((solverChoice.vert_implicit_fac[level][nrk] > zero_d) && solverChoice.implicit_before_substep) {
             const Real stage_dt = static_cast<Real>(slow_dt);
@@ -310,6 +345,12 @@
             }
 
 #include "ERF_ImplicitPre.H"
+
+            // NOTE: the implicit part of the vertical (rho theta) diffusion is not added to the flux
+            //       registers.  (rho theta) is refluxed only on anelastic levels, and there no stage
+            //       whose fluxes are registered solves implicitly: RK2 turns the solve off, and
+            //       MidPoint solves in stage 0 but registers stage 1 (see SolverChoice and
+            //       StageFluxWeight).
 
             MultiFab::Saxpy(scratch, -one_d, S_old[IntVars::cons], 1, 1, 1, 0); // scratch  := (S_new - S_old)           (for rhotheta only)
             scratch.mult(one_d / stage_dt);                                 // scratch  := (S_new - S_old) / stage_dt
@@ -438,13 +479,12 @@
             const Real bdy_factor = solverChoice.bdy_nudge_factor;
             if (real_width>0) {
                 //
-                // Note that old_stage_time is elapsed time, but (start_time+old_stage_time) is total time
-                //           start_bdy_time and final_bdy_time are total time
+                // Note that old_stage_time is elapsed time; start_bdy_time and final_bdy_time
+                //           are total time
                 //
-                double total_time = start_time + old_stage_time;
                 Real l_rdOcp    = solverChoice.rdOcp;
                 Real l_c_p      = solverChoice.c_p;
-                realbdy_compute_interior_ghost_rhs(total_time, slow_dt,
+                realbdy_compute_interior_ghost_rhs(old_stage_time, start_time, slow_dt,
                                                    start_bdy_time, final_bdy_time, bdy_time_interval,
                                                    bdy_factor, real_width, fine_geom,
                                                    S_rhs, S_data,
